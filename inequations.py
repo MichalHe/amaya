@@ -1,9 +1,9 @@
 from __future__ import annotations
 from log import logger
 from dataclasses import dataclass
-from typing import List, Dict
-from automatons import DFA
-from utils import vector_dot
+from typing import List, Dict, Sequence
+from automatons import DFA, AlphabetLetter
+from utils import vector_dot, number_to_bit_tuple
 import math
 
 
@@ -118,6 +118,11 @@ def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: Presburger
         ineq_variable_names.append(var_name)
         ineq_variable_coeficients.append(var_coef)
 
+        # @Debug: See whether the system can process variables with coeficients
+        # bigger than 1
+        if abs(var_coef) > 1:
+            logger.info(f'Found variable coeficient which is bigger than expected- {var_name}:{var_coef}')
+
     return Inequality(
         ineq_variable_names,
         ineq_variable_coeficients,
@@ -139,16 +144,27 @@ def extract_inquality(ast) -> Inequality:
     return normalize_inequation(op, lhs_expr, rhs_expr)
 
 
-def build_dfa_from_inequality(inequation: Inequality) -> DFA:
-    logger.debug(f'Building DFA (over N) to inequation: {inequation}')
+def get_automaton_alphabet_from_inequality(ineq: Inequality) -> Sequence[AlphabetLetter]:
+    '''Generator'''
+    letter_size = len(ineq.variable_names)
+    for i in range(2**letter_size):
+        yield number_to_bit_tuple(i)
+
+
+def build_dfa_from_inequality(ineq: Inequality) -> DFA:
+    '''Builds DFA with Lang same as solutions to the inequation over N'''
+    logger.debug(f'Building DFA (over N) to inequation: {ineq}')
 
     # Build DFA, assume len(bound_variables) == 1
-    initial_state = inequation.absolute_part
+    initial_state = ineq.absolute_part
     final_states = set()
     states = set()
     transitions = dict()
 
     work_queue = [initial_state]
+
+    alphabet = list(get_automaton_alphabet_from_inequality(ineq))
+    logger.info(f'Generated alphabet for automaton: {alphabet}')
 
     while work_queue:
         currently_processed_state = work_queue.pop(0)
@@ -158,9 +174,9 @@ def build_dfa_from_inequality(inequation: Inequality) -> DFA:
             final_states.add(currently_processed_state)
 
         # @TODO: Add function to generate alphabet from variable_names
-        for alphabet_symbol in [(0,), (1,)]:
+        for alphabet_symbol in alphabet:
             # @Optimize: Precompute dot before graph traversal
-            dot = vector_dot(alphabet_symbol, inequation.variable_coeficients)
+            dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
             # Add newly discovered transition
@@ -175,7 +191,7 @@ def build_dfa_from_inequality(inequation: Inequality) -> DFA:
         states=states,
         final_states=final_states,
         transitions=transitions,
-        alphabet=[]
+        alphabet=alphabet
     )
 
     logger.debug(f'Extracted dfa: {dfa}')

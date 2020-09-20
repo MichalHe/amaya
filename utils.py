@@ -1,3 +1,4 @@
+from typing import Tuple
 
 def vector_dot(vec1, vec2) -> int:
     assert(len(vec1) == len(vec2))
@@ -29,3 +30,13 @@ def tree_depth(tree) -> int:
     for leaf in tree:  # first leaf is the node name
         max_depth = max((tree_depth(leaf), max_depth))
     return max_depth + 1
+
+
+def number_to_bit_tuple(number: int) -> Tuple[int]:
+    bits = []
+    if number == 0:
+        return (0,)
+    while number:
+        bits.append(number % 2)
+        number = int(number / 2)
+    return tuple(reversed(bits))
