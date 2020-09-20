@@ -2,6 +2,7 @@ from __future__ import annotations
 from log import logger
 from dataclasses import dataclass
 from typing import List, Dict, Sequence
+from collections import defaultdict
 from automatons import DFA, AlphabetLetter
 from utils import vector_dot, number_to_bit_tuple
 import math
@@ -169,18 +170,24 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
     while work_queue:
         currently_processed_state = work_queue.pop(0)
         states.add(currently_processed_state)
-        transitions[currently_processed_state] = set()
+        transitions[currently_processed_state] = {}
+
+        # Check whether current state satisfies property that it accepts an
+        # empty word
         if currently_processed_state >= 0:
             final_states.add(currently_processed_state)
 
-        # @TODO: Add function to generate alphabet from variable_names
         for alphabet_symbol in alphabet:
             # @Optimize: Precompute dot before graph traversal
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
+            # Was the alphabet symbol already seen?
+            if alphabet_symbol not in transitions[currently_processed_state]:
+                transitions[currently_processed_state][alphabet_symbol] = set()
+
             # Add newly discovered transition
-            transitions[currently_processed_state].add(next_state)
+            transitions[currently_processed_state][alphabet_symbol].add(next_state)
 
             if next_state not in states:
                 if next_state not in work_queue:  # @Optimize: Use hashtable-like object to quickly check for `in`
