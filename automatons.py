@@ -2,8 +2,10 @@ from __future__ import annotations
 from typing import Set, Dict, Tuple, List, Union
 from dataclasses import dataclass
 
-NFA_AutomatonState = int
-DFA_AutomatonState = Union[int, Tuple[int, ...]]
+
+AutomatonStateLabel = Union[int, str]
+NFA_AutomatonState = Union[int, str]  # The automaton state can be also special non int value such as Qf='FINAL'
+DFA_AutomatonState = Union[AutomatonStateLabel, Tuple[AutomatonStateLabel, ...]]
 AlphabetLetter = Tuple[int, ...]
 
 NFA_Transitions = Dict[
@@ -32,8 +34,8 @@ class DFA:
 
 @dataclass
 class NFA:
-    alphabet: Tuple[AlphabetLetter]
-    initial_states: Tuple[NFA_AutomatonState]
+    alphabet: Tuple[AlphabetLetter, ...]
+    initial_states: Tuple[NFA_AutomatonState, ...]
     final_states: Set[NFA_AutomatonState]
     states: Set[NFA_AutomatonState]
     transitions: NFA_Transitions
@@ -42,10 +44,10 @@ class NFA:
 def NFAtoDFA(nfa: NFA) -> DFA:
     '''Performs NFA -> DFA using the powerset construction'''
     # @TODO: This is actually broken (in terms of types)
-    working_queue: List[Tuple[int, ...]] = [nfa.initial_states]
+    working_queue: List[Tuple[AutomatonStateLabel, ...]] = [nfa.initial_states]
 
     dfa_states = set()
-    dfa_final_states: Set[Tuple[int, ...]] = set()
+    dfa_final_states: Set[DFA_AutomatonState] = set()
     dfa_transitions: DFA_Transitions = {}
 
     while working_queue:
@@ -58,7 +60,7 @@ def NFAtoDFA(nfa: NFA) -> DFA:
             dfa_final_states.add(unexplored_dfa_state)
 
         for letter in nfa.alphabet:
-            reachable_states: List[int] = list()
+            reachable_states: List[NFA_AutomatonState] = list()
             for state in unexplored_dfa_state:
                 if state not in nfa.transitions:
                     continue
@@ -66,7 +68,7 @@ def NFAtoDFA(nfa: NFA) -> DFA:
                 if letter in state_transitions:
                     reachable_states += state_transitions[letter]
 
-            dfa_state: Tuple[int, ...] = tuple(set(reachable_states))
+            dfa_state = tuple(set(reachable_states))
 
             if dfa_state and dfa_state not in dfa_states:
                 working_queue.append(dfa_state)
