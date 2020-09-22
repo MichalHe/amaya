@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Any
 
 source_text = '''
 (set-info :category "industrial")
@@ -9,7 +9,6 @@ source_text = '''
 '''
 
 formulas = []
-info = {}
 
 
 def lex(source: str) -> List[str]:
@@ -20,7 +19,7 @@ def lex(source: str) -> List[str]:
 
 
 def build_syntax_tree(tokens: List[str]):
-    stack = []
+    stack: List[Any] = []
     depth = -1
     for token in tokens:
         if token == '(':

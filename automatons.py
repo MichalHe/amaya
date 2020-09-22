@@ -1,37 +1,51 @@
 from __future__ import annotations
-from typing import Set, Dict, Tuple
+from typing import Set, Dict, Tuple, List, Union
 from dataclasses import dataclass
 
-AutomatonState = int
-AlphabetLetter = Tuple[int]
-NFA_Transitions = Dict[AutomatonState, Dict[AlphabetLetter, Set[AutomatonState]]]
-DFA_Transitions = Dict[AutomatonState, Dict[AlphabetLetter, AutomatonState]]
+NFA_AutomatonState = int
+DFA_AutomatonState = Union[int, Tuple[int, ...]]
+AlphabetLetter = Tuple[int, ...]
+
+NFA_Transitions = Dict[
+    NFA_AutomatonState,
+    Dict[
+        AlphabetLetter,
+        Set[NFA_AutomatonState]
+    ]]
+
+DFA_Transitions = Dict[
+    DFA_AutomatonState,
+    Dict[
+        AlphabetLetter,
+        DFA_AutomatonState
+    ]]
 
 
 @dataclass
 class DFA:
-    alphabet: Tuple[AlphabetLetter]
-    initial_state: AutomatonState
-    final_states: Set[AutomatonState]
-    states: Set[AutomatonState]
+    alphabet: Tuple[AlphabetLetter, ...]
+    initial_state: DFA_AutomatonState
+    final_states: Tuple[DFA_AutomatonState, ...]
+    states: Tuple[DFA_AutomatonState, ...]
     transitions: DFA_Transitions
 
 
 @dataclass
 class NFA:
     alphabet: Tuple[AlphabetLetter]
-    initial_state: AutomatonState
-    final_states: Set[AutomatonState]
-    states: Set[AutomatonState]
+    initial_states: Tuple[NFA_AutomatonState]
+    final_states: Set[NFA_AutomatonState]
+    states: Set[NFA_AutomatonState]
     transitions: NFA_Transitions
 
 
 def NFAtoDFA(nfa: NFA) -> DFA:
     '''Performs NFA -> DFA using the powerset construction'''
-    working_queue = [(nfa.initial_state,)]
+    # @TODO: This is actually broken (in terms of types)
+    working_queue: List[Tuple[int, ...]] = [nfa.initial_states]
 
     dfa_states = set()
-    dfa_final_states = set()
+    dfa_final_states: Set[Tuple[int, ...]] = set()
     dfa_transitions: DFA_Transitions = {}
 
     while working_queue:
@@ -44,7 +58,7 @@ def NFAtoDFA(nfa: NFA) -> DFA:
             dfa_final_states.add(unexplored_dfa_state)
 
         for letter in nfa.alphabet:
-            reachable_states = list()
+            reachable_states: List[int] = list()
             for state in unexplored_dfa_state:
                 if state not in nfa.transitions:
                     continue
@@ -52,19 +66,19 @@ def NFAtoDFA(nfa: NFA) -> DFA:
                 if letter in state_transitions:
                     reachable_states += state_transitions[letter]
 
-            reachable_states = tuple(set(reachable_states))
+            dfa_state: Tuple[int, ...] = tuple(set(reachable_states))
 
-            if reachable_states and reachable_states not in dfa_states:
-                working_queue.append(reachable_states)
+            if dfa_state and dfa_state not in dfa_states:
+                working_queue.append(dfa_state)
 
             if unexplored_dfa_state not in dfa_transitions:
                 dfa_transitions[unexplored_dfa_state] = {}
-            dfa_transitions[unexplored_dfa_state][letter] = reachable_states
+            dfa_transitions[unexplored_dfa_state][letter] = dfa_state
 
     return DFA(
-        initial_state=set([nfa.initial_state]),
-        final_states=dfa_final_states,
-        states=dfa_states,
+        initial_state=nfa.initial_states,
+        final_states=tuple(dfa_final_states),
+        states=tuple(dfa_states),
         transitions=dfa_transitions,
         alphabet=nfa.alphabet
                )

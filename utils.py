@@ -1,4 +1,5 @@
-from typing import Tuple
+from typing import Tuple, List
+
 
 def vector_dot(vec1, vec2) -> int:
     assert(len(vec1) == len(vec2))
@@ -32,8 +33,8 @@ def tree_depth(tree) -> int:
     return max_depth + 1
 
 
-def number_to_bit_tuple(number: int) -> Tuple[int]:
-    bits = []
+def number_to_bit_tuple(number: int) -> Tuple[int, ...]:
+    bits: List[int] = []
     if number == 0:
         return (0,)
     while number:

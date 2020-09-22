@@ -1,9 +1,8 @@
 from __future__ import annotations
 from log import logger
 from dataclasses import dataclass
-from typing import List, Dict, Sequence
-from collections import defaultdict
-from automatons import DFA, AlphabetLetter
+from typing import List, Dict, Generator
+from automatons import DFA, AlphabetLetter, DFA_Transitions
 from utils import vector_dot, number_to_bit_tuple
 import math
 
@@ -99,9 +98,9 @@ def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: Presburger
     '''
 
     if op == '<=' or op == '<':
-        unified_expr: PresburgerExpr = lhs_expr - rhs_expr
+        unified_expr = lhs_expr - rhs_expr
     elif op == '>=' or op == '>':
-        unified_expr: PresburgerExpr = rhs_expr - lhs_expr
+        unified_expr = rhs_expr - lhs_expr
     # Now the unified expr has form of <everything> <= 0 or <everything> < 0
     logger.debug(f'{op}0 (unified expr): {unified_expr}')
 
@@ -145,7 +144,7 @@ def extract_inquality(ast) -> Inequality:
     return normalize_inequation(op, lhs_expr, rhs_expr)
 
 
-def get_automaton_alphabet_from_inequality(ineq: Inequality) -> Sequence[AlphabetLetter]:
+def get_automaton_alphabet_from_inequality(ineq: Inequality) -> Generator[AlphabetLetter, None, None]:
     '''Generator'''
     letter_size = len(ineq.variable_names)
     for i in range(2**letter_size):
@@ -160,11 +159,11 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
     initial_state = ineq.absolute_part
     final_states = set()
     states = set()
-    transitions = dict()
+    transitions: DFA_Transitions = dict()
 
     work_queue = [initial_state]
 
-    alphabet = list(get_automaton_alphabet_from_inequality(ineq))
+    alphabet = tuple(get_automaton_alphabet_from_inequality(ineq))
     logger.info(f'Generated alphabet for automaton: {alphabet}')
 
     while work_queue:
@@ -182,12 +181,18 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
-            # Was the alphabet symbol already seen?
-            if alphabet_symbol not in transitions[currently_processed_state]:
-                transitions[currently_processed_state][alphabet_symbol] = set()
+            # Check DFA consistency - Was the alphabet symbol already seen?
+            if alphabet_symbol in transitions[currently_processed_state]:
+                logger.warn(
+                    'Discovered multiple transitions from from state: {0} via letter {1}, old target: {2}, new target {3}'.format(
+                        currently_processed_state,
+                        alphabet_symbol,
+                        transitions[currently_processed_state][alphabet_symbol],
+                        next_state
+                    ))
 
             # Add newly discovered transition
-            transitions[currently_processed_state][alphabet_symbol].add(next_state)
+            transitions[currently_processed_state][alphabet_symbol] = next_state
 
             if next_state not in states:
                 if next_state not in work_queue:  # @Optimize: Use hashtable-like object to quickly check for `in`
@@ -195,8 +200,8 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
 
     dfa = DFA(
         initial_state=initial_state,
-        states=states,
-        final_states=final_states,
+        states=tuple(states),
+        final_states=tuple(final_states),
         transitions=transitions,
         alphabet=alphabet
     )
