@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import Set, Dict, Tuple, List, Union
 from dataclasses import dataclass
 
-
 AutomatonStateLabel = Union[int, str]
 NFA_AutomatonState = Union[int, str]  # The automaton state can be also special non int value such as Qf='FINAL'
 DFA_AutomatonState = Union[AutomatonStateLabel, Tuple[AutomatonStateLabel, ...]]
@@ -39,6 +38,41 @@ class NFA:
     final_states: Set[NFA_AutomatonState]
     states: Set[NFA_AutomatonState]
     transitions: NFA_Transitions
+
+
+def unite_transition_functions(alphabet: Tuple[AlphabetLetter, ...],
+                               t1: Union[NFA_Transitions, DFA_Transitions],
+                               t2: Union[NFA_Transitions, DFA_Transitions],
+                               ) -> NFA_Transitions:
+    # @TODO: Refactor types - namely a DFA should be also an NFA
+
+    transitions: NFA_Transitions = {}
+    for state in t1:
+        transitions[state] = {}
+        for transition_symbol in t1[state]:
+            if type(t1) == NFA_Transitions:
+                # Copy the tuple
+                transitions[state][transition_symbol] = tuple(t1[state][transition_symbol])
+            else:
+                transitions[state][transition_symbol] = (t1[state][transition_symbol], )
+        transitions
+
+    for state in t2:
+        if state not in transitions:
+            transitions[state] = {}
+        for transition_symbol in t2[state]:
+            if type(t2) == NFA_Transitions:
+                # Copy the tuple
+                transitions[state][transition_symbol] += tuple(t2[state][transition_symbol])
+            else:
+                transitions[state][transition_symbol] += (t2[state][transition_symbol], )
+    return transitions
+
+
+def unite_states(a1_states: Tuple[NFA_AutomatonState, ...],
+                 a2_states: Tuple[NFA_AutomatonState, ...],
+                 ) -> Tuple[NFA_AutomatonState]:
+    return tuple(set(a1_states + a2_states))
 
 
 def NFAtoDFA(nfa: NFA) -> DFA:
@@ -84,3 +118,19 @@ def NFAtoDFA(nfa: NFA) -> DFA:
         transitions=dfa_transitions,
         alphabet=nfa.alphabet
                )
+
+
+def automaton_union(a1: Union[DFA, NFA], a2: Union[DFA, NFA]) -> NFA:
+    assert type(a1) == NFA and type(a2) == NFA
+    states = set(a1.states).union(a2.states)
+    transitions = unite_transition_functions(a1, a2)
+    initial_states = unite_states(a1.initial_states, a2.initial_states)
+    final_states = unite_states(a1.final_states, a2.final_states)
+
+    return NFA(
+        a1.alphabet,
+        initial_states,
+        final_states,
+        states,
+        transitions
+    )
