@@ -161,7 +161,7 @@ def get_automaton_alphabet_from_inequality(ineq: Inequality) -> Generator[Alphab
     '''Generator'''
     letter_size = len(ineq.variable_names)
     for i in range(2**letter_size):
-        yield number_to_bit_tuple(i)
+        yield number_to_bit_tuple(i, tuple_size=letter_size, pad=0)
 
 
 def update_nfa_transition_fn(transition_fn: NFA_Transitions,
@@ -263,10 +263,10 @@ def build_nfa_from_inequality(ineq: Inequality) -> NFA:
 
             # Check whether state is final
             if current_state + dot >= 0:
-                final_state = 4000
+                final_state = 'FINAL'
                 states.add(final_state)
                 final_states.add(final_state)
-                update_nfa_transition_fn(transition_fn, current_state, destination_state, alphabet_letter)
+                update_nfa_transition_fn(transition_fn, current_state, final_state, alphabet_letter)
 
     return NFA(
         alphabet=alphabet,
