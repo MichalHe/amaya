@@ -1,4 +1,4 @@
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 
 def vector_dot(vec1, vec2) -> int:
@@ -33,11 +33,20 @@ def tree_depth(tree) -> int:
     return max_depth + 1
 
 
-def number_to_bit_tuple(number: int) -> Tuple[int, ...]:
+def number_to_bit_tuple(number: int,
+                        tuple_size: Optional[int] = None,
+                        pad: int = 0) -> Tuple[int, ...]:
     bits: List[int] = []
     if number == 0:
+        if tuple_size:
+            return tuple([0] * tuple_size)
         return (0,)
     while number:
         bits.append(number % 2)
         number = int(number / 2)
+
+    if tuple_size and len(bits) < tuple_size:
+        missing_padding_c = tuple_size - len(bits)
+        # Add missing padding
+        bits += [0] * missing_padding_c
     return tuple(reversed(bits))
