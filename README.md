@@ -1,4 +1,4 @@
-This is my implementation of algorithms working on pressburger arithmetics using finite automatons.
+This is my implementation of algorithms working with pressburger arithmetics using finite automatons.
 
 ### TODO
 - [x] build nfa to solve inequalities over Z
