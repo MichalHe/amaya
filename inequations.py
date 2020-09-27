@@ -6,16 +6,15 @@ from typing import (
     Dict,
     Tuple,
     Generator,
-    Set
+    Set,
+    Union
 )
 from utils import vector_dot, number_to_bit_tuple
 from automatons import (
     DFA,
     NFA,
-    NFA_AutomatonState,
-    NFA_Transitions,
-    AlphabetLetter,
-    DFA_Transitions
+    TransitionFn,
+    AutomatonType
 )
 import math
 
@@ -157,51 +156,39 @@ def extract_inquality(ast) -> Inequality:
     return normalize_inequation(op, lhs_expr, rhs_expr)
 
 
-def get_automaton_alphabet_from_inequality(ineq: Inequality) -> Generator[AlphabetLetter, None, None]:
+def get_automaton_alphabet_from_inequality(ineq: Inequality) -> Generator[Tuple[int, ...], None, None]:
     '''Generator'''
     letter_size = len(ineq.variable_names)
     for i in range(2**letter_size):
         yield number_to_bit_tuple(i, tuple_size=letter_size, pad=0)
 
 
-def update_nfa_transition_fn(transition_fn: NFA_Transitions,
-                             from_state: NFA_AutomatonState,
-                             to_state: NFA_AutomatonState,
-                             via_letter: AlphabetLetter):
-
-    if from_state not in transition_fn:
-        transition_fn[from_state] = {}
-
-    if via_letter not in transition_fn[from_state]:
-        transition_fn[from_state][via_letter] = set()
-
-    transition_fn[from_state][via_letter].add(to_state)
-
+DFA_AlphabetSymbolType = Tuple[int, ...]
+DFA_AutomatonStateType = int
 
 def build_dfa_from_inequality(ineq: Inequality) -> DFA:
     '''Builds DFA with Lang same as solutions to the inequation over N'''
     logger.debug(f'Building DFA (over N) to inequation: {ineq}')
 
-    # Build DFA, assume len(bound_variables) == 1
-    initial_state = ineq.absolute_part
-    final_states = set()
-    states = set()
-    transitions: DFA_Transitions = dict()
+    alphabet: Tuple[DFA_AlphabetSymbolType, ...] = tuple(get_automaton_alphabet_from_inequality(ineq))
+    dfa: DFA[DFA_AutomatonStateType, DFA_AlphabetSymbolType] = DFA(
+        initial_states=set((ineq.absolute_part, )),
+        alphabet=alphabet,
+        automaton_type=AutomatonType.DFA
+    )
 
-    work_queue = [initial_state]
+    work_queue: List[DFA_AutomatonStateType] = [ineq.absolute_part]
 
-    alphabet = tuple(get_automaton_alphabet_from_inequality(ineq))
     logger.info(f'Generated alphabet for automaton: {alphabet}')
 
     while work_queue:
         currently_processed_state = work_queue.pop(0)
-        states.add(currently_processed_state)
-        transitions[currently_processed_state] = {}
+        dfa.add_state(currently_processed_state)
 
         # Check whether current state satisfies property that it accepts an
         # empty word
         if currently_processed_state >= 0:
-            final_states.add(currently_processed_state)
+            dfa.add_final_state(currently_processed_state)
 
         for alphabet_symbol in alphabet:
             # @Optimize: Precompute dot before graph traversal
@@ -209,69 +196,58 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
             # Check DFA consistency - Was the alphabet symbol already seen?
-            if alphabet_symbol in transitions[currently_processed_state]:
-                logger.warn(
-                    'Discovered multiple transitions from from state: {0} via letter {1}, old target: {2}, new target {3}'.format(
-                        currently_processed_state,
-                        alphabet_symbol,
-                        transitions[currently_processed_state][alphabet_symbol],
-                        next_state
-                    ))
+            # if alphabet_symbol in transitions[currently_processed_state]:
+                # logger.warn(
+                    # 'Discovered multiple transitions from from state: {0} via letter {1}, old target: {2}, new target {3}'.format(
+                        # currently_processed_state,
+                        # alphabet_symbol,
+                        # transitions[currently_processed_state][alphabet_symbol],
+                        # next_state
+                    # ))
 
             # Add newly discovered transition
-            transitions[currently_processed_state][alphabet_symbol] = next_state
+            dfa.update_transition_fn(currently_processed_state, alphabet_symbol, next_state)
 
-            if next_state not in states:
+            if next_state not in dfa.states:
                 if next_state not in work_queue:  # @Optimize: Use hashtable-like object to quickly check for `in`
                     work_queue.append(next_state)
-
-    dfa = DFA(
-        initial_state=initial_state,
-        states=tuple(states),
-        final_states=tuple(final_states),
-        transitions=transitions,
-        alphabet=alphabet
-    )
 
     logger.debug(f'Extracted dfa: {dfa}')
 
     return dfa
 
+NFA_AutomatonStateType = Union[int, str]
+NFA_AlphabetSymbolType = Tuple[int, ...]
 
-def build_nfa_from_inequality(ineq: Inequality) -> NFA:
+def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType, Tuple[int, ...]]:
     # Initialize nfa structures
-    final_states: Set[NFA_AutomatonState] = set()
-    initial_states: Tuple[NFA_AutomatonState, ...] = (ineq.absolute_part,)
-    states: Set[NFA_AutomatonState] = set()
-    transition_fn: NFA_Transitions = {}
-
     alphabet = tuple(get_automaton_alphabet_from_inequality(ineq))
+    nfa: NFA[NFA_AutomatonStateType, NFA_AlphabetSymbolType] = NFA(
+        alphabet=alphabet,
+        automaton_type=AutomatonType.NFA,
+        initial_states=set((ineq.absolute_part, ))
+    )
+
     work_queue: List[int] = [ineq.absolute_part]
 
     while work_queue:
         current_state = work_queue.pop(0)
-        states.add(current_state)
+        nfa.add_state(current_state)
 
-        for alphabet_letter in alphabet:
-            dot = vector_dot(alphabet_letter, ineq.variable_coeficients)
+        for alphabet_symbol in alphabet:
+            dot = vector_dot(alphabet_symbol , ineq.variable_coeficients)
             destination_state = math.floor(0.5 * (current_state - dot))
 
-            if destination_state not in states:
+            if destination_state not in nfa.states:
                 work_queue.append(destination_state)
 
-            update_nfa_transition_fn(transition_fn, current_state, destination_state, alphabet_letter)
+            nfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
 
             # Check whether state is final
             if current_state + dot >= 0:
                 final_state = 'FINAL'
-                states.add(final_state)
-                final_states.add(final_state)
-                update_nfa_transition_fn(transition_fn, current_state, final_state, alphabet_letter)
+                nfa.add_state(final_state)
+                nfa.add_final_state(final_state)
+                nfa.update_transition_fn(current_state, alphabet_symbol, final_state)
 
-    return NFA(
-        alphabet=alphabet,
-        initial_states=initial_states,
-        final_states=final_states,
-        transitions=transition_fn,
-        states=states
-    )
+    return nfa

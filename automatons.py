@@ -1,19 +1,23 @@
 from __future__ import annotations
+from enum import Enum
 from typing import (
     Set,
     Dict,
     Tuple,
     List,
     TypeVar,
-    Generic
+    Generic,
 )
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+    field
+)
 
 AutomatonState = TypeVar('AutomatonState')
 AlphabetSymbol = TypeVar('AlphabetSymbol')
 
 
-class TransitionFn(Generic[AutomatonState, AlphabetSymbol]):
+class TransitionFn_(Generic[AutomatonState, AlphabetSymbol]):
     data: Dict[AutomatonState,
                Dict[
                   AlphabetSymbol,
@@ -33,13 +37,24 @@ class TransitionFn(Generic[AutomatonState, AlphabetSymbol]):
         return self.data
 
 
+TransitionFn = Dict[AutomatonState,
+                    Dict[
+                        AlphabetSymbol,
+                        Tuple[AutomatonState, ...]
+                    ]]
+
+
+AutomatonType = Enum('AutomatonType', 'DFA NFA')
+
+
 @dataclass
 class NFA(Generic[AutomatonState, AlphabetSymbol]):
     alphabet:       Tuple[AlphabetSymbol, ...]
-    initial_states: Set[AutomatonState]
-    final_states:   Set[AutomatonState]
-    states:         Set[AutomatonState]
-    transition_fn:  TransitionFn[AutomatonState, AlphabetSymbol]
+    automaton_type: AutomatonType = AutomatonType.NFA
+    initial_states: Set[AutomatonState] = field(default_factory=set)
+    final_states:   Set[AutomatonState] = field(default_factory=set)
+    states:         Set[AutomatonState] = field(default_factory=set)
+    transition_fn:  TransitionFn[AutomatonState, AlphabetSymbol] = field(default_factory=dict)
 
     def union(self,
               other: NFA[AutomatonState, AlphabetSymbol]
@@ -83,7 +98,7 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
 
     def determinize(self):
         '''Performs NFA -> DFA using the powerset construction'''
-        working_queue: List[Tuple[AutomatonState, ...]] = [self.initial_states]
+        working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self.initial_states)]
 
         DFA_AutomatonState = Tuple[AutomatonState, ...]  # Alias type
         dfa_states: Set[DFA_AutomatonState] = set()
@@ -119,19 +134,32 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
                 dfa_transitions[unexplored_dfa_state][symbol] = dfa_state
 
         return DFA[DFA_AutomatonState, AlphabetSymbol](
-            initial_state=self.initial_states,
+            initial_states=tuple(self.initial_states),
             final_states=dfa_final_states,
             states=dfa_states,
-            transitions=dfa_transitions,
+            transition_fn=dfa_transitions,
             alphabet=self.alphabet
                 )
 
+    def update_transition_fn(self,
+                             from_state: AutomatonState,
+                             via_symbol: AlphabetSymbol,
+                             to_state: AutomatonState
+                             ):
+        if from_state not in self.transition_fn:
+            self.transition_fn[from_state] = {}
 
-class DFA(NFA):
-    def __init__(self, initial_state, *args, **kwargs):
-        # @TODO: Check whether this works
-        super(
-            initial_states=(initial_state, ),
-            *args,
-            **kwargs,
-        )
+        if via_symbol not in self.transition_fn[from_state]:
+            self.transition_fn[from_state][via_symbol] = (to_state, )
+        else:
+            if to_state not in self.transition_fn[from_state][via_symbol]:
+                self.transition_fn[from_state][via_symbol] += (to_state, )
+
+    def add_state(self, state: AutomatonState):
+        self.states.add(state)
+
+    def add_final_state(self, state: AutomatonState):
+        self.final_states.add(state)
+
+
+DFA = NFA
