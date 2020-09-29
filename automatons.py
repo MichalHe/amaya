@@ -6,8 +6,12 @@ from typing import (
     Tuple,
     List,
     TypeVar,
-    Generic,
+    Generic
 )
+
+from inequations import Inequality
+from utils import number_to_bit_tuple
+
 from dataclasses import (
     dataclass,
     field
@@ -48,8 +52,27 @@ AutomatonType = Enum('AutomatonType', 'DFA NFA')
 
 
 @dataclass
+class LSBF_Alphabet(Generic[AlphabetSymbol]):
+    symbols: Tuple[AlphabetSymbol, ...]
+    variable_names: Tuple[str, ...]
+
+    @staticmethod
+    def from_inequation(ineq: Inequality) -> LSBF_Alphabet[Tuple[int, ...]]:
+        letter_size = len(ineq.variable_names)
+        symbols = tuple(map(
+            lambda i: number_to_bit_tuple(i, tuple_size=letter_size, pad=0),
+            range(2**letter_size)
+        ))
+
+        return LSBF_Alphabet(
+            symbols=symbols,
+            variable_names=tuple(ineq.variable_names)
+        )
+
+
+@dataclass
 class NFA(Generic[AutomatonState, AlphabetSymbol]):
-    alphabet:       Tuple[AlphabetSymbol, ...]
+    alphabet:       LSBF_Alphabet[AlphabetSymbol]
     automaton_type: AutomatonType = AutomatonType.NFA
     initial_states: Set[AutomatonState] = field(default_factory=set)
     final_states:   Set[AutomatonState] = field(default_factory=set)
@@ -114,7 +137,7 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
             if intersect:
                 dfa_final_states.add(unexplored_dfa_state)
 
-            for symbol in self.alphabet:
+            for symbol in self.alphabet.symbols:
                 reachable_states: List[AutomatonState] = list()
                 for state in unexplored_dfa_state:
                     if state not in self.transition_fn:
@@ -160,6 +183,9 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
 
     def add_final_state(self, state: AutomatonState):
         self.final_states.add(state)
+
+    def do_project(self, variable_name):
+        pass
 
 
 DFA = NFA

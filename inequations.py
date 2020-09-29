@@ -5,15 +5,13 @@ from typing import (
     List,
     Dict,
     Tuple,
-    Generator,
-    Set,
     Union
 )
-from utils import vector_dot, number_to_bit_tuple
+from utils import vector_dot
 from automatons import (
     DFA,
     NFA,
-    TransitionFn,
+    LSBF_Alphabet,
     AutomatonType
 )
 import math
@@ -156,21 +154,17 @@ def extract_inquality(ast) -> Inequality:
     return normalize_inequation(op, lhs_expr, rhs_expr)
 
 
-def get_automaton_alphabet_from_inequality(ineq: Inequality) -> Generator[Tuple[int, ...], None, None]:
-    '''Generator'''
-    letter_size = len(ineq.variable_names)
-    for i in range(2**letter_size):
-        yield number_to_bit_tuple(i, tuple_size=letter_size, pad=0)
-
-
 DFA_AlphabetSymbolType = Tuple[int, ...]
 DFA_AutomatonStateType = int
+NFA_AutomatonStateType = Union[int, str]
+NFA_AlphabetSymbolType = Tuple[int, ...]
+
 
 def build_dfa_from_inequality(ineq: Inequality) -> DFA:
     '''Builds DFA with Lang same as solutions to the inequation over N'''
     logger.debug(f'Building DFA (over N) to inequation: {ineq}')
 
-    alphabet: Tuple[DFA_AlphabetSymbolType, ...] = tuple(get_automaton_alphabet_from_inequality(ineq))
+    alphabet = LSBF_Alphabet.from_inequation(ineq)
     dfa: DFA[DFA_AutomatonStateType, DFA_AlphabetSymbolType] = DFA(
         initial_states=set((ineq.absolute_part, )),
         alphabet=alphabet,
@@ -190,20 +184,10 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
         if currently_processed_state >= 0:
             dfa.add_final_state(currently_processed_state)
 
-        for alphabet_symbol in alphabet:
+        for alphabet_symbol in alphabet.symbols:
             # @Optimize: Precompute dot before graph traversal
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
-
-            # Check DFA consistency - Was the alphabet symbol already seen?
-            # if alphabet_symbol in transitions[currently_processed_state]:
-                # logger.warn(
-                    # 'Discovered multiple transitions from from state: {0} via letter {1}, old target: {2}, new target {3}'.format(
-                        # currently_processed_state,
-                        # alphabet_symbol,
-                        # transitions[currently_processed_state][alphabet_symbol],
-                        # next_state
-                    # ))
 
             # Add newly discovered transition
             dfa.update_transition_fn(currently_processed_state, alphabet_symbol, next_state)
@@ -216,12 +200,10 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
 
     return dfa
 
-NFA_AutomatonStateType = Union[int, str]
-NFA_AlphabetSymbolType = Tuple[int, ...]
 
 def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType, Tuple[int, ...]]:
     # Initialize nfa structures
-    alphabet = tuple(get_automaton_alphabet_from_inequality(ineq))
+    alphabet = LSBF_Alphabet.from_inequation(ineq)
     nfa: NFA[NFA_AutomatonStateType, NFA_AlphabetSymbolType] = NFA(
         alphabet=alphabet,
         automaton_type=AutomatonType.NFA,
@@ -234,8 +216,8 @@ def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType, T
         current_state = work_queue.pop(0)
         nfa.add_state(current_state)
 
-        for alphabet_symbol in alphabet:
-            dot = vector_dot(alphabet_symbol , ineq.variable_coeficients)
+        for alphabet_symbol in alphabet.symbols:
+            dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             destination_state = math.floor(0.5 * (current_state - dot))
 
             if destination_state not in nfa.states:
