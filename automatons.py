@@ -6,7 +6,8 @@ from typing import (
     Tuple,
     List,
     TypeVar,
-    Generic
+    Generic,
+    Optional
 )
 
 from inequations import Inequality
@@ -18,23 +19,23 @@ from dataclasses import (
 )
 
 AutomatonState = TypeVar('AutomatonState')
-AlphabetSymbol = TypeVar('AlphabetSymbol')
+LSBF_AlphabetSymbol = Tuple[int, ...]
 
 
-class TransitionFn_(Generic[AutomatonState, AlphabetSymbol]):
+class TransitionFn_(Generic[AutomatonState]):
     data: Dict[AutomatonState,
                Dict[
-                  AlphabetSymbol,
+                  LSBF_AlphabetSymbol,
                   Tuple[AutomatonState, ...]
                ]]
 
     def __init__(self):
         self.data = {}
 
-    def __getitem__(self, item: AutomatonState) -> Dict[AlphabetSymbol, Tuple[AutomatonState, ...]]:
+    def __getitem__(self, item: AutomatonState) -> Dict[LSBF_AlphabetSymbol, Tuple[AutomatonState, ...]]:
         return self.data[item]
 
-    def __setitem__(self, item: AutomatonState, val: Dict[AlphabetSymbol, Tuple[AutomatonState, ...]]):
+    def __setitem__(self, item: AutomatonState, val: Dict[LSBF_AlphabetSymbol, Tuple[AutomatonState, ...]]):
         self.data[item] = val
 
     def __iter__(self):
@@ -43,7 +44,7 @@ class TransitionFn_(Generic[AutomatonState, AlphabetSymbol]):
 
 TransitionFn = Dict[AutomatonState,
                     Dict[
-                        AlphabetSymbol,
+                        LSBF_AlphabetSymbol,
                         Tuple[AutomatonState, ...]
                     ]]
 
@@ -52,12 +53,12 @@ AutomatonType = Enum('AutomatonType', 'DFA NFA')
 
 
 @dataclass
-class LSBF_Alphabet(Generic[AlphabetSymbol]):
-    symbols: Tuple[AlphabetSymbol, ...]
+class LSBF_Alphabet():
+    symbols: Tuple[LSBF_AlphabetSymbol, ...]
     variable_names: Tuple[str, ...]
 
     @staticmethod
-    def from_inequation(ineq: Inequality) -> LSBF_Alphabet[Tuple[int, ...]]:
+    def from_inequation(ineq: Inequality) -> LSBF_Alphabet:
         letter_size = len(ineq.variable_names)
         symbols = tuple(map(
             lambda i: number_to_bit_tuple(i, tuple_size=letter_size, pad=0),
@@ -71,17 +72,17 @@ class LSBF_Alphabet(Generic[AlphabetSymbol]):
 
 
 @dataclass
-class NFA(Generic[AutomatonState, AlphabetSymbol]):
-    alphabet:       LSBF_Alphabet[AlphabetSymbol]
+class NFA(Generic[AutomatonState]):
+    alphabet:       LSBF_Alphabet
     automaton_type: AutomatonType = AutomatonType.NFA
     initial_states: Set[AutomatonState] = field(default_factory=set)
     final_states:   Set[AutomatonState] = field(default_factory=set)
     states:         Set[AutomatonState] = field(default_factory=set)
-    transition_fn:  TransitionFn[AutomatonState, AlphabetSymbol] = field(default_factory=dict)
+    transition_fn:  TransitionFn[AutomatonState] = field(default_factory=dict)
 
     def union(self,
-              other: NFA[AutomatonState, AlphabetSymbol]
-              ) -> NFA[AutomatonState, AlphabetSymbol]:
+              other: NFA[AutomatonState]
+              ) -> NFA[AutomatonState]:
         if self.alphabet != other.alphabet:
             raise NotImplementedError('Union of automatons with different alphabets is not implemented')
 
@@ -99,10 +100,10 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
         )
 
     @staticmethod
-    def __unite_transition_functions(f1: TransitionFn[AutomatonState, AlphabetSymbol],
-                                     f2: TransitionFn[AutomatonState, AlphabetSymbol]):
+    def __unite_transition_functions(f1: TransitionFn[AutomatonState],
+                                     f2: TransitionFn[AutomatonState]):
 
-        transitions = TransitionFn[AutomatonState, AlphabetSymbol]()
+        transitions = TransitionFn[AutomatonState]()
         for state in f1:
             transitions[state] = {}
             for transition_symbol in f1[state]:
@@ -126,7 +127,7 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
         DFA_AutomatonState = Tuple[AutomatonState, ...]  # Alias type
         dfa_states: Set[DFA_AutomatonState] = set()
         dfa_final_states: Set[DFA_AutomatonState] = set()
-        dfa_transitions: TransitionFn[DFA_AutomatonState, AlphabetSymbol] = {}
+        dfa_transitions: TransitionFn[DFA_AutomatonState, LSBF_AlphabetSymbol] = {}
 
         while working_queue:
             unexplored_dfa_state: DFA_AutomatonState = working_queue.pop(0)
@@ -156,7 +157,7 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
                     dfa_transitions[unexplored_dfa_state] = {}
                 dfa_transitions[unexplored_dfa_state][symbol] = dfa_state
 
-        return DFA[DFA_AutomatonState, AlphabetSymbol](
+        return DFA[DFA_AutomatonState](
             initial_states=tuple(self.initial_states),
             final_states=dfa_final_states,
             states=dfa_states,
@@ -166,7 +167,7 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
 
     def update_transition_fn(self,
                              from_state: AutomatonState,
-                             via_symbol: AlphabetSymbol,
+                             via_symbol: LSBF_AlphabetSymbol,
                              to_state: AutomatonState
                              ):
         if from_state not in self.transition_fn:
@@ -184,8 +185,44 @@ class NFA(Generic[AutomatonState, AlphabetSymbol]):
     def add_final_state(self, state: AutomatonState):
         self.final_states.add(state)
 
-    def do_project(self, variable_name):
-        pass
+    def __var_bit_position_in_alphabet_symbol(self, variable_name) -> Optional[int]:
+        for pos, alphabet_var_name in enumerate(self.alphabet.variable_names):
+            if alphabet_var_name == variable_name:
+                return pos
+        return None
+
+    def __create_projection_symbol_map(self, variable_name) -> Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol]:
+        projection_map: Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol] = {}
+        variable_position = self.__var_bit_position_in_alphabet_symbol(variable_name)
+        if not variable_position:
+            raise ValueError(f'Given variable name is not in alphabet: {variable_name}, available names: {self.alphabet.variable_names}')
+
+        for symbol in self.alphabet.symbols:
+            if variable_position == 0:
+                new_symbol = symbol[1:]
+            elif variable_position == len(symbol) - 1:
+                new_symbol = symbol[:-1]
+            else:
+                new_symbol = symbol[0:variable_position] + symbol[variable_position + 1:]
+
+            projection_map[symbol] = new_symbol
+
+        return projection_map
+
+    def do_projection(self, variable_name: str):
+        work_queue = list(self.states)
+        projection_map = self.__create_projection_symbol_map(variable_name)
+        while work_queue:
+            current_state = work_queue.pop(0)
+            out_transitions = self.transition_fn[current_state]  # Outwards transitions
+            for alphabet_symbol in out_transitions:
+                # Remap alphabet_symbol to its projected counterpart
+                out_states = out_transitions[alphabet_symbol]
+                new_symbol = projection_map[alphabet_symbol]
+                out_transitions[new_symbol] = out_states
+
+                # Delete old mapping
+                out_transitions.pop(alphabet_symbol)
 
 
 DFA = NFA

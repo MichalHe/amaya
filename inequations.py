@@ -165,7 +165,7 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
     logger.debug(f'Building DFA (over N) to inequation: {ineq}')
 
     alphabet = LSBF_Alphabet.from_inequation(ineq)
-    dfa: DFA[DFA_AutomatonStateType, DFA_AlphabetSymbolType] = DFA(
+    dfa: DFA[DFA_AutomatonStateType] = DFA(
         initial_states=set((ineq.absolute_part, )),
         alphabet=alphabet,
         automaton_type=AutomatonType.DFA
@@ -201,10 +201,10 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
     return dfa
 
 
-def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType, Tuple[int, ...]]:
+def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType]:
     # Initialize nfa structures
     alphabet = LSBF_Alphabet.from_inequation(ineq)
-    nfa: NFA[NFA_AutomatonStateType, NFA_AlphabetSymbolType] = NFA(
+    nfa: NFA[NFA_AutomatonStateType] = NFA(
         alphabet=alphabet,
         automaton_type=AutomatonType.NFA,
         initial_states=set((ineq.absolute_part, ))
