@@ -23,10 +23,8 @@ On the other hand, analyzing the BDD I see two benefits:
 1. memory efficient storage for sparse/compact boolean functions
 2. quick implementation of the projection (exists quantifier)
 
-To point 1. - we don't have sparse transition functions (except for final state in NFA over Z) -- doubtious benefits
+To point 1. - After further investigation, this benefit seems to be very promissing.
 
 To point 2. - I believe that the dictionary reference swapping (replacing `key#0 -> value` with `key#1 -> value`)
-should be pretty straightforward. This justifies (for now) the decision not to transition from dictionary based transition
-functions towards BDD.
-
+should be pretty straightforward. 
 
