@@ -72,13 +72,19 @@ class LSBF_Alphabet():
 
 
 @dataclass
+class BoundAutomatonState(Generic[AutomatonState]):
+    state: AutomatonState
+    automaton_uid: int  # Use parent automaton ID
+
+
+@dataclass
 class NFA(Generic[AutomatonState]):
     alphabet:       LSBF_Alphabet
     automaton_type: AutomatonType = AutomatonType.NFA
-    initial_states: Set[AutomatonState] = field(default_factory=set)
-    final_states:   Set[AutomatonState] = field(default_factory=set)
-    states:         Set[AutomatonState] = field(default_factory=set)
-    transition_fn:  TransitionFn[AutomatonState] = field(default_factory=dict)
+    initial_states: Set[BoundAutomatonState[AutomatonState]] = field(default_factory=set)
+    final_states:   Set[BoundAutomatonState[AutomatonState]] = field(default_factory=set)
+    states:         Set[BoundAutomatonState[AutomatonState]] = field(default_factory=set)
+    transition_fn:  TransitionFn[BoundAutomatonState[AutomatonState]] = field(default_factory=dict)
 
     def union(self,
               other: NFA[AutomatonState]
@@ -100,10 +106,10 @@ class NFA(Generic[AutomatonState]):
         )
 
     @staticmethod
-    def __unite_transition_functions(f1: TransitionFn[AutomatonState],
-                                     f2: TransitionFn[AutomatonState]):
+    def __unite_transition_functions(f1: TransitionFn[BoundAutomatonState[AutomatonState]],
+                                     f2: TransitionFn[BoundAutomatonState[AutomatonState]]):
 
-        transitions = TransitionFn[AutomatonState]()
+        transitions = TransitionFn[BoundAutomatonState[AutomatonState]]()
         for state in f1:
             transitions[state] = {}
             for transition_symbol in f1[state]:
@@ -117,10 +123,12 @@ class NFA(Generic[AutomatonState]):
         return transitions
 
     @staticmethod
-    def __unite_states(s1: Set[AutomatonState], s2: Set[AutomatonState]):
+    def __unite_states(s1: Set[BoundAutomatonState[AutomatonState]],
+                       s2: Set[BoundAutomatonState[AutomatonState]]):
         return s1.union(s2)
 
     def determinize(self):
+        # FIXME: Refactor this to use lazy init
         '''Performs NFA -> DFA using the powerset construction'''
         working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self.initial_states)]
 
@@ -170,20 +178,26 @@ class NFA(Generic[AutomatonState]):
                              via_symbol: LSBF_AlphabetSymbol,
                              to_state: AutomatonState
                              ):
-        if from_state not in self.transition_fn:
-            self.transition_fn[from_state] = {}
+        origin = self.into_bound(from_state)
+        target = self.into_bound(to_state)
 
-        if via_symbol not in self.transition_fn[from_state]:
-            self.transition_fn[from_state][via_symbol] = (to_state, )
+        if from_state not in self.transition_fn:
+            self.transition_fn[origin] = {}
+
+        if via_symbol not in self.transition_fn[origin]:
+            self.transition_fn[origin][via_symbol] = (target, )
         else:
-            if to_state not in self.transition_fn[from_state][via_symbol]:
-                self.transition_fn[from_state][via_symbol] += (to_state, )
+            if to_state not in self.transition_fn[origin][via_symbol]:
+                self.transition_fn[origin][via_symbol] += (target, )
+
+    def into_bound(self, state: AutomatonState):
+        return BoundAutomatonState(state=state, automaton_uid=id(self))
 
     def add_state(self, state: AutomatonState):
-        self.states.add(state)
+        self.states.add(self.into_bound(state))
 
     def add_final_state(self, state: AutomatonState):
-        self.final_states.add(state)
+        self.final_states.add(self.into_bound(state))
 
     def __var_bit_position_in_alphabet_symbol(self, variable_name) -> Optional[int]:
         for pos, alphabet_var_name in enumerate(self.alphabet.variable_names):
