@@ -209,8 +209,6 @@ def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType]:
 
     work_queue: List[int] = [ineq.absolute_part]
 
-    import pdb
-    pdb.set_trace()
     while work_queue:
         current_state = work_queue.pop(0)
         nfa.add_state(current_state)
