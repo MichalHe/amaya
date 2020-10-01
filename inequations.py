@@ -14,6 +14,10 @@ from automatons import (
     LSBF_Alphabet,
     AutomatonType
 )
+from inequations_data import (
+    Inequality
+)
+
 import math
 
 
@@ -23,14 +27,6 @@ INEQUALITY_COMPARISON_COMPLEMENTS = {
     '<=': '>=',
     '>=': '<=',
 }
-
-
-@dataclass
-class Inequality:
-    variable_names: List[str]
-    variable_coeficients: List[int]
-    absolute_part: int
-    operation: str
 
 
 @dataclass
@@ -166,10 +162,10 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
 
     alphabet = LSBF_Alphabet.from_inequation(ineq)
     dfa: DFA[DFA_AutomatonStateType] = DFA(
-        initial_states=set((ineq.absolute_part, )),
         alphabet=alphabet,
         automaton_type=AutomatonType.DFA
     )
+    dfa.add_initial_state(ineq.absolute_part)
 
     work_queue: List[DFA_AutomatonStateType] = [ineq.absolute_part]
 
@@ -177,6 +173,7 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
 
     while work_queue:
         currently_processed_state = work_queue.pop(0)
+        print(dfa.states)
         dfa.add_state(currently_processed_state)
 
         # Check whether current state satisfies property that it accepts an
@@ -192,8 +189,8 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
             # Add newly discovered transition
             dfa.update_transition_fn(currently_processed_state, alphabet_symbol, next_state)
 
-            if next_state not in dfa.states:
-                if next_state not in work_queue:  # @Optimize: Use hashtable-like object to quickly check for `in`
+            if not dfa.has_state_with_value(next_state):
+                if next_state not in work_queue:
                     work_queue.append(next_state)
 
     logger.debug(f'Extracted dfa: {dfa}')
@@ -207,11 +204,13 @@ def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType]:
     nfa: NFA[NFA_AutomatonStateType] = NFA(
         alphabet=alphabet,
         automaton_type=AutomatonType.NFA,
-        initial_states=set((ineq.absolute_part, ))
     )
+    nfa.add_initial_state(ineq.absolute_part)
 
     work_queue: List[int] = [ineq.absolute_part]
 
+    import pdb
+    pdb.set_trace()
     while work_queue:
         current_state = work_queue.pop(0)
         nfa.add_state(current_state)
@@ -220,7 +219,7 @@ def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType]:
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             destination_state = math.floor(0.5 * (current_state - dot))
 
-            if destination_state not in nfa.states:
+            if not nfa.has_state_with_value(destination_state):
                 work_queue.append(destination_state)
 
             nfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
