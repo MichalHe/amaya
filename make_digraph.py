@@ -10,7 +10,8 @@ arg_parser.add_argument('-i',
                         '--input-file',
                         help='Read from file instead of stdin',
                         dest='file_input',
-                        type=str)
+                        type=str,
+                        default=None)
 
 args = arg_parser.parse_args()
 
@@ -32,7 +33,7 @@ def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
     return convert_automaton_to_graphviz(nfa)
 
 
-if 'file_input' in args:
+if args.file_input:
     with open(args.file_input) as input_file:
         smtlib_src = input_file.read()
 else:
