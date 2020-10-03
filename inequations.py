@@ -64,6 +64,26 @@ class PresburgerExpr:
                 variables[var_name] = other.variables[var_name]
         return PresburgerExpr(abs_val, variables)
 
+    def __mul__(self, other: PresburgerExpr):
+        # In PA one must be constant
+        const_expr: PresburgerExpr = self
+        non_const_expr: PresburgerExpr = other
+
+        if self.variables:
+            if other.variables:
+                raise ValueError(f'Atempting to multiply variables by variables, which is forbidden in PA: {self} * {other}')
+            else:
+                const_expr = other
+                non_const_expr = self
+
+        new_variables: Dict[str, int] = dict()
+        for var_name, var_value in non_const_expr.variables.items():
+            new_variables[var_name] = const_expr.absolute_part * var_value
+        return PresburgerExpr(
+            absolute_part=const_expr.absolute_part * non_const_expr.absolute_part,
+            variables=new_variables
+        )
+
 
 def evaluate_expression(expr) -> PresburgerExpr:
     if not type(expr) == list:
@@ -93,8 +113,18 @@ def evaluate_expression(expr) -> PresburgerExpr:
         operand1 = evaluate_expression(expr[1])
         operand2 = evaluate_expression(expr[2])
         return operand1 + operand2
+    elif operation == '*':
+        operand1 = evaluate_expression(expr[1])
+        operand2 = evaluate_expression(expr[2])
+
+        # (* (+ 10 x) (- 20 y)) --> forbidden in presburger arithmetics
+        try:
+            return operand1 * operand2
+        except ValueError:
+            raise ValueError(f'Error while evaluating {expr} -- attempting to multiply variables by variables, which is forbidden in PA.')
+
     else:
-        raise ValueError(f'Unsupported operation type: {operation}')
+        raise ValueError(f'Unsupported operation type: {operation} in expr: {expr}')
 
 
 def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: PresburgerExpr) -> Inequality:
