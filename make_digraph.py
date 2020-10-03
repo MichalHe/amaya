@@ -15,8 +15,8 @@ arg_parser.add_argument('-i',
 args = arg_parser.parse_args()
 
 
-def export_dot_from_stmlibsrc(stmlib_src: str) -> str:
-    tokens = parse.lex(stmlib_src)
+def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
+    tokens = parse.lex(smtlib_src)
     expr_tree = parse.build_syntax_tree(tokens)
 
     asserts = parse.filter_asserts(expr_tree)
@@ -34,8 +34,8 @@ def export_dot_from_stmlibsrc(stmlib_src: str) -> str:
 
 if 'file_input' in args:
     with open(args.file_input) as input_file:
-        stmlib_src = input_file.read()
+        smtlib_src = input_file.read()
 else:
-    stmlib_src = sys.stdin.read()
+    smtlib_src = sys.stdin.read()
 
-print(export_dot_from_stmlibsrc(stmlib_src))
+print(export_dot_from_stmlibsrc(smtlib_src))
