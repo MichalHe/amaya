@@ -9,22 +9,15 @@ This is my implementation of algorithms working with pressburger arithmetics usi
 - [ ] Test whether projection produces correct symbol maps
 - [ ] implement automaton intersection
 - [ ] implement variable projection (quantifiers)
-- [ ] solve final state uniqueness when merging automatons
-- [ ] test, wheter parser recognizes variable coefs expressions correctly
+- [x] solve final state uniqueness when merging automatons
+- [ ] \[WIP\] test, wheter parser recognizes variable coefs expressions correctly
 - [ ] solve first formula :)
 
-### Efficient representation of transitions between states.
-##### 28.9
-One of the more efficient ways about how to store transitions is to store them inside Multi Terminal BDD.
-After brief investigation, there are no viable MTBDD python libraries, so I'm considering writing my own
-implementation, customized for this purpose, most likely based on the pyeda library.
-##### 29.9
-On the other hand, analyzing the BDD I see two benefits:
-1. memory efficient storage for sparse/compact boolean functions
-2. quick implementation of the projection (exists quantifier)
 
-To point 1. - After further investigation, this benefit seems to be very promissing.
-
-To point 2. - I believe that the dictionary reference swapping (replacing `key#0 -> value` with `key#1 -> value`)
-should be pretty straightforward. 
-
+### Why are states implemented the way they are
+The way of internal representation of automaton states was changed as of (1.10.2020). 
+The motivation to perform this changed arised when it became obvious that plain integer,
+which is used to denote state in DFA/NFA encoding will become a problem when uniting two automatons,
+since it might get consumed in automaton union (set union uperation). Therefor automaton state
+must hold more than just an integer value - it also requires an attribute, which would determine, that would
+differentiate between two integer states, which belong to different automatons.
