@@ -5,17 +5,28 @@ from collections import defaultdict
 
 
 def compute_html_label_for_symbols(symbols: List[Tuple[int, ...]]):
-    label = '<<TABLE BORDER="1" SIDES="LR" CELLPADDING="0" CELLSPACING="0">'
+    label = '<<TABLE BORDER="0" SIDES="LR" CELLPADDING="1" CELLSPACING="0">'
 
     table_row_count = len(symbols[0])
     table_column_count = len(symbols)
 
     for row in range(table_row_count):
         label += '<TR>'
+        is_first_column = True
         for column in range(table_column_count):
-            label += '<TD BORDER="0">'
+
+            if not is_first_column:
+                sides = "L"
+                border = "1"
+            else:
+                sides = ""
+                border = "0"
+
+            label += f'<TD BORDER="{border}" sides="{sides}">'
             label += f'{symbols[column][row]}'
             label += '</TD>'
+
+            is_first_column = False
         label += '</TR>'
 
     label += '</TABLE>>'
