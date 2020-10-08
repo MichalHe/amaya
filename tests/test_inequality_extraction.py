@@ -22,6 +22,28 @@ def sample_inequation(inequality_tree):
     return inequations.extract_inquality(inequality_tree)
 
 
+@pytest.fixture
+def inequation_source__valid_arithmetic_operations():
+    source_text = '''
+    (set-info :category "industrial")
+    (set-info :status unsat)
+    (assert
+        (not
+            (exists
+                ((?X Int))
+                (<=
+                    (* (+ 2 (- 6 3)) 8)
+                    (+ (* 3 (- ?X 10)) 12)
+                )
+            )
+        )
+    )
+    (check-sat)
+    (exit)
+    '''
+    return source_text
+
+
 def test_inequality_extraction(inequality_tree):
     # @TODO: Add more inequations to test agains
     ineq = inequations.extract_inquality(inequality_tree)
@@ -36,5 +58,14 @@ def test_inequality_extraction(inequality_tree):
     assert not coef_outside_allowed_range
 
 
-def test_build_automaton_over_N(sample_inequation):
-    assert inequations.build_dfa_from_inequality(sample_inequation)
+def test_inequality_arithmetic_operations_evaluation(inequation_source__valid_arithmetic_operations):
+    expr_tree = parse.build_syntax_tree(parse.lex(inequation_source__valid_arithmetic_operations))
+
+    ineq = inequations.extract_inquality(search_tree(expr_tree, 'exists')[2])
+
+    assert ineq.absolute_part == -58
+    assert len(ineq.variable_coeficients) == 1
+    assert len(ineq.variable_names) == 1
+    assert '?X' in ineq.variable_names
+    assert ineq.variable_coeficients[0] == -3
+    assert ineq.operation == '<='
