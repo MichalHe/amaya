@@ -1,4 +1,7 @@
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Iterable, TypeVar
+
+T = TypeVar('T')
+S = TypeVar('S')
 
 
 def vector_dot(vec1, vec2) -> int:
@@ -50,3 +53,13 @@ def number_to_bit_tuple(number: int,
         # Add missing padding
         bits += [0] * missing_padding_c
     return tuple(reversed(bits))
+
+
+def carthesian_product(op0: Iterable[T], op1: Iterable[S]) -> List[Tuple[S, T]]:
+    product: List[Tuple[S, T]] = list()
+
+    for a in op0:
+        for b in op1:
+            product.append((a, b))
+
+    return product

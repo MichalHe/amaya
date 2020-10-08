@@ -7,10 +7,14 @@ from typing import (
     List,
     TypeVar,
     Generic,
-    Optional
+    Optional,
+    Union
 )
 
-from utils import number_to_bit_tuple
+from utils import (
+    number_to_bit_tuple,
+    carthesian_product,
+)
 
 from dataclasses import (
     dataclass,
@@ -22,6 +26,8 @@ from inequations_data import (
 )
 
 AutomatonState = TypeVar('AutomatonState')
+AnyAutomatonState = TypeVar('AnyAutomatonState')
+
 LSBF_AlphabetSymbol = Tuple[int, ...]
 
 TransitionFn = Dict[AutomatonState,
@@ -214,12 +220,19 @@ class NFA(Generic[AutomatonState]):
                 # Delete old mapping
                 out_transitions.pop(alphabet_symbol)
 
-    def get_transition_target(self, origin: AutomatonState, via_symbol: LSBF_AlphabetSymbol) -> Optional[Tuple[AutomatonState, ...]]:
+    def get_transition_target(self,
+                              origin: AutomatonState,
+                              via_symbol: LSBF_AlphabetSymbol, raw_states=False) -> Optional[Union[Tuple[AutomatonState, ...],
+                                                                                                   Tuple[BoundAutomatonState[AutomatonState]]
+                                                                                                   ]]:
         _origin = self.into_bound(origin)
         if _origin not in self.transition_fn:
             return None
         if via_symbol not in self.transition_fn[_origin]:
             return None
+
+        if raw_states:
+            return self.transition_fn[_origin][via_symbol]
 
         return tuple(
             map(
@@ -230,11 +243,53 @@ class NFA(Generic[AutomatonState]):
     def has_state_with_value(self, state: AutomatonState) -> bool:
         return self.into_bound(state) in self.states
 
+    def has_final_state_with_value(self, value: AutomatonState) -> bool:
+        return self.into_bound(value) in self.final_states
+
     def _unwrap_states(self, states: Set[BoundAutomatonState[AutomatonState]]) -> Set[AutomatonState]:
         unwrapped_states: List[AutomatonState] = []
         for state in states:
             unwrapped_states.append(state.state)
         return set(unwrapped_states)
+
+    def intersection(self, other: NFA[AnyAutomatonState]):
+        ResultingStateType = Tuple[BoundAutomatonState[AutomatonType], BoundAutomatonState[AnyAutomatonState]]
+        resulting_nfa: NFA[ResultingStateType] = NFA(
+            alphabet=self.alphabet,
+            automaton_type=AutomatonType.NFA
+        )
+
+        # Add all the initial states to the to-be-processed queue
+        work_queue = carthesian_product(self.initial_states, other.initial_states)
+        for initial_state in work_queue:
+            resulting_nfa.add_initial_state(initial_state)
+
+        while work_queue:
+            current_state: Tuple[AutomatonState, AnyAutomatonState] = work_queue.pop(0)
+            resulting_nfa.add_state(current_state)
+
+            # States in work_queue are boxed
+            b_self_state, b_others_state = current_state
+
+            # Check whether intersecti n state should be made final
+            if (b_self_state in self.final_states and b_others_state in other.final_states):
+                resulting_nfa.add_final_state((b_self_state, b_others_state))
+
+            for symbol in self.alphabet:
+                self_targets = self.get_transition_target(b_self_state.state, symbol, raw_states=True)
+                other_targets = other.get_transition_target(b_others_state.state, symbol, raw_states=True)
+
+                if self_targets is None or other_targets is None:
+                    continue
+
+                for new_intersect_state in carthesian_product(self_targets, other_targets):
+                    if new_intersect_state not in resulting_nfa.states:
+                        if new_intersect_state not in work_queue:
+                            work_queue.append(new_intersect_state)
+
+                    resulting_nfa.update_transition_fn(current_state, symbol, new_intersect_state)
+
+        return resulting_nfa
 
 
 DFA = NFA
