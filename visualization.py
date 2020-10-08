@@ -4,7 +4,7 @@ from typing import Callable, Dict, Tuple, List, DefaultDict
 from collections import defaultdict
 
 
-def compute_html_label_for_symbols(symbols: List[Tuple[int, ...]]):
+def compute_html_label_for_symbols(variable_names: List[str], symbols: List[Tuple[int, ...]]):
     label = '<<TABLE BORDER="0" SIDES="LR" CELLPADDING="1" CELLSPACING="0">'
 
     table_row_count = len(symbols[0])
@@ -13,8 +13,8 @@ def compute_html_label_for_symbols(symbols: List[Tuple[int, ...]]):
     for row in range(table_row_count):
         label += '<TR>'
         is_first_column = True
+        label += f'<TD BORDER="0" BGCOLOR="gray">{variable_names[row]}:</TD>'
         for column in range(table_column_count):
-
             if not is_first_column:
                 sides = "L"
                 border = "1"
@@ -68,6 +68,9 @@ def convert_automaton_to_graphviz(nfa: NFA, node_naming_fn: Callable[[int], str]
         for destination_state_box in target_states:
             dest_node_name = state_node_names[destination_state_box]
             # print(f'Creating transition from {origin_box} to {destination_state_box} via {target_states[destination_state_box]}')
-            graph.edge(origin_node_name, dest_node_name, label=compute_html_label_for_symbols(target_states[destination_state_box]))
+            graph.edge(
+                origin_node_name,
+                dest_node_name,
+                label=compute_html_label_for_symbols(nfa.alphabet.variable_names, target_states[destination_state_box]))
 
     return graph
