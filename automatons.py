@@ -147,16 +147,14 @@ class NFA(Generic[AutomatonState]):
                              via_symbol: LSBF_AlphabetSymbol,
                              to_state: AutomatonState
                              ):
-        origin = self.into_bound(from_state)
-        target = self.into_bound(to_state)
 
-        if origin not in self.transition_fn:
-            self.transition_fn[origin] = {}
+        if from_state not in self.transition_fn:
+            self.transition_fn[from_state] = {}
 
-        if via_symbol not in self.transition_fn[origin]:
-            self.transition_fn[origin][via_symbol] = set((target, ))
+        if via_symbol not in self.transition_fn[from_state]:
+            self.transition_fn[from_state][via_symbol] = set((to_state, ))
         else:
-            self.transition_fn[origin][via_symbol].add(target)
+            self.transition_fn[from_state][via_symbol].add(to_state)
 
     def add_state(self, state: AutomatonState):
         self.states.add(state)
@@ -211,16 +209,15 @@ class NFA(Generic[AutomatonState]):
                               via_symbol: LSBF_AlphabetSymbol
                               ) -> Optional[Tuple[AutomatonState, ...]]:
 
-        _origin = self.into_bound(origin)
-        if _origin not in self.transition_fn:
+        if origin not in self.transition_fn:
             return None
-        if via_symbol not in self.transition_fn[_origin]:
+        if via_symbol not in self.transition_fn[origin]:
             return None
 
         return tuple(
             map(
                 lambda state_box: state_box.state,
-                self.transition_fn[_origin][via_symbol]
+                self.transition_fn[origin][via_symbol]
             ))
 
     def has_state_with_value(self, state: AutomatonState) -> bool:
