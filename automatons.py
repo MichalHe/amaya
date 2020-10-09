@@ -8,7 +8,6 @@ from typing import (
     TypeVar,
     Generic,
     Optional,
-    Union
 )
 
 from utils import (
@@ -59,24 +58,16 @@ class LSBF_Alphabet():
         )
 
 
-@dataclass(frozen=True, eq=True)
-class BoundAutomatonState(Generic[AutomatonState]):
-    state: AutomatonState
-    automaton_uid: int  # Use parent automaton ID
-
-
 @dataclass
 class NFA(Generic[AutomatonState]):
     alphabet:       LSBF_Alphabet
     automaton_type: AutomatonType = AutomatonType.NFA
-    initial_states: Set[BoundAutomatonState[AutomatonState]] = field(default_factory=set)
-    final_states:   Set[BoundAutomatonState[AutomatonState]] = field(default_factory=set)
-    states:         Set[BoundAutomatonState[AutomatonState]] = field(default_factory=set)
-    transition_fn:  TransitionFn[BoundAutomatonState[AutomatonState]] = field(default_factory=dict)
+    initial_states: Set[AutomatonState] = field(default_factory=set)
+    final_states:   Set[AutomatonState] = field(default_factory=set)
+    states:         Set[AutomatonState] = field(default_factory=set)
+    transition_fn:  TransitionFn[AutomatonState] = field(default_factory=dict)
 
-    def union(self,
-              other: NFA[AutomatonState]
-              ) -> NFA[AutomatonState]:
+    def union(self, other: NFA[AutomatonState]) -> NFA[AutomatonState]:
         if self.alphabet != other.alphabet:
             raise NotImplementedError('Union of automatons with different alphabets is not implemented')
 
@@ -94,10 +85,9 @@ class NFA(Generic[AutomatonState]):
         )
 
     @staticmethod
-    def __unite_transition_functions(f1: TransitionFn[BoundAutomatonState[AutomatonState]],
-                                     f2: TransitionFn[BoundAutomatonState[AutomatonState]]):
+    def __unite_transition_functions(f1: TransitionFn[AutomatonState], f2: TransitionFn[AutomatonState]):
 
-        transitions = TransitionFn[BoundAutomatonState[AutomatonState]]()
+        transitions = TransitionFn[AutomatonState]()
         for state in f1:
             transitions[state] = {}
             for transition_symbol in f1[state]:
@@ -111,8 +101,7 @@ class NFA(Generic[AutomatonState]):
         return transitions
 
     @staticmethod
-    def __unite_states(s1: Set[BoundAutomatonState[AutomatonState]],
-                       s2: Set[BoundAutomatonState[AutomatonState]]):
+    def __unite_states(s1: Set[AutomatonState], s2: Set[AutomatonState]):
         return s1.union(s2)
 
     def determinize(self):
@@ -169,17 +158,14 @@ class NFA(Generic[AutomatonState]):
         else:
             self.transition_fn[origin][via_symbol].add(target)
 
-    def into_bound(self, state: AutomatonState):
-        return BoundAutomatonState(state=state, automaton_uid=id(self))
-
     def add_state(self, state: AutomatonState):
-        self.states.add(self.into_bound(state))
+        self.states.add(state)
 
     def add_final_state(self, state: AutomatonState):
-        self.final_states.add(self.into_bound(state))
+        self.final_states.add(state)
 
     def add_initial_state(self, state: AutomatonState):
-        self.initial_states.add(self.into_bound(state))
+        self.initial_states.add(state)
 
     def __var_bit_position_in_alphabet_symbol(self, variable_name) -> Optional[int]:
         for pos, alphabet_var_name in enumerate(self.alphabet.variable_names):
@@ -222,17 +208,14 @@ class NFA(Generic[AutomatonState]):
 
     def get_transition_target(self,
                               origin: AutomatonState,
-                              via_symbol: LSBF_AlphabetSymbol, raw_states=False) -> Optional[Union[Tuple[AutomatonState, ...],
-                                                                                                   Tuple[BoundAutomatonState[AutomatonState]]
-                                                                                                   ]]:
+                              via_symbol: LSBF_AlphabetSymbol
+                              ) -> Optional[Tuple[AutomatonState, ...]]:
+
         _origin = self.into_bound(origin)
         if _origin not in self.transition_fn:
             return None
         if via_symbol not in self.transition_fn[_origin]:
             return None
-
-        if raw_states:
-            return self.transition_fn[_origin][via_symbol]
 
         return tuple(
             map(
@@ -241,19 +224,13 @@ class NFA(Generic[AutomatonState]):
             ))
 
     def has_state_with_value(self, state: AutomatonState) -> bool:
-        return self.into_bound(state) in self.states
+        return state in self.states
 
     def has_final_state_with_value(self, value: AutomatonState) -> bool:
-        return self.into_bound(value) in self.final_states
-
-    def _unwrap_states(self, states: Set[BoundAutomatonState[AutomatonState]]) -> Set[AutomatonState]:
-        unwrapped_states: List[AutomatonState] = []
-        for state in states:
-            unwrapped_states.append(state.state)
-        return set(unwrapped_states)
+        return value in self.final_states
 
     def intersection(self, other: NFA[AnyAutomatonState]):
-        ResultingStateType = Tuple[BoundAutomatonState[AutomatonType], BoundAutomatonState[AnyAutomatonState]]
+        ResultingStateType = Tuple[AutomatonType, AnyAutomatonState]
         resulting_nfa: NFA[ResultingStateType] = NFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA
