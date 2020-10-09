@@ -8,6 +8,7 @@ from typing import (
     TypeVar,
     Generic,
     Optional,
+    Callable,
 )
 
 from utils import (
@@ -67,22 +68,10 @@ class NFA(Generic[AutomatonState]):
     states:         Set[AutomatonState] = field(default_factory=set)
     transition_fn:  TransitionFn[AutomatonState] = field(default_factory=dict)
 
-    def union(self, other: NFA[AutomatonState]) -> NFA[AutomatonState]:
-        if self.alphabet != other.alphabet:
-            raise NotImplementedError('Union of automatons with different alphabets is not implemented')
-
-        states = set(self.states).union(other.states)
-        transitions = NFA.__unite_transition_functions(self.transition_fn, other.transition_fn)
-        initial_states = self.__unite_states(self.initial_states, other.initial_states)
-        final_states = self.__unite_states(self.final_states, other.final_states)
-
-        return NFA(
-            self.alphabet,
-            initial_states,
-            final_states,
-            states,
-            transitions
-        )
+    # Debug handle to listen to any state renaming happening during
+    # intersecion/union; takes (automaton_id, old_state(int, str),
+    # new_state(int))
+    __debug_state_rename: Optional[Callable[[int, AutomatonState, int], None]] = None
 
     @staticmethod
     def __unite_transition_functions(f1: TransitionFn[AutomatonState], f2: TransitionFn[AutomatonState]):
@@ -100,9 +89,130 @@ class NFA(Generic[AutomatonState]):
                 transitions[state][transition_symbol] = transitions[state][transition_symbol].union(set(f2[state][transition_symbol]))
         return transitions
 
-    @staticmethod
-    def __unite_states(s1: Set[AutomatonState], s2: Set[AutomatonState]):
-        return s1.union(s2)
+    def update_transition_fn(self,
+                             from_state: AutomatonState,
+                             via_symbol: LSBF_AlphabetSymbol,
+                             to_state: AutomatonState
+                             ):
+
+        if from_state not in self.transition_fn:
+            self.transition_fn[from_state] = {}
+
+        if via_symbol not in self.transition_fn[from_state]:
+            self.transition_fn[from_state][via_symbol] = set((to_state, ))
+        else:
+            self.transition_fn[from_state][via_symbol].add(to_state)
+
+    def add_state(self, state: AutomatonState):
+        self.states.add(state)
+
+    def add_final_state(self, state: AutomatonState):
+        self.final_states.add(state)
+
+    def add_initial_state(self, state: AutomatonState):
+        self.initial_states.add(state)
+
+    def has_state_with_value(self, state: AutomatonState) -> bool:
+        return state in self.states
+
+    def has_final_state_with_value(self, value: AutomatonState) -> bool:
+        return value in self.final_states
+
+    def __var_bit_position_in_alphabet_symbol(self, variable_name) -> Optional[int]:
+        for pos, alphabet_var_name in enumerate(self.alphabet.variable_names):
+            if alphabet_var_name == variable_name:
+                return pos
+        return None
+
+    def __create_projection_symbol_map(self, variable_name) -> Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol]:
+        projection_map: Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol] = {}
+        variable_position = self.__var_bit_position_in_alphabet_symbol(variable_name)
+        if not variable_position:
+            raise ValueError(f'Given variable name is not in alphabet: {variable_name}, available names: {self.alphabet.variable_names}')
+
+        for symbol in self.alphabet.symbols:
+            if variable_position == 0:
+                new_symbol = symbol[1:]
+            elif variable_position == len(symbol) - 1:
+                new_symbol = symbol[:-1]
+            else:
+                new_symbol = symbol[0:variable_position] + symbol[variable_position + 1:]
+
+            projection_map[symbol] = new_symbol
+
+        return projection_map
+
+    def get_transition_target(self,
+                              origin: AutomatonState,
+                              via_symbol: LSBF_AlphabetSymbol
+                              ) -> Optional[Tuple[AutomatonState, ...]]:
+
+        if origin not in self.transition_fn:
+            return None
+        if via_symbol not in self.transition_fn[origin]:
+            return None
+
+        return tuple(self.transition_fn[origin][via_symbol])
+
+    def intersection(self, other: NFA[S]):
+        resulting_nfa: NFA[Tuple[AutomatonState, S]] = NFA(
+            alphabet=self.alphabet,
+            automaton_type=AutomatonType.NFA
+        )
+
+        # Add all the initial states to the to-be-processed queue
+        work_queue = carthesian_product(self.initial_states, other.initial_states)
+        for initial_state in work_queue:
+            resulting_nfa.add_initial_state(initial_state)
+
+        while work_queue:
+            current_state: Tuple[AutomatonState, S] = work_queue.pop(0)
+            resulting_nfa.add_state(current_state)
+
+            # States in work_queue are boxed
+            self_state, others_state = current_state
+
+            # Check whether intersecti n state should be made final
+            if (self_state in self.final_states and others_state in other.final_states):
+                resulting_nfa.add_final_state((self_state, others_state))
+
+            for symbol in self.alphabet.symbols:
+                self_targets = self.get_transition_target(self_state, symbol)
+                other_targets = other.get_transition_target(others_state, symbol)
+
+                if self_targets is None or other_targets is None:
+                    continue
+
+                for new_intersect_state in carthesian_product(self_targets, other_targets):
+                    if new_intersect_state not in resulting_nfa.states:
+                        if new_intersect_state not in work_queue:
+                            work_queue.append(new_intersect_state)
+
+                    resulting_nfa.update_transition_fn(current_state, symbol, new_intersect_state)
+
+        return resulting_nfa
+
+    def union(self, other: NFA[AutomatonState]) -> NFA[int]:
+        # @FIXME The type of Other shouldn't be the same as self
+        if self.alphabet != other.alphabet:
+            raise NotImplementedError('Union of automatons with different alphabets is not implemented')
+
+        latest_state_value, self_renamed = self.rename_states()
+        _, other_renamed = other.rename_states(start_from=latest_state_value)
+
+        states = self_renamed.states.union(other_renamed.states)
+        transitions = NFA.__unite_transition_functions(self_renamed.transition_fn, other_renamed.transition_fn)
+        initial_states = self_renamed.initial_states.union(other_renamed.initial_states)
+        final_states = self_renamed.final_states.union(other_renamed.final_states)
+
+        return NFA(
+            alphabet=self.alphabet,
+            automaton_type=AutomatonType.NFA,
+            initial_states=initial_states,
+            final_states=final_states,
+            states=states,
+            transition_fn=transitions
+        )
 
     def determinize(self):
         '''Performs NFA -> DFA using the powerset construction'''
@@ -142,53 +252,6 @@ class NFA(Generic[AutomatonState]):
 
         return determinized_automaton
 
-    def update_transition_fn(self,
-                             from_state: AutomatonState,
-                             via_symbol: LSBF_AlphabetSymbol,
-                             to_state: AutomatonState
-                             ):
-
-        if from_state not in self.transition_fn:
-            self.transition_fn[from_state] = {}
-
-        if via_symbol not in self.transition_fn[from_state]:
-            self.transition_fn[from_state][via_symbol] = set((to_state, ))
-        else:
-            self.transition_fn[from_state][via_symbol].add(to_state)
-
-    def add_state(self, state: AutomatonState):
-        self.states.add(state)
-
-    def add_final_state(self, state: AutomatonState):
-        self.final_states.add(state)
-
-    def add_initial_state(self, state: AutomatonState):
-        self.initial_states.add(state)
-
-    def __var_bit_position_in_alphabet_symbol(self, variable_name) -> Optional[int]:
-        for pos, alphabet_var_name in enumerate(self.alphabet.variable_names):
-            if alphabet_var_name == variable_name:
-                return pos
-        return None
-
-    def __create_projection_symbol_map(self, variable_name) -> Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol]:
-        projection_map: Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol] = {}
-        variable_position = self.__var_bit_position_in_alphabet_symbol(variable_name)
-        if not variable_position:
-            raise ValueError(f'Given variable name is not in alphabet: {variable_name}, available names: {self.alphabet.variable_names}')
-
-        for symbol in self.alphabet.symbols:
-            if variable_position == 0:
-                new_symbol = symbol[1:]
-            elif variable_position == len(symbol) - 1:
-                new_symbol = symbol[:-1]
-            else:
-                new_symbol = symbol[0:variable_position] + symbol[variable_position + 1:]
-
-            projection_map[symbol] = new_symbol
-
-        return projection_map
-
     def do_projection(self, variable_name: str):
         work_queue = list(self.states)
         projection_map = self.__create_projection_symbol_map(variable_name)
@@ -204,61 +267,40 @@ class NFA(Generic[AutomatonState]):
                 # Delete old mapping
                 out_transitions.pop(alphabet_symbol)
 
-    def get_transition_target(self,
-                              origin: AutomatonState,
-                              via_symbol: LSBF_AlphabetSymbol
-                              ) -> Optional[Tuple[AutomatonState, ...]]:
+    def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
+        state_cnt = start_from
+        nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
+        self_id = id(self)
 
-        if origin not in self.transition_fn:
-            return None
-        if via_symbol not in self.transition_fn[origin]:
-            return None
+        state_name_translation: Dict[AutomatonState, int] = dict()
 
-        return tuple(self.transition_fn[origin][via_symbol])
+        for state in self.states:
+            new_state_name = state_cnt
+            if self.__debug_state_rename is not None:
+                self.__debug_state_rename(self_id, state, new_state_name)
 
-    def has_state_with_value(self, state: AutomatonState) -> bool:
-        return state in self.states
+            state_name_translation[state] = new_state_name
+            state_cnt += 1
 
-    def has_final_state_with_value(self, value: AutomatonState) -> bool:
-        return value in self.final_states
+            nfa.add_state(new_state_name)
 
-    def intersection(self, other: NFA[S]):
-        resulting_nfa: NFA[Tuple[AutomatonState, S]] = NFA(
-            alphabet=self.alphabet,
-            automaton_type=AutomatonType.NFA
-        )
+        def translate(old_state_name: AutomatonState) -> int:
+            return state_name_translation[old_state_name]
 
-        # Add all the initial states to the to-be-processed queue
-        work_queue = carthesian_product(self.initial_states, other.initial_states)
-        for initial_state in work_queue:
-            resulting_nfa.add_initial_state(initial_state)
+        for initial_state in self.initial_states:
+            nfa.add_initial_state(translate(initial_state))
 
-        while work_queue:
-            current_state: Tuple[AutomatonState, S] = work_queue.pop(0)
-            resulting_nfa.add_state(current_state)
+        for final_state in self.final_states:
+            nfa.add_final_state(translate(final_state))
 
-            # States in work_queue are boxed
-            self_state, others_state = current_state
+        # Perform translation of transition function
+        for origin in self.transition_fn:
+            state_exits = self.transition_fn[origin]
+            renamed_origin = translate(origin)
+            for symbol, destinations in state_exits.items():
+                nfa.transition_fn[renamed_origin][symbol] = set(map(translate, destinations))
 
-            # Check whether intersecti n state should be made final
-            if (self_state in self.final_states and others_state in other.final_states):
-                resulting_nfa.add_final_state((self_state, others_state))
-
-            for symbol in self.alphabet.symbols:
-                self_targets = self.get_transition_target(self_state, symbol)
-                other_targets = other.get_transition_target(others_state, symbol)
-
-                if self_targets is None or other_targets is None:
-                    continue
-
-                for new_intersect_state in carthesian_product(self_targets, other_targets):
-                    if new_intersect_state not in resulting_nfa.states:
-                        if new_intersect_state not in work_queue:
-                            work_queue.append(new_intersect_state)
-
-                    resulting_nfa.update_transition_fn(current_state, symbol, new_intersect_state)
-
-        return resulting_nfa
+        return (state_cnt, nfa)
 
 
 DFA = NFA
