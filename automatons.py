@@ -25,7 +25,7 @@ from inequations_data import (
 )
 
 AutomatonState = TypeVar('AutomatonState')
-AnyAutomatonState = TypeVar('AnyAutomatonState')
+S = TypeVar('S')
 
 LSBF_AlphabetSymbol = Tuple[int, ...]
 
@@ -106,8 +106,8 @@ class NFA(Generic[AutomatonState]):
 
     def determinize(self):
         '''Performs NFA -> DFA using the powerset construction'''
-        working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self._unwrap_states(self.initial_states))]
-        _final_states_raw = self._unwrap_states(self.final_states)
+        working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self.initial_states)]
+        _final_states_raw = self.final_states
 
         DFA_AutomatonState = Tuple[AutomatonState, ...]  # Alias type
         determinized_automaton: DFA[DFA_AutomatonState] = DFA(
@@ -214,11 +214,7 @@ class NFA(Generic[AutomatonState]):
         if via_symbol not in self.transition_fn[origin]:
             return None
 
-        return tuple(
-            map(
-                lambda state_box: state_box.state,
-                self.transition_fn[origin][via_symbol]
-            ))
+        return tuple(self.transition_fn[origin][via_symbol])
 
     def has_state_with_value(self, state: AutomatonState) -> bool:
         return state in self.states
@@ -226,9 +222,8 @@ class NFA(Generic[AutomatonState]):
     def has_final_state_with_value(self, value: AutomatonState) -> bool:
         return value in self.final_states
 
-    def intersection(self, other: NFA[AnyAutomatonState]):
-        ResultingStateType = Tuple[AutomatonType, AnyAutomatonState]
-        resulting_nfa: NFA[ResultingStateType] = NFA(
+    def intersection(self, other: NFA[S]):
+        resulting_nfa: NFA[Tuple[AutomatonState, S]] = NFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA
         )
@@ -239,19 +234,19 @@ class NFA(Generic[AutomatonState]):
             resulting_nfa.add_initial_state(initial_state)
 
         while work_queue:
-            current_state: Tuple[AutomatonState, AnyAutomatonState] = work_queue.pop(0)
+            current_state: Tuple[AutomatonState, S] = work_queue.pop(0)
             resulting_nfa.add_state(current_state)
 
             # States in work_queue are boxed
-            b_self_state, b_others_state = current_state
+            self_state, others_state = current_state
 
             # Check whether intersecti n state should be made final
-            if (b_self_state in self.final_states and b_others_state in other.final_states):
-                resulting_nfa.add_final_state((b_self_state, b_others_state))
+            if (self_state in self.final_states and others_state in other.final_states):
+                resulting_nfa.add_final_state((self_state, others_state))
 
-            for symbol in self.alphabet:
-                self_targets = self.get_transition_target(b_self_state.state, symbol, raw_states=True)
-                other_targets = other.get_transition_target(b_others_state.state, symbol, raw_states=True)
+            for symbol in self.alphabet.symbols:
+                self_targets = self.get_transition_target(self_state, symbol)
+                other_targets = other.get_transition_target(others_state, symbol)
 
                 if self_targets is None or other_targets is None:
                     continue
