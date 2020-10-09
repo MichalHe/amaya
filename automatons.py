@@ -192,8 +192,7 @@ class NFA(Generic[AutomatonState]):
 
         return resulting_nfa
 
-    def union(self, other: NFA[AutomatonState]) -> NFA[int]:
-        # @FIXME The type of Other shouldn't be the same as self
+    def union(self, other: NFA[S]) -> NFA[int]:
         if self.alphabet != other.alphabet:
             raise NotImplementedError('Union of automatons with different alphabets is not implemented')
 
