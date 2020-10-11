@@ -71,7 +71,7 @@ class NFA(Generic[AutomatonState]):
     # Debug handle to listen to any state renaming happening during
     # intersecion/union; takes (automaton_id, old_state(int, str),
     # new_state(int))
-    __debug_state_rename: Optional[Callable[[int, AutomatonState, int], None]] = None
+    _debug_state_rename: Optional[Callable[[int, AutomatonState, int], None]] = None
 
     @staticmethod
     def __unite_transition_functions(f1: TransitionFn[AutomatonState], f2: TransitionFn[AutomatonState]):
@@ -159,6 +159,13 @@ class NFA(Generic[AutomatonState]):
             alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA
         )
+
+        # @TODO: First perform state renaming, and then execute the
+        # intersection on other automatons
+
+        # @Maybe: Pull the implementations of ops into functions that take NFA
+        # and return NFA without performing all kinds of renaming under the
+        # hood
 
         # Add all the initial states to the to-be-processed queue
         work_queue = carthesian_product(self.initial_states, other.initial_states)
@@ -267,6 +274,8 @@ class NFA(Generic[AutomatonState]):
                 out_transitions.pop(alphabet_symbol)
 
     def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
+        # import pdb
+        # pdb.set_trace()
         state_cnt = start_from
         nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
         self_id = id(self)
@@ -275,8 +284,8 @@ class NFA(Generic[AutomatonState]):
 
         for state in self.states:
             new_state_name = state_cnt
-            if self.__debug_state_rename is not None:
-                self.__debug_state_rename(self_id, state, new_state_name)
+            if (self._debug_state_rename is not None):
+                self._debug_state_rename(self_id, state, new_state_name)
 
             state_name_translation[state] = new_state_name
             state_cnt += 1
@@ -297,6 +306,8 @@ class NFA(Generic[AutomatonState]):
             state_exits = self.transition_fn[origin]
             renamed_origin = translate(origin)
             for symbol, destinations in state_exits.items():
+                if renamed_origin not in nfa.transition_fn:
+                    nfa.transition_fn[renamed_origin] = dict()
                 nfa.transition_fn[renamed_origin][symbol] = set(map(translate, destinations))
 
         return (state_cnt, nfa)

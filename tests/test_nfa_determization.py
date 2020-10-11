@@ -1,11 +1,14 @@
 import pytest
 from inequations_data import Inequality
 from inequations import build_nfa_from_inequality
-from automatons import AutomatonType
+from automatons import (
+    AutomatonType,
+    NFA
+)
 
 
 @pytest.fixture
-def simple_nfa():
+def simple_nfa() -> NFA:
     ineq = Inequality(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
@@ -17,7 +20,6 @@ def simple_nfa():
 
 
 def test_simple_nfa_determinization(simple_nfa):
-
     assert simple_nfa.automaton_type == AutomatonType.NFA
 
     dfa = simple_nfa.determinize()
@@ -37,18 +39,17 @@ def test_simple_nfa_determinization(simple_nfa):
     permuted_expected_states = dict()
 
     for state in dfa.states:
-        state_val = state.state
 
-        if state_val not in expected_states:
+        if state not in expected_states:
             # Reorder state and try again
-            permuted_state = (state_val[1], state_val[0])
+            permuted_state = (state[1], state[0])
             assert permuted_state in expected_states
 
             # Map the value from expected to the actual *state_val*
-            permuted_expected_states[permuted_state] = state_val
+            permuted_expected_states[permuted_state] = state
         else:
             # No reordering needed in this case
-            permuted_expected_states[state_val] = state_val
+            permuted_expected_states[state] = state
 
     # Test whether there are transitions present
     e_transitions = [
@@ -90,4 +91,4 @@ def test_simple_nfa_determinization(simple_nfa):
 
     for state in dfa.states:
         for symbol in dfa.alphabet.symbols:
-            assert len(dfa.get_transition_target(state.state, symbol)) == 1
+            assert len(dfa.get_transition_target(state, symbol)) == 1

@@ -1,4 +1,4 @@
-from typing import Tuple, List, Optional, Iterable, TypeVar
+from typing import Tuple, List, Optional, Iterable, TypeVar, Any, Dict
 
 T = TypeVar('T')
 S = TypeVar('S')
@@ -55,11 +55,20 @@ def number_to_bit_tuple(number: int,
     return tuple(reversed(bits))
 
 
-def carthesian_product(op0: Iterable[T], op1: Iterable[S]) -> List[Tuple[S, T]]:
-    product: List[Tuple[S, T]] = list()
+def carthesian_product(op0: Iterable[T], op1: Iterable[S]) -> List[Tuple[T, S]]:
+    product: List[Tuple[T, S]] = list()
 
     for a in op0:
         for b in op1:
             product.append((a, b))
 
     return product
+
+
+def transition_fn_size(fn: Dict[Any, Dict[Any, Iterable[Any]]]) -> int:
+    size = 0
+    for origin in fn:
+        for symbol in fn[origin]:
+            for dest in fn[origin][symbol]:
+                size += 1
+    return size
