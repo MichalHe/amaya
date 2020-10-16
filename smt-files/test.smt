@@ -1,0 +1,5 @@
+(set-info :category "industrial")
+(set-info :status unsat)
+(assert (not (exists ((?X Int)) (<= 1000 (+ ?X (* 2 ?Y))))))
+(check-sat)
+(exit)
