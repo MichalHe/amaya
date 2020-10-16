@@ -1,5 +1,5 @@
 from graphviz import Digraph
-from automatons import NFA, BoundAutomatonState
+from automatons import NFA
 from typing import Callable, Dict, Tuple, List, DefaultDict
 from collections import defaultdict
 
@@ -41,24 +41,24 @@ def convert_automaton_to_graphviz(nfa: NFA, node_naming_fn: Callable[[int], str]
             return str(index)
         node_naming_fn = naming_fn
 
-    state_node_names: Dict[BoundAutomatonState[int], str] = {}
+    state_node_names: Dict[int, str] = {}
 
     for index, state in enumerate(nfa.states):
         node_name = node_naming_fn(index)
         if state in nfa.final_states:
-            graph.node(node_name, str(state.state), shape='doublecircle')
+            graph.node(node_name, str(state), shape='doublecircle')
         else:
-            graph.node(node_name, str(state.state))
+            graph.node(node_name, str(state))
         state_node_names[state] = node_name
 
     for index, state in enumerate(nfa.initial_states):
-        initial_point_name = f'{state.state}@Start'
+        initial_point_name = f'{state}@Start'
         graph.node(initial_point_name, shape='point')
         graph.edge(initial_point_name, state_node_names[state])
 
     # TODO: Create method in NFA to get list of all transition tuples
     for origin_box in nfa.transition_fn:
-        target_states: DefaultDict[BoundAutomatonState[int], List[Tuple[int, ...]]] = defaultdict(list)
+        target_states: DefaultDict[int, List[Tuple[int, ...]]] = defaultdict(list)
         origin_node_name = state_node_names[origin_box]
 
         for symbol in nfa.transition_fn[origin_box]:
