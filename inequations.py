@@ -202,7 +202,7 @@ def build_dfa_from_inequality(ineq: Inequality) -> DFA:
     logger.info(f'Generated alphabet for automaton: {alphabet}')
 
     while work_queue:
-        currently_processed_state = work_queue.pop(0)
+        currently_processed_state = work_queue.pop()
         print(dfa.states)
         dfa.add_state(currently_processed_state)
 
@@ -240,7 +240,7 @@ def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType]:
     work_queue: List[int] = [ineq.absolute_part]
 
     while work_queue:
-        current_state = work_queue.pop(0)
+        current_state = work_queue.pop()
         nfa.add_state(current_state)
 
         for alphabet_symbol in alphabet.symbols:
