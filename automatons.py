@@ -76,7 +76,8 @@ class NFA(Generic[AutomatonState]):
     @staticmethod
     def __unite_transition_functions(f1: TransitionFn[AutomatonState], f2: TransitionFn[AutomatonState]):
 
-        transitions = TransitionFn[AutomatonState]()
+        # States are unique
+        transitions: TransitionFn[AutomatonState] = dict()
         for state in f1:
             transitions[state] = {}
             for transition_symbol in f1[state]:
@@ -86,7 +87,7 @@ class NFA(Generic[AutomatonState]):
             if state not in transitions:
                 transitions[state] = {}
             for transition_symbol in f2[state]:
-                transitions[state][transition_symbol] = transitions[state][transition_symbol].union(set(f2[state][transition_symbol]))
+                transitions[state][transition_symbol] = set(f2[state][transition_symbol])
         return transitions
 
     def update_transition_fn(self,
