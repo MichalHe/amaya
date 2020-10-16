@@ -1,4 +1,4 @@
-from typing import Tuple, List, Optional, Iterable, TypeVar, Any, Dict
+from typing import Tuple, List, Optional, Iterable, TypeVar, Any, Dict, Generator
 
 T = TypeVar('T')
 S = TypeVar('S')
@@ -72,3 +72,10 @@ def transition_fn_size(fn: Dict[Any, Dict[Any, Iterable[Any]]]) -> int:
             for dest in fn[origin][symbol]:
                 size += 1
     return size
+
+
+def iter_transition_fn(fn: Dict[S, Dict[Tuple[int, ...], S]]) -> Generator[Tuple[S, Tuple[int, ...], S], None, None]:
+    for o in fn:
+        for s in fn[o]:
+            for d in fn[o][s]:
+                yield (o, s, d)
