@@ -14,6 +14,7 @@ from typing import (
 from utils import (
     number_to_bit_tuple,
     carthesian_product,
+    copy_transition_fn,
 )
 
 from dataclasses import (
@@ -342,6 +343,18 @@ class NFA(Generic[AutomatonState]):
                 nfa.transition_fn[renamed_origin][symbol] = set(map(translate, destinations))
 
         return (state_cnt, nfa)
+
+    def complement(self) -> NFA:
+        result = NFA(
+            alphabet=self.alphabet,
+            automaton_type=self.automaton_type
+        )
+        result.states = set(self.states)
+        result.final_states = self.states.difference(self.final_states)
+        result.initial_states = set(self.states)
+        result.transition_fn = copy_transition_fn(self.transition_fn)
+
+        return result
 
 
 DFA = NFA
