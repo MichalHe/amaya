@@ -58,6 +58,21 @@ class LSBF_Alphabet():
             variable_names=tuple(ineq.variable_names)
         )
 
+    def new_with_variable_removed(self, removed_var: str) -> Optional[LSBF_Alphabet]:
+
+        new_variable_names = tuple(
+            filter(
+                lambda variable_name: removed_var != variable_name, self.variable_names))
+
+        if len(new_variable_names) == len(self.variable_names):
+            return None  # The variable name to be removed was not present in current variable list
+
+        new_symbols = tuple(
+            map(
+                number_to_bit_tuple, range(2**len(new_variable_names))))
+
+        return LSBF_Alphabet(symbols=new_symbols, variable_names=new_variable_names)
+
 
 @dataclass
 class NFA(Generic[AutomatonState]):
@@ -128,9 +143,6 @@ class NFA(Generic[AutomatonState]):
     def __create_projection_symbol_map(self, variable_name) -> Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol]:
         projection_map: Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol] = {}
         variable_position = self.__var_bit_position_in_alphabet_symbol(variable_name)
-        if not variable_position:
-            raise ValueError(f'Given variable name is not in alphabet: {variable_name}, available names: {self.alphabet.variable_names}')
-
         for symbol in self.alphabet.symbols:
             if variable_position == 0:
                 new_symbol = symbol[1:]
@@ -156,20 +168,17 @@ class NFA(Generic[AutomatonState]):
         return tuple(self.transition_fn[origin][via_symbol])
 
     def intersection(self, other: NFA[S]):
+        self_renamed_highest_state, self_renamed = self.rename_states()
+        _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
+
         resulting_nfa: NFA[Tuple[AutomatonState, S]] = NFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA
         )
 
-        # @TODO: First perform state renaming, and then execute the
-        # intersection on other automatons
-
-        # @Maybe: Pull the implementations of ops into functions that take NFA
-        # and return NFA without performing all kinds of renaming under the
-        # hood
-
         # Add all the initial states to the to-be-processed queue
-        work_queue = carthesian_product(self.initial_states, other.initial_states)
+        work_queue = carthesian_product(self_renamed.initial_states,
+                                        other_renamed.initial_states)
         for initial_state in work_queue:
             resulting_nfa.add_initial_state(initial_state)
 
@@ -181,12 +190,12 @@ class NFA(Generic[AutomatonState]):
             self_state, others_state = current_state
 
             # Check whether intersecti n state should be made final
-            if (self_state in self.final_states and others_state in other.final_states):
+            if (self_state in self_renamed.final_states and others_state in other_renamed.final_states):
                 resulting_nfa.add_final_state((self_state, others_state))
 
-            for symbol in self.alphabet.symbols:
-                self_targets = self.get_transition_target(self_state, symbol)
-                other_targets = other.get_transition_target(others_state, symbol)
+            for symbol in self_renamed.alphabet.symbols:
+                self_targets = self_renamed.get_transition_target(self_state, symbol)
+                other_targets = other_renamed.get_transition_target(others_state, symbol)
 
                 if self_targets is None or other_targets is None:
                     continue
@@ -259,24 +268,45 @@ class NFA(Generic[AutomatonState]):
 
         return determinized_automaton
 
-    def do_projection(self, variable_name: str):
-        work_queue = list(self.states)
+    def do_projection(self, variable_name: str) -> Optional[NFA]:
+        new_alphabet = self.alphabet.new_with_variable_removed(variable_name)
+        if new_alphabet is None:
+            return None
+
+        new_nfa = NFA(
+            alphabet=new_alphabet,
+            automaton_type=AutomatonType.NFA,
+        )
+
+        new_nfa.states = set(self.states)
+        new_nfa.initial_states = set(self.initial_states)
+        new_nfa.final_states = set(self.final_states)
+
+        work_queue = list(self.transition_fn.keys())
         projection_map = self.__create_projection_symbol_map(variable_name)
         while work_queue:
-            current_state = work_queue.pop(0)
+            current_state = work_queue.pop()
+
+            if current_state in self.transition_fn:
+                new_nfa.transition_fn[current_state] = {}
+
             out_transitions = self.transition_fn[current_state]  # Outwards transitions
             for alphabet_symbol in out_transitions:
                 # Remap alphabet_symbol to its projected counterpart
                 out_states = out_transitions[alphabet_symbol]
                 new_symbol = projection_map[alphabet_symbol]
-                out_transitions[new_symbol] = out_states
 
-                # Delete old mapping
-                out_transitions.pop(alphabet_symbol)
+                # Some alphabet symbols are mapped to same projection symbol,
+                # therefore we must check and do concat if needed instead of
+                # plain copy
+                if new_symbol in new_nfa.transition_fn[current_state]:
+                    new_nfa.transition_fn[current_state][new_symbol] = new_nfa.transition_fn[current_state][new_symbol].union(out_states)
+                else:
+                    new_nfa.transition_fn[current_state][new_symbol] = set(out_states)
+
+        return new_nfa
 
     def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
-        # import pdb
-        # pdb.set_trace()
         state_cnt = start_from
         nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
         self_id = id(self)
