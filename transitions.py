@@ -3,13 +3,21 @@ from typing import (
     Dict,
     Tuple,
     Union,
-    Mapping
+    Mapping,
+    Optional,
+    List,
+    Iterable,
+    Generator,
+
+    TypeVar
 )
 
 import functools
 
 Symbol = Tuple[Union[str, int], ...]
-State = Union[str, int]
+# State = Union[str, int]
+State = TypeVar('State')
+T = TypeVar('T')
 Transitions = Dict[State, Dict[State, Set[Symbol]]]
 
 
@@ -23,17 +31,20 @@ def symbols_intersect(symbol_a: Symbol, symbol_b: Symbol) -> bool:
     return True
 
 
-def get_transition_target(t: Transitions, origin: State, via: Symbol):
-    dest = []
+def get_transition_target(t: Transitions, origin: State, via: Symbol) -> Tuple[State, ...]:
+    dest: List[State] = []
+    if origin not in t:
+        return tuple()
+
     s = t[origin]
     for d in s:
         for sym in s[d]:
             if symbols_intersect(sym, via):
                 dest.append(d)
-    return dest
+    return tuple(dest)
 
 
-def make_transtions_copy(t: Transitions) -> Transitions:
+def make_transitions_copy(t: Transitions) -> Transitions:
     t_copy: Transitions = {}
     for s in t:
         t_copy[s] = {}
@@ -65,7 +76,7 @@ def insert_into_transition_fn(t: Transitions, origin: State, via: Symbol, dest: 
 
 
 def unite_transitions(t1: Transitions, t2: Transitions):
-    unified_t: Transitions = make_transtions_copy(t1)
+    unified_t: Transitions = make_transitions_copy(t1)
     update_transition_fn_with(unified_t, t2)
     return unified_t
 
@@ -74,7 +85,7 @@ def do_projection_on_symbol(pos: int, symbol: Symbol) -> Symbol:
     return symbol[:pos] + ('*', ) + symbol[pos + 1:]
 
 
-def make_projection(t1: Transitions, pos: int) -> Transitions:
+def do_projection(t1: Transitions, pos: int) -> Transitions:
     resulting_transitions: Transitions = {}
     symbol_projection_func = functools.partial(do_projection_on_symbol, pos)
     for origin in t1:
@@ -84,7 +95,7 @@ def make_projection(t1: Transitions, pos: int) -> Transitions:
     return resulting_transitions
 
 
-def translate_transition_fn_states(t: Transitions, translation: Mapping[State, State]) -> Transitions:
+def translate_transition_fn_states(t: Transitions[State], translation: Mapping[State, T]) -> Transitions[T]:
     translated_transitions: Transitions = {}
     for origin in t:
         translated_origin = translation[origin]
@@ -94,3 +105,17 @@ def translate_transition_fn_states(t: Transitions, translation: Mapping[State, S
             translated_transitions[translated_origin][translated_dest] = set(t[origin][dest])
 
     return translated_transitions
+
+
+def calculate_variable_bit_position(variable_names: Iterable[str], var: str) -> Optional[int]:
+    for pos, alphabet_var_name in enumerate(variable_names):
+        if alphabet_var_name == var:
+            return pos
+    return None
+
+
+def iter_transition_fn(t: Transitions[State]) -> Generator[Tuple[State, Symbol, State], None, None]:
+    for origin in t:
+        for dest in t[origin]:
+            for sym in t[origin][dest]:
+                yield (origin, sym, dest)
