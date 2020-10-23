@@ -61,7 +61,7 @@ def insert_into_transition_fn(t: Transitions, origin: State, via: Symbol, dest: 
     if dest not in t[origin]:
         t[origin][dest] = set()
 
-    t[origin][dest].update(via)
+    t[origin][dest].add(via)
 
 
 def unite_transitions(t1: Transitions, t2: Transitions):
@@ -71,7 +71,7 @@ def unite_transitions(t1: Transitions, t2: Transitions):
 
 
 def do_projection_on_symbol(pos: int, symbol: Symbol) -> Symbol:
-    return symbol[:pos] + '*' + symbol[pos + 1:]
+    return symbol[:pos] + ('*', ) + symbol[pos + 1:]
 
 
 def make_projection(t1: Transitions, pos: int) -> Transitions:
@@ -81,12 +81,13 @@ def make_projection(t1: Transitions, pos: int) -> Transitions:
         resulting_transitions[origin] = {}
         for dest in t1[origin]:
             resulting_transitions[origin][dest] = set(map(symbol_projection_func, t1[origin][dest]))
+    return resulting_transitions
 
 
-def translate_transition_fn_states(t: Transitions, traslation: Mapping[Symbol, Symboll]) -> Transitions:
+def translate_transition_fn_states(t: Transitions, translation: Mapping[State, State]) -> Transitions:
     translated_transitions: Transitions = {}
     for origin in t:
-        translated_origin = traslation[origin]
+        translated_origin = translation[origin]
         translated_transitions[translated_origin] = {}
         for dest in t[origin]:
             translated_dest = translation[dest]
