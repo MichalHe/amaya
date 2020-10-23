@@ -6,7 +6,6 @@ from typing import (
     Any,
     Dict,
 )
-from utils import transition_fn_size
 
 
 @pytest.fixture
@@ -39,15 +38,12 @@ def test_state_renaming(nfa):
     assert nfa.automaton_type == AutomatonType.NFA
     assert len(state_names_translat) == len(new_nfa.states)
 
-    original_transition_count = 0
     for original_origin in nfa.states:
         new_origin = state_names_translat[original_origin]
         if original_origin not in nfa.transition_fn:
             continue
-        for symbol in nfa.transition_fn[original_origin]:
-            for original_dest in nfa.transition_fn[original_origin][symbol]:
-                new_dest = state_names_translat[original_dest]
-                assert new_dest in new_nfa.transition_fn[new_origin][symbol]
-                original_transition_count += 1
 
-    assert transition_fn_size(new_nfa.transition_fn) == original_transition_count
+        for original_dest in nfa.transition_fn[original_origin]:
+            new_dest = state_names_translat[original_dest]
+            assert new_origin in new_nfa.transition_fn
+            assert new_dest in new_nfa.transition_fn[new_origin]

@@ -2,7 +2,8 @@ import pytest
 from automatons import NFA
 from inequations_data import Inequality
 from inequations import build_nfa_from_inequality
-from utils import transition_fn_size, iter_transition_fn
+from utils import transition_fn_size
+from transitions import iter_transition_fn
 from log import logger
 from typing import (
     Dict,
@@ -26,8 +27,7 @@ def nfa2() -> NFA:
     ineq = Inequality(
         variable_names=['x', 'y'],
         variable_coeficients=[3, -1],
-        absolute_part=3,
-        operation='<='
+        absolute_part=3, operation='<='
     )
     return build_nfa_from_inequality(ineq)
 
@@ -71,7 +71,13 @@ def test_automaton_union(nfa1, nfa2):
     # Verify that both transition fns are indeed present in the united
     # automaton
     for o, s, d in iter_transition_fn(nfa1.transition_fn):
-        assert nfa1_state_translation[d] in united_automaton.transition_fn[nfa1_state_translation[o]][s]
+        translated_origin = nfa1_state_translation[o]
+        translated_dest = nfa1_state_translation[d]
+
+        assert s in united_automaton.transition_fn[translated_origin][translated_dest]
 
     for o, s, d in iter_transition_fn(nfa2.transition_fn):
-        assert nfa2_state_translation[d] in united_automaton.transition_fn[nfa2_state_translation[o]][s]
+        translated_origin = nfa2_state_translation[o]
+        translated_dest = nfa2_state_translation[d]
+
+        assert s in united_automaton.transition_fn[translated_origin][translated_dest]
