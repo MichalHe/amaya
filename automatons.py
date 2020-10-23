@@ -9,6 +9,7 @@ from typing import (
     Generic,
     Optional,
     Callable,
+    Union
 )
 
 from utils import (
@@ -29,7 +30,7 @@ from inequations_data import (
 AutomatonState = TypeVar('AutomatonState')
 S = TypeVar('S')
 
-LSBF_AlphabetSymbol = Tuple[int, ...]
+LSBF_AlphabetSymbol = Tuple[Union[int, str], ...]
 
 TransitionFn = Dict[AutomatonState,
                     Dict[
@@ -48,7 +49,11 @@ class LSBF_Alphabet():
 
     @staticmethod
     def from_inequation(ineq: Inequality) -> LSBF_Alphabet:
-        letter_size = len(ineq.variable_names)
+        return LSBF_Alphabet.from_variable_names(tuple(ineq.variable_names))
+
+    @staticmethod
+    def from_variable_names(variable_names: Tuple[str]) -> LSBF_Alphabet:
+        letter_size = len(variable_names)
         symbols = tuple(map(
             lambda i: number_to_bit_tuple(i, tuple_size=letter_size, pad=0),
             range(2**letter_size)
@@ -56,7 +61,7 @@ class LSBF_Alphabet():
 
         return LSBF_Alphabet(
             symbols=symbols,
-            variable_names=tuple(ineq.variable_names)
+            variable_names=variable_names
         )
 
     def new_with_variable_removed(self, removed_var: str) -> Optional[LSBF_Alphabet]:
@@ -73,6 +78,30 @@ class LSBF_Alphabet():
                 number_to_bit_tuple, range(2**len(new_variable_names))))
 
         return LSBF_Alphabet(symbols=new_symbols, variable_names=new_variable_names)
+
+    def get_downcaster_from_higher_dim(self, higher_alphabet: LSBF_Alphabet) -> Callable[[LSBF_AlphabetSymbol], LSBF_AlphabetSymbol]:
+        # 1) compute indices for where the current variables lie within the old
+        # symbols
+        variable_indices = []
+
+        processed_self_variables = 0
+        for i, variable_name in enumerate(higher_alphabet.variable_names):
+            if variable_name == self.variable_names[processed_self_variables]:
+                variable_indices.append(i)
+                processed_self_variables += 1
+
+            if processed_self_variables == len(self.variable_names):
+                break
+
+        # 2) generate function accepts a bigger symbol, loops over it, and just
+        # selects the needed variables
+
+        def downcaster(higher_symbol: LSBF_AlphabetSymbol) -> LSBF_AlphabetSymbol:
+            downcasted_letter = []
+            for i in variable_indices:
+                downcasted_letter.append(higher_symbol[i])
+            return tuple(downcasted_letter)
+        return downcaster
 
 
 @dataclass

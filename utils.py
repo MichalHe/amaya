@@ -79,3 +79,12 @@ def iter_transition_fn(fn: Dict[S, Dict[Tuple[int, ...], S]]) -> Generator[Tuple
         for s in fn[o]:
             for d in fn[o][s]:
                 yield (o, s, d)
+
+
+def copy_transition_fn(fn: Dict[S, Dict[Tuple[int, ...], S]]) -> Dict[S, Dict[Tuple[int, ...], S]]:
+    new_fn: Dict[S, Dict[Tuple[int, ...], S]] = {}
+    for src in fn:
+        new_fn[src] = {}
+        for sym in fn[src]:
+            new_fn[src][sym] = set(fn[src][sym])
+    return new_fn
