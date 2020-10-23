@@ -1,7 +1,8 @@
-from typing import Tuple, List, Optional, Iterable, TypeVar, Any, Dict, Generator
+from typing import Tuple, List, Optional, Iterable, TypeVar, Any, Dict, Generator, Callable, Set
 
 T = TypeVar('T')
 S = TypeVar('S')
+DebugStateTranslationFn = Callable[[S, int], None]
 
 
 def vector_dot(vec1, vec2) -> int:
@@ -74,17 +75,33 @@ def transition_fn_size(fn: Dict[Any, Dict[Any, Iterable[Any]]]) -> int:
     return size
 
 
-def iter_transition_fn(fn: Dict[S, Dict[Tuple[int, ...], S]]) -> Generator[Tuple[S, Tuple[int, ...], S], None, None]:
+def iter_transition_fn(fn: Dict[S, Dict[Tuple[int, ...], Iterable[S]]]) -> Generator[Tuple[S, Tuple[int, ...], S], None, None]:
     for o in fn:
         for s in fn[o]:
             for d in fn[o][s]:
                 yield (o, s, d)
 
 
-def copy_transition_fn(fn: Dict[S, Dict[Tuple[int, ...], S]]) -> Dict[S, Dict[Tuple[int, ...], S]]:
-    new_fn: Dict[S, Dict[Tuple[int, ...], S]] = {}
+def copy_transition_fn(fn: Dict[S, Dict[Tuple[int, ...], Set[S]]]) -> Dict[S, Dict[Tuple[int, ...], Set[S]]]:
+    new_fn: Dict[S, Dict[Tuple[int, ...], Set[S]]] = {}
     for src in fn:
         new_fn[src] = {}
         for sym in fn[src]:
             new_fn[src][sym] = set(fn[src][sym])
     return new_fn
+
+
+def create_enumeration_state_translation_map(states: Iterable[S],
+                                             debug_rename_function: Optional[DebugStateTranslationFn] = None,
+                                             start_from=0
+                                             ) -> Tuple[int, Dict[S, int]]:
+    state_cnt = start_from
+    translation: Dict[S, int] = {}
+    for state in states:
+        new_state_name = state_cnt
+        if (debug_rename_function is not None):
+            debug_rename_function(state, new_state_name)
+
+        translation[state] = new_state_name
+        state_cnt += 1
+    return (state_cnt, translation)
