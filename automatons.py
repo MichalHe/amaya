@@ -225,6 +225,8 @@ class NFA(Generic[AutomatonState]):
 
     def determinize(self):
         '''Performs NFA -> DFA using the powerset construction'''
+        self._rename_own_states()
+
         working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self.initial_states)]
         _final_states_raw = self.final_states
 
@@ -260,6 +262,23 @@ class NFA(Generic[AutomatonState]):
                 determinized_automaton.update_transition_fn(unexplored_dfa_state, symbol, dfa_state)
 
         return determinized_automaton
+
+    def _rename_own_states(self):
+        debug_fn: Optional[functools.partial[None]]
+        if self._debug_state_rename is not None:
+            debug_fn = functools.partial(self._debug_state_rename, id(self))
+        else:
+            debug_fn = None
+
+        hightest_state, state_name_translation = create_enumeration_state_translation_map(self.states, debug_fn, start_from=0)
+
+        def translate(state: AutomatonState) -> int:
+            return state_name_translation[state]
+
+        self.states = set(map(translate, self.states))
+        self.initial_states = set(map(translate, self.initial_states))
+        self.final_states = set(map(translate, self.final_states))
+        self.transition_fn = translate_transition_fn_states(self.transition_fn, state_name_translation)
 
     def do_projection(self, variable_name: str) -> Optional[NFA]:
         new_alphabet = self.alphabet.new_with_variable_removed(variable_name)
