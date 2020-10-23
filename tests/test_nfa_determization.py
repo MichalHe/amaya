@@ -1,6 +1,7 @@
 import pytest
 from inequations_data import Inequality
 from inequations import build_nfa_from_inequality
+from typing import Union
 from automatons import (
     AutomatonType,
     NFA
@@ -19,37 +20,49 @@ def simple_nfa() -> NFA:
     return build_nfa_from_inequality(ineq)
 
 
-def test_simple_nfa_determinization(simple_nfa):
+def translate_transitions(transitions, translate):  # translate is function
+    translated = []
+    for transition in transitions:
+        source, symbol, dest = transition
+        source_translated = tuple(sorted(map(translate, source)))
+        dest_translated = tuple(sorted(map(translate, dest)))
+
+        translated.append((source_translated, symbol, dest_translated))
+    return translated
+
+
+def test_simple_nfa_determinization(simple_nfa: NFA[Union[int, str]]):
     assert simple_nfa.automaton_type == AutomatonType.NFA
+
+    trans_map: Dict[Union[int, str], int] = {}
+    def state_rename_occured(automaton_id: int, old_name: Union[int, str], new_name: int):
+        trans_map[old_name] = new_name
+
+    simple_nfa._debug_state_rename = state_rename_occured
+
+    print('Translation map: ', trans_map)
 
     dfa = simple_nfa.determinize()
     assert dfa
+    for state in dfa.states:
+        print(state)
     assert len(dfa.states) == 8
     assert len(dfa.final_states) == 4
     assert len(dfa.initial_states) == 1
     assert dfa.automaton_type == AutomatonType.DFA
 
-    expected_states = [
+
+    def translate(state: Union[str, int]) -> int:
+        return trans_map[state]
+
+    expected_states_before_remap = [
         (2, ), (0, ), (-1, ), (-2, ),
         (1, 'FINAL'), (0, 'FINAL'), (-1, 'FINAL'), (-2, 'FINAL')
     ]
 
-    # @TODO @Hack: This is needed because there is no order quaranteed on the
-    # name of the meta state
-    permuted_expected_states = dict()
-
-    for state in dfa.states:
-
-        if state not in expected_states:
-            # Reorder state and try again
-            permuted_state = (state[1], state[0])
-            assert permuted_state in expected_states
-
-            # Map the value from expected to the actual *state_val*
-            permuted_expected_states[permuted_state] = state
-        else:
-            # No reordering needed in this case
-            permuted_expected_states[state] = state
+    expected_states = []
+    for state in expected_states_before_remap:
+        expected_states.append(tuple(map(translate, state)))
 
     # Test whether there are transitions present
     e_transitions = [
@@ -72,18 +85,17 @@ def test_simple_nfa_determinization(simple_nfa):
         ((-1, ), (1, 0), (0, )),  # Test existing transition with different symbol
     ]
 
-    for transition in e_transitions:
+    e_transitions_translated = translate_transitions(e_transitions, translate)
+    ne_transitions_translated = translate_transitions(ne_transitions, translate)
+
+
+    for transition in e_transitions_translated:
         origin, symbol, dest = transition
         # perform state name correction
-        origin = permuted_expected_states[origin]
-        dest = permuted_expected_states[dest]
         assert dest in dfa.get_transition_target(origin, symbol)
 
     for transition in ne_transitions:
         origin, symbol, dest = transition
-        # perform state name correction
-        origin = permuted_expected_states[origin]
-        dest = permuted_expected_states[dest]
         assert dfa.get_transition_target(origin, symbol) is None or dest not in dfa.get_transition_target(origin, symbol)
 
     # Test whether the automaton has some target state for every symbol in
