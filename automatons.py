@@ -15,7 +15,7 @@ from typing import (
 from utils import (
     number_to_bit_tuple,
     carthesian_product,
-    copy_transition_fn,
+    create_enumeration_state_translation_map,
 )
 
 from dataclasses import (
@@ -26,6 +26,19 @@ from dataclasses import (
 from inequations_data import (
     Inequality
 )
+
+from transitions import (
+    Transitions,
+    insert_into_transition_fn,
+    get_transition_target,
+    unite_transitions,
+    translate_transition_fn_states,
+    do_projection,
+    calculate_variable_bit_position,
+    make_transitions_copy
+)
+import functools
+
 
 AutomatonState = TypeVar('AutomatonState')
 S = TypeVar('S')
@@ -52,7 +65,7 @@ class LSBF_Alphabet():
         return LSBF_Alphabet.from_variable_names(tuple(ineq.variable_names))
 
     @staticmethod
-    def from_variable_names(variable_names: Tuple[str]) -> LSBF_Alphabet:
+    def from_variable_names(variable_names: Tuple[str, ...]) -> LSBF_Alphabet:
         letter_size = len(variable_names)
         symbols = tuple(map(
             lambda i: number_to_bit_tuple(i, tuple_size=letter_size, pad=0),
@@ -111,47 +124,19 @@ class NFA(Generic[AutomatonState]):
     initial_states: Set[AutomatonState] = field(default_factory=set)
     final_states:   Set[AutomatonState] = field(default_factory=set)
     states:         Set[AutomatonState] = field(default_factory=set)
-    transition_fn:  TransitionFn[AutomatonState] = field(default_factory=dict)
+    transition_fn:  Transitions[AutomatonState] = field(default_factory=dict)
 
     # Debug handle to listen to any state renaming happening during
     # intersecion/union; takes (automaton_id, old_state(int, str),
     # new_state(int))
     _debug_state_rename: Optional[Callable[[int, AutomatonState, int], None]] = None
 
-    @staticmethod
-    def __unite_transition_functions(f1: TransitionFn[AutomatonState], f2: TransitionFn[AutomatonState]):
-        # @Mark: Refactor to Q -> (Q -> [S])
-        # @Mark: RefactorExists
-
-        # States are unique
-        transitions: TransitionFn[AutomatonState] = dict()
-        for state in f1:
-            transitions[state] = {}
-            for transition_symbol in f1[state]:
-                # Copy the tuple
-                transitions[state][transition_symbol] = set(f1[state][transition_symbol])
-        for state in f2:
-            if state not in transitions:
-                transitions[state] = {}
-            for transition_symbol in f2[state]:
-                transitions[state][transition_symbol] = set(f2[state][transition_symbol])
-        return transitions
-
     def update_transition_fn(self,
                              from_state: AutomatonState,
                              via_symbol: LSBF_AlphabetSymbol,
                              to_state: AutomatonState
                              ):
-        # @Mark: Refactor to Q -> (Q -> [S])
-        # @RefactorExists
-
-        if from_state not in self.transition_fn:
-            self.transition_fn[from_state] = {}
-
-        if via_symbol not in self.transition_fn[from_state]:
-            self.transition_fn[from_state][via_symbol] = set((to_state, ))
-        else:
-            self.transition_fn[from_state][via_symbol].add(to_state)
+        insert_into_transition_fn(self.transition_fn, from_state, via_symbol, to_state)
 
     def add_state(self, state: AutomatonState):
         self.states.add(state)
@@ -168,49 +153,17 @@ class NFA(Generic[AutomatonState]):
     def has_final_state_with_value(self, value: AutomatonState) -> bool:
         return value in self.final_states
 
-    def __var_bit_position_in_alphabet_symbol(self, variable_name) -> Optional[int]:
-        for pos, alphabet_var_name in enumerate(self.alphabet.variable_names):
-            if alphabet_var_name == variable_name:
-                return pos
-        return None
-
-    def __create_projection_symbol_map(self, variable_name) -> Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol]:
-        projection_map: Dict[LSBF_AlphabetSymbol, LSBF_AlphabetSymbol] = {}
-        variable_position = self.__var_bit_position_in_alphabet_symbol(variable_name)
-        for symbol in self.alphabet.symbols:
-            if variable_position == 0:
-                new_symbol = symbol[1:]
-            elif variable_position == len(symbol) - 1:
-                new_symbol = symbol[:-1]
-            else:
-                new_symbol = symbol[0:variable_position] + symbol[variable_position + 1:]
-
-            projection_map[symbol] = new_symbol
-
-        return projection_map
-
     def get_transition_target(self,
                               origin: AutomatonState,
                               via_symbol: LSBF_AlphabetSymbol
-                              ) -> Optional[Tuple[AutomatonState, ...]]:
-        # @Mark: Refactor to Q -> (Q -> [S])
-        # @RefactorExists
-
-        if origin not in self.transition_fn:
-            return None
-        if via_symbol not in self.transition_fn[origin]:
-            return None
-
-        return tuple(self.transition_fn[origin][via_symbol])
+                              ) -> Tuple[AutomatonState, ...]:
+        return get_transition_target(self.transition_fn, origin, via_symbol)
 
     def intersection(self, other: NFA[S]):
-        # @Mark: Refactor to Q -> (Q -> [S])
-        # @Deps: get_transition_target [OK]
-
         self_renamed_highest_state, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
 
-        resulting_nfa: NFA[Tuple[AutomatonState, S]] = NFA(
+        resulting_nfa: NFA[Tuple[int, int]] = NFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA
         )
@@ -222,7 +175,7 @@ class NFA(Generic[AutomatonState]):
             resulting_nfa.add_initial_state(initial_state)
 
         while work_queue:
-            current_state: Tuple[AutomatonState, S] = work_queue.pop(0)
+            current_state: Tuple[int, int] = work_queue.pop(0)
             resulting_nfa.add_state(current_state)
 
             # States in work_queue are boxed
@@ -249,16 +202,15 @@ class NFA(Generic[AutomatonState]):
         return resulting_nfa
 
     def union(self, other: NFA[S]) -> NFA[int]:
-        # @Mark: Refactor to Q -> (Q -> [S])
-        # @Deps: UniteTransitionFunctions [OK]
         if self.alphabet != other.alphabet:
+            # TODO: Adress this
             raise NotImplementedError('Union of automatons with different alphabets is not implemented')
 
         latest_state_value, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=latest_state_value)
 
         states = self_renamed.states.union(other_renamed.states)
-        transitions = NFA.__unite_transition_functions(self_renamed.transition_fn, other_renamed.transition_fn)
+        transitions = unite_transitions(self_renamed.transition_fn, other_renamed.transition_fn)
         initial_states = self_renamed.initial_states.union(other_renamed.initial_states)
         final_states = self_renamed.final_states.union(other_renamed.final_states)
 
@@ -272,8 +224,6 @@ class NFA(Generic[AutomatonState]):
         )
 
     def determinize(self):
-        # @Mark: Refactor to Q -> (Q -> [S])
-        # @Deps: get_transition_target
         '''Performs NFA -> DFA using the powerset construction'''
         working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self.initial_states)]
         _final_states_raw = self.final_states
@@ -301,7 +251,7 @@ class NFA(Generic[AutomatonState]):
                     if out_states:
                         reachable_states += list(out_states)
 
-                dfa_state: DFA_AutomatonState = tuple(set(reachable_states))
+                dfa_state: DFA_AutomatonState = tuple(set(sorted(reachable_states)))
 
                 if dfa_state and not determinized_automaton.has_state_with_value(dfa_state):
                     if dfa_state not in working_queue:
@@ -312,14 +262,11 @@ class NFA(Generic[AutomatonState]):
         return determinized_automaton
 
     def do_projection(self, variable_name: str) -> Optional[NFA]:
-        # @Mark: Refactor to Q -> (Q -> [S])
-        # @Deps: CreateProjectionMap [OK]
-
         new_alphabet = self.alphabet.new_with_variable_removed(variable_name)
         if new_alphabet is None:
             return None
 
-        new_nfa = NFA(
+        new_nfa: NFA[AutomatonState] = NFA(
             alphabet=new_alphabet,
             automaton_type=AutomatonType.NFA,
         )
@@ -328,78 +275,43 @@ class NFA(Generic[AutomatonState]):
         new_nfa.initial_states = set(self.initial_states)
         new_nfa.final_states = set(self.final_states)
 
-        work_queue = list(self.transition_fn.keys())
-        projection_map = self.__create_projection_symbol_map(variable_name)
-        while work_queue:
-            current_state = work_queue.pop()
-
-            if current_state in self.transition_fn:
-                new_nfa.transition_fn[current_state] = {}
-
-            out_transitions = self.transition_fn[current_state]  # Outwards transitions
-            for alphabet_symbol in out_transitions:
-                # Remap alphabet_symbol to its projected counterpart
-                out_states = out_transitions[alphabet_symbol]
-                new_symbol = projection_map[alphabet_symbol]
-
-                # Some alphabet symbols are mapped to same projection symbol,
-                # therefore we must check and do concat if needed instead of
-                # plain copy
-                if new_symbol in new_nfa.transition_fn[current_state]:
-                    new_nfa.transition_fn[current_state][new_symbol] = new_nfa.transition_fn[current_state][new_symbol].union(out_states)
-                else:
-                    new_nfa.transition_fn[current_state][new_symbol] = set(out_states)
+        bit_pos = calculate_variable_bit_position(self.alphabet.variable_names, variable_name)
+        if bit_pos is None:
+            raise ValueError(f'Could not find variable_name "{variable_name}" in current alphabet {self.alphabet}')
+        new_nfa.transition_fn = do_projection(self.transition_fn, bit_pos)
 
         return new_nfa
 
     def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
-        # @Mark: Refactor to Q -> (Q -> [S])
-        # @Deps: Directly iterates over states - [OK] -- translate_transition_fn_states
-        state_cnt = start_from
         nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
-        self_id = id(self)
 
-        state_name_translation: Dict[AutomatonState, int] = dict()
+        debug_fn: Optional[functools.partial[None]]
+        if self._debug_state_rename is not None:
+            debug_fn = functools.partial(self._debug_state_rename, id(self))
+        else:
+            debug_fn = None
 
-        for state in self.states:
-            new_state_name = state_cnt
-            if (self._debug_state_rename is not None):
-                self._debug_state_rename(self_id, state, new_state_name)
+        hightest_state, state_name_translation = create_enumeration_state_translation_map(self.states, debug_fn, start_from=start_from)
 
-            state_name_translation[state] = new_state_name
-            state_cnt += 1
+        def translate(state: AutomatonState) -> int:
+            return state_name_translation[state]
 
-            nfa.add_state(new_state_name)
+        nfa.states.update(map(translate, self.states))
+        nfa.initial_states.update(map(translate, self.initial_states))
+        nfa.final_states.update(map(translate, self.final_states))
+        nfa.transition_fn = translate_transition_fn_states(self.transition_fn, state_name_translation)
 
-        def translate(old_state_name: AutomatonState) -> int:
-            return state_name_translation[old_state_name]
-
-        for initial_state in self.initial_states:
-            nfa.add_initial_state(translate(initial_state))
-
-        for final_state in self.final_states:
-            nfa.add_final_state(translate(final_state))
-
-        # Perform translation of transition function
-        for origin in self.transition_fn:
-            state_exits = self.transition_fn[origin]
-            renamed_origin = translate(origin)
-            for symbol, destinations in state_exits.items():
-                if renamed_origin not in nfa.transition_fn:
-                    nfa.transition_fn[renamed_origin] = dict()
-                nfa.transition_fn[renamed_origin][symbol] = set(map(translate, destinations))
-
-        return (state_cnt, nfa)
+        return (hightest_state, nfa)
 
     def complement(self) -> NFA:
-        result = NFA(
+        result: NFA[AutomatonState] = NFA(
             alphabet=self.alphabet,
             automaton_type=self.automaton_type
         )
         result.states = set(self.states)
         result.final_states = self.states.difference(self.final_states)
         result.initial_states = set(self.states)
-        result.transition_fn = copy_transition_fn(self.transition_fn)
+        result.transition_fn = make_transitions_copy(self.transition_fn)
 
         return result
 
