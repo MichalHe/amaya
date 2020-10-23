@@ -91,6 +91,8 @@ class NFA(Generic[AutomatonState]):
 
     @staticmethod
     def __unite_transition_functions(f1: TransitionFn[AutomatonState], f2: TransitionFn[AutomatonState]):
+        # @Mark: Refactor to Q -> (Q -> [S])
+        # @Mark: RefactorExists
 
         # States are unique
         transitions: TransitionFn[AutomatonState] = dict()
@@ -111,6 +113,8 @@ class NFA(Generic[AutomatonState]):
                              via_symbol: LSBF_AlphabetSymbol,
                              to_state: AutomatonState
                              ):
+        # @Mark: Refactor to Q -> (Q -> [S])
+        # @RefactorExists
 
         if from_state not in self.transition_fn:
             self.transition_fn[from_state] = {}
@@ -160,6 +164,8 @@ class NFA(Generic[AutomatonState]):
                               origin: AutomatonState,
                               via_symbol: LSBF_AlphabetSymbol
                               ) -> Optional[Tuple[AutomatonState, ...]]:
+        # @Mark: Refactor to Q -> (Q -> [S])
+        # @RefactorExists
 
         if origin not in self.transition_fn:
             return None
@@ -169,6 +175,9 @@ class NFA(Generic[AutomatonState]):
         return tuple(self.transition_fn[origin][via_symbol])
 
     def intersection(self, other: NFA[S]):
+        # @Mark: Refactor to Q -> (Q -> [S])
+        # @Deps: get_transition_target [OK]
+
         self_renamed_highest_state, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
 
@@ -211,6 +220,8 @@ class NFA(Generic[AutomatonState]):
         return resulting_nfa
 
     def union(self, other: NFA[S]) -> NFA[int]:
+        # @Mark: Refactor to Q -> (Q -> [S])
+        # @Deps: UniteTransitionFunctions [OK]
         if self.alphabet != other.alphabet:
             raise NotImplementedError('Union of automatons with different alphabets is not implemented')
 
@@ -232,6 +243,8 @@ class NFA(Generic[AutomatonState]):
         )
 
     def determinize(self):
+        # @Mark: Refactor to Q -> (Q -> [S])
+        # @Deps: get_transition_target
         '''Performs NFA -> DFA using the powerset construction'''
         working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self.initial_states)]
         _final_states_raw = self.final_states
@@ -270,6 +283,9 @@ class NFA(Generic[AutomatonState]):
         return determinized_automaton
 
     def do_projection(self, variable_name: str) -> Optional[NFA]:
+        # @Mark: Refactor to Q -> (Q -> [S])
+        # @Deps: CreateProjectionMap [OK]
+
         new_alphabet = self.alphabet.new_with_variable_removed(variable_name)
         if new_alphabet is None:
             return None
@@ -308,6 +324,8 @@ class NFA(Generic[AutomatonState]):
         return new_nfa
 
     def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
+        # @Mark: Refactor to Q -> (Q -> [S])
+        # @Deps: Directly iterates over states - [OK] -- translate_transition_fn_states
         state_cnt = start_from
         nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
         self_id = id(self)
