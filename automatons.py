@@ -35,7 +35,9 @@ from transitions import (
     translate_transition_fn_states,
     do_projection,
     calculate_variable_bit_position,
-    make_transitions_copy
+    make_transitions_copy,
+    unite_alphabets,
+    extend_transitions_to_new_alphabet_symbols
 )
 import functools
 
@@ -203,8 +205,13 @@ class NFA(Generic[AutomatonState]):
 
     def union(self, other: NFA[S]) -> NFA[int]:
         if self.alphabet != other.alphabet:
-            # TODO: Adress this
-            raise NotImplementedError('Union of automatons with different alphabets is not implemented')
+            # Perform alphabet union
+            unified_variable_names = unite_alphabets(self.alphabet.variable_names, other.alphabet.variable_names)
+            self.transition_fn = extend_transitions_to_new_alphabet_symbols(self.alphabet.variable_names, unified_variable_names, self.transition_fn)
+            other.transition_fn = extend_transitions_to_new_alphabet_symbols(other.alphabet.variable_names, unified_variable_names, other.transition_fn)
+
+            self.alphabet = LSBF_Alphabet.from_variable_names(unified_variable_names)
+            other.alphabet = self.alphabet
 
         latest_state_value, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=latest_state_value)

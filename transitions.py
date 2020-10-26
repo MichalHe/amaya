@@ -19,6 +19,66 @@ Symbol = Tuple[Union[str, int], ...]
 State = TypeVar('State')
 T = TypeVar('T')
 Transitions = Dict[State, Dict[State, Set[Symbol]]]
+VariableNames = List[str]
+
+# Create united alphabet
+# Function for extending to new alphabet
+# already implemented unite_transitions
+
+
+def unite_alphabets(alphabet1: VariableNames, alphabet2: VariableNames) -> VariableNames:
+    return list(sorted(set(alphabet1 + alphabet2)))
+
+
+def get_indices_of_missing_variables(old_variables: VariableNames, new_variables: VariableNames) -> List[int]:
+    missing_variables_indices: List[int] = []
+
+    old_variables_i = 0
+    has_more_new_variables = False
+    last_examined_new_variable: int = None
+    for i, nv in enumerate(new_variables):
+        if not nv == old_variables[old_variables_i]:
+            missing_variables_indices.append(i)
+        else:
+            old_variables_i += 1
+
+        if old_variables_i >= len(old_variables):
+            has_more_new_variables = True
+            last_examined_new_variable = i
+            break
+
+    if has_more_new_variables:
+        for i in range(last_examined_new_variable + 1, len(new_variables)):
+            missing_variables_indices.append(i)
+
+    return missing_variables_indices
+
+
+def extend_symbol_on_index(symbol: Tuple[int, ...], missing_index: int) -> Tuple[int]:
+    if missing_index >= len(symbol):
+        return symbol + ('*', )
+    elif missing_index == 0:
+        return ('*', ) + symbol
+    else:
+        return symbol[:missing_index] + ('*', ) + symbol[missing_index:]
+
+
+def extend_symbol_with_missing_indices(symbol: Tuple[int, ...], missing_indices: List[int]):
+    patched_symbol = symbol
+    for missing_index in missing_indices:
+        patched_symbol = extend_symbol_on_index(patched_symbol, missing_index)
+    return patched_symbol
+
+
+def extend_transitions_to_new_alphabet_symbols(old_variables: VariableNames, new_variables: VariableNames, t: Transitions) -> Transitions:
+    missing_indices = get_indices_of_missing_variables(old_variables, new_variables)
+    extended_transitions = make_transitions_copy(t)
+
+    for origin in t:
+        for dest in t[origin]:
+            extended_transitions[origin][dest] = set(map(lambda old_symbol: extend_symbol_with_missing_indices(old_symbol, missing_indices), t[origin][dest]))
+
+    return extended_transitions
 
 
 def symbols_intersect(symbol_a: Symbol, symbol_b: Symbol) -> bool:
