@@ -1,7 +1,6 @@
 from graphviz import Digraph
 from automatons import NFA
-from typing import Callable, Dict, Tuple, List, DefaultDict
-from collections import defaultdict
+from typing import Callable, Dict, Tuple, List
 
 
 def compute_html_label_for_symbols(variable_names: List[str], symbols: List[Tuple[int, ...]]):
@@ -56,21 +55,18 @@ def convert_automaton_to_graphviz(nfa: NFA, node_naming_fn: Callable[[int], str]
         graph.node(initial_point_name, shape='point')
         graph.edge(initial_point_name, state_node_names[state])
 
-    # TODO: Create method in NFA to get list of all transition tuples
-    for origin_box in nfa.transition_fn:
-        target_states: DefaultDict[int, List[Tuple[int, ...]]] = defaultdict(list)
-        origin_node_name = state_node_names[origin_box]
-
-        for symbol in nfa.transition_fn[origin_box]:
-            for destination_box in nfa.transition_fn[origin_box][symbol]:
-                target_states[destination_box].append(symbol)
-
-        for destination_state_box in target_states:
-            dest_node_name = state_node_names[destination_state_box]
-            # print(f'Creating transition from {origin_box} to {destination_state_box} via {target_states[destination_state_box]}')
+    for origin in nfa.transition_fn:
+        origin_node_name = state_node_names[origin]
+        for destination in nfa.transition_fn[origin]:
+            destination_node_name = state_node_names[destination]
+            transition_symbols = nfa.transition_fn[origin][destination]
             graph.edge(
                 origin_node_name,
-                dest_node_name,
-                label=compute_html_label_for_symbols(nfa.alphabet.variable_names, target_states[destination_state_box]))
+                destination_node_name,
+                label=compute_html_label_for_symbols(
+                    nfa.alphabet.variable_names,
+                    list(transition_symbols),
+                    )
+            )
 
     return graph
