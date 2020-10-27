@@ -162,6 +162,9 @@ class NFA(Generic[AutomatonState]):
         return get_transition_target(self.transition_fn, origin, via_symbol)
 
     def intersection(self, other: NFA[S]):
+        if self.alphabet != other.alphabet:
+            self.extend_to_common_alphabet(other)
+
         self_renamed_highest_state, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
 
@@ -205,13 +208,7 @@ class NFA(Generic[AutomatonState]):
 
     def union(self, other: NFA[S]) -> NFA[int]:
         if self.alphabet != other.alphabet:
-            # Perform alphabet union
-            unified_variable_names = unite_alphabets(self.alphabet.variable_names, other.alphabet.variable_names)
-            self.transition_fn = extend_transitions_to_new_alphabet_symbols(self.alphabet.variable_names, unified_variable_names, self.transition_fn)
-            other.transition_fn = extend_transitions_to_new_alphabet_symbols(other.alphabet.variable_names, unified_variable_names, other.transition_fn)
-
-            self.alphabet = LSBF_Alphabet.from_variable_names(unified_variable_names)
-            other.alphabet = self.alphabet
+            self.extend_to_common_alphabet(other)
 
         latest_state_value, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=latest_state_value)
@@ -229,6 +226,14 @@ class NFA(Generic[AutomatonState]):
             states=states,
             transition_fn=transitions
         )
+
+    def extend_to_common_alphabet(self, other: NFA[S]):
+        unified_variable_names = unite_alphabets(self.alphabet.variable_names, other.alphabet.variable_names)
+        self.transition_fn = extend_transitions_to_new_alphabet_symbols(self.alphabet.variable_names, unified_variable_names, self.transition_fn)
+        other.transition_fn = extend_transitions_to_new_alphabet_symbols(other.alphabet.variable_names, unified_variable_names, other.transition_fn)
+
+        self.alphabet = LSBF_Alphabet.from_variable_names(unified_variable_names)
+        other.alphabet = self.alphabet
 
     def determinize(self):
         '''Performs NFA -> DFA using the powerset construction'''
