@@ -5,9 +5,39 @@ from transitions import (
     extend_transitions_to_new_alphabet_symbols,
     iter_transition_fn
 )
-from typing import List
+from typing import List, Union
 from inequations_data import Inequality
 from inequations import build_nfa_from_inequality
+from automatons import NFA
+import pytest
+
+
+@pytest.fixture
+def xy_nfa_from_ineq() -> NFA[Union[int, str]]:
+    ineq1 = Inequality(['x', 'y'], [1, 1], -1, '<=')
+    nfa1 = build_nfa_from_inequality(ineq1)
+    return nfa1
+
+
+@pytest.fixture
+def xz_nfa_from_ineq() -> NFA[Union[int, str]]:
+    ineq2 = Inequality(['x', 'z'], [1, 1], 0, '<=')
+    nfa2 = build_nfa_from_inequality(ineq2)
+    return nfa2
+
+
+@pytest.fixture
+def y_nfa_from_ineq() -> NFA[Union[int, str]]:
+    ineq1 = Inequality(['y'], [1], -1, '<=')
+    nfa1 = build_nfa_from_inequality(ineq1)
+    return nfa1
+
+
+@pytest.fixture
+def x_nfa_from_ineq() -> NFA[Union[int, str]]:
+    ineq2 = Inequality(['x'], [1], 0, '<=')
+    nfa2 = build_nfa_from_inequality(ineq2)
+    return nfa2
 
 
 def test_get_indices_of_missing_variables():
@@ -74,12 +104,9 @@ def test_extend_transitions_to_new_alphabet():
     assert('*', '*', '*', 1, '*') in extended_transitions[2][1]
 
 
-def test_unite_nfas_with_different_alphabets():
-    ineq1 = Inequality(['x', 'y'], [1, 1], -10, '<=')
-    ineq2 = Inequality(['x', 'z'], [1, 1], -11, '<=')
-
-    nfa1 = build_nfa_from_inequality(ineq1)
-    nfa2 = build_nfa_from_inequality(ineq2)
+def test_unite_nfas_with_different_alphabets(xy_nfa_from_ineq, xz_nfa_from_ineq):
+    nfa1 = xy_nfa_from_ineq
+    nfa2 = xz_nfa_from_ineq
 
     union = nfa1.union(nfa2)
     assert union
@@ -91,3 +118,40 @@ def test_unite_nfas_with_different_alphabets():
         cnt += 1
 
     assert cnt == len(list(iter_transition_fn(nfa1.transition_fn))) + len(list(iter_transition_fn(nfa2.transition_fn)))
+
+
+def test_intersect_nfas_with_different_alphabets(y_nfa_from_ineq, x_nfa_from_ineq):
+
+    state_names_x = {}
+    state_names_y = {}
+
+    def state_renamed(aid, old, new):
+        if aid == id(y_nfa_from_ineq):
+            state_names_y[old] = new
+        else:
+            state_names_x[old] = new
+
+    y_nfa_from_ineq._debug_state_rename = state_renamed
+    x_nfa_from_ineq._debug_state_rename = state_renamed
+
+    intersection = y_nfa_from_ineq.intersection(x_nfa_from_ineq)
+    print(state_names_x)
+    print(state_names_y)
+    assert len(y_nfa_from_ineq.states) == 2
+    assert len(x_nfa_from_ineq.states) == 3
+    assert intersection
+    assert len(intersection.final_states) == 1
+
+    _e_states = [
+        (0, -1),
+        (-1, -1),
+        ('FINAL', 'FINAL')
+    ]
+
+    expected_states = []
+    for state in _e_states:
+        b, a = state
+        expected_states.append((state_names_y[a], state_names_x[b]))
+
+    for expected_state in expected_states:
+        assert expected_state in intersection.states
