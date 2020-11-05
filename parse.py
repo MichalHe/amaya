@@ -12,12 +12,38 @@ from typing import (
     Any
 )
 
+PRETTY_PRINT_INDENT = ' ' * 2
 
 logger.setLevel(INFO)
 
 
 def _eval_info(msg, depth):
     logger.info('  ' * depth + msg)
+
+
+def pretty_print_smt_tree(tree, printer=None, depth=0):
+    if printer is None:
+        printer = print
+
+    if tree is None:
+        return
+
+    node_name = tree[0]
+
+    if node_name in ['exists', 'forall']:
+        binders = tree[1]
+        printer(PRETTY_PRINT_INDENT * depth + f'{node_name} (binding: {binders})')
+        pretty_print_smt_tree(tree[2], printer=printer, depth=depth+1)
+    # assert, not, and, or
+    elif node_name in ['and', 'or']:
+        printer(PRETTY_PRINT_INDENT * depth + f'{node_name}')
+        pretty_print_smt_tree(tree[1], printer=printer, depth=depth+1)
+        pretty_print_smt_tree(tree[2], printer=printer, depth=depth+1)
+    elif node_name in ['assert', 'not']:
+        printer(PRETTY_PRINT_INDENT * depth + f'{node_name}')
+        pretty_print_smt_tree(tree[1], printer=printer, depth=depth+1)
+    else:
+        printer(PRETTY_PRINT_INDENT * depth + f'{tree}')
 
 
 def get_variable_names_from_bindings(bindings: List[Tuple[str, str]]) -> List[str]:
