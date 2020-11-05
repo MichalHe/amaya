@@ -94,30 +94,6 @@ class LSBF_Alphabet():
 
         return LSBF_Alphabet(symbols=new_symbols, variable_names=new_variable_names)
 
-    def get_downcaster_from_higher_dim(self, higher_alphabet: LSBF_Alphabet) -> Callable[[LSBF_AlphabetSymbol], LSBF_AlphabetSymbol]:
-        # 1) compute indices for where the current variables lie within the old
-        # symbols
-        variable_indices = []
-
-        processed_self_variables = 0
-        for i, variable_name in enumerate(higher_alphabet.variable_names):
-            if variable_name == self.variable_names[processed_self_variables]:
-                variable_indices.append(i)
-                processed_self_variables += 1
-
-            if processed_self_variables == len(self.variable_names):
-                break
-
-        # 2) generate function accepts a bigger symbol, loops over it, and just
-        # selects the needed variables
-
-        def downcaster(higher_symbol: LSBF_AlphabetSymbol) -> LSBF_AlphabetSymbol:
-            downcasted_letter = []
-            for i in variable_indices:
-                downcasted_letter.append(higher_symbol[i])
-            return tuple(downcasted_letter)
-        return downcaster
-
 
 @dataclass
 class NFA(Generic[AutomatonState]):
