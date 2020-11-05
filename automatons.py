@@ -293,12 +293,9 @@ class NFA(Generic[AutomatonState]):
         self.transition_fn = translate_transition_fn_states(self.transition_fn, state_name_translation)
 
     def do_projection(self, variable_name: str) -> Optional[NFA]:
-        new_alphabet = self.alphabet.new_with_variable_removed(variable_name)
-        if new_alphabet is None:
-            return None
 
         new_nfa: NFA[AutomatonState] = NFA(
-            alphabet=new_alphabet,
+            alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA,
         )
 
