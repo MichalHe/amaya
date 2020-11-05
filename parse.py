@@ -1,4 +1,27 @@
-from typing import List, Any
+from inequations import (
+    build_nfa_from_inequality,
+    extract_inquality
+)
+
+from automatons import NFA
+from log import logger
+from logging import INFO
+from typing import (
+    List,
+    Tuple,
+    Any
+)
+
+
+logger.setLevel(INFO)
+
+
+def _eval_info(msg, depth):
+    logger.info('  ' * depth + msg)
+
+
+def get_variable_names_from_bindings(bindings: List[Tuple[str, str]]) -> List[str]:
+    return list(map(lambda binding: binding[0], bindings))
 
 
 def lex(source: str) -> List[str]:
@@ -32,7 +55,77 @@ def filter_asserts(ast):
             _asserts.append(top_level_expr)
     return _asserts
 
-# ["assert" ["not" ["exists" [BINDERS] TERM]]
+
+def eval_smt_tree(root, _debug_recursion_depth=0) -> NFA:
+    # ['assert'
+    #     ['not'
+    #         ['exists,
+    #             ['and',
+    #                 [INEQ1]
+    #                 [INEQ2]
+    #              ]]]]
+    node_name = root[0]
+    if node_name in ['<', '>', '<=', '>=']:
+        # We have found node which need to be translated into NFA
+        _eval_info(f' >> build_nfa_from_inequality({root})', _debug_recursion_depth)
+
+        inequality = extract_inquality(root)
+        nfa = build_nfa_from_inequality(inequality)
+
+        return nfa
+    else:
+        _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
+        # Current node is NFA operation
+        if node_name == 'and':
+            assert len(root) == 3
+            lhs_term = root[1]
+            rhs_term = root[2]
+            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1)
+            rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1)
+
+            assert type(lhs) == NFA
+            assert type(rhs) == NFA
+
+            _eval_info(' >> intersection(lhs, rhs)', _debug_recursion_depth)
+            return lhs.intersection(rhs)
+        elif node_name == 'or':
+            lhs_term = root[1]
+            rhs_term = root[2]
+            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1)
+            rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1)
+
+            assert type(lhs) == NFA
+            assert type(rhs) == NFA
+
+            _eval_info(' >> union(lhs, rhs)', _debug_recursion_depth)
+            return lhs.union(rhs)
+        elif node_name == 'not':
+            assert len(root) == 2
+            operand = eval_smt_tree(root[1], _debug_recursion_depth+1)
+
+            assert type(operand) == NFA
+
+            _eval_info(' >> complement(operand)', _debug_recursion_depth)
+            return operand.complement()
+        elif node_name == 'exists':
+            assert len(root) == 3
+            variable_names = get_variable_names_from_bindings(root[1])
+            nfa = eval_smt_tree(root[2], _debug_recursion_depth+1)
+
+            # TODO: Check whether variables are in fact present in alphabet
+            _eval_info(f' >> projection({variable_names})', _debug_recursion_depth)
+            for var in variable_names:
+                nfa = nfa.do_projection(var)
+
+            return nfa
+
+        else:
+            raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}, assert_tree')
+
+
+def eval_assert_tree(assert_tree):
+    assert assert_tree[0] == 'assert'
+    return eval_smt_tree(assert_tree[1])
 
 
 def expand_multivariable_bindings(assertion_tree):
