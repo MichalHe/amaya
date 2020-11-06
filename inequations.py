@@ -154,11 +154,6 @@ def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: Presburger
         ineq_variable_names.append(var_name)
         ineq_variable_coeficients.append(var_coef)
 
-        # @Debug: See whether the system can process variables with coeficients
-        # bigger than 1
-        if abs(var_coef) > 1:
-            logger.info(f'Found variable coeficient which is bigger than expected- {var_name}:{var_coef}')
-
     return Inequality(
         ineq_variable_names,
         ineq_variable_coeficients,

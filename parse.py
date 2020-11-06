@@ -3,7 +3,7 @@ from inequations import (
     extract_inquality
 )
 
-from automatons import NFA
+from automatons import NFA, AutomatonType
 from log import logger
 from logging import INFO
 from typing import (
@@ -132,6 +132,11 @@ def eval_smt_tree(root, _debug_recursion_depth=0) -> NFA:
             assert type(operand) == NFA
 
             _eval_info(' >> complement(operand)', _debug_recursion_depth)
+
+            if operand.automaton_type == AutomatonType.NFA:
+                _eval_info(' >> determinize into DFA', _debug_recursion_depth)
+                operand = operand.determinize()
+
             return operand.complement()
         elif node_name == 'exists':
             assert len(root) == 3
