@@ -14,6 +14,9 @@ class Inequality:
     operation: str
 
 
+Relation = Inequality  # TODO: Rename the Inequality class to Relation
+
+
 @dataclass
 class PresburgerExpr:
     absolute_part: int

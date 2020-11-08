@@ -15,7 +15,8 @@ from automatons import (
     AutomatonType
 )
 from inequations_data import (
-    Inequality
+    Inequality,
+    Relation
 )
 
 import math
@@ -254,4 +255,45 @@ def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType]:
                 nfa.add_final_state(final_state)
                 nfa.update_transition_fn(current_state, alphabet_symbol, final_state)
 
+    return nfa
+
+
+def build_nfa_from_equality(eq: Relation):
+    alphabet = LSBF_Alphabet.from_inequation(eq)
+
+    nfa: NFA[NFA_AutomatonStateType] = NFA(
+        alphabet=alphabet,
+        automaton_type=AutomatonType.NFA
+    )
+
+    nfa.add_initial_state(eq.absolute_part)
+
+    states_to_explore: List[int] = [eq.absolute_part]
+
+    while states_to_explore:
+        e_state = states_to_explore.pop()
+        nfa.add_state(e_state)
+
+        for symbol in alphabet.symbols:
+            dot = vector_dot(symbol, eq.variable_coeficients)
+
+            d_state = e_state - dot  # Discovered state
+
+            # Process only even states
+            if d_state % 2 == 0:
+                d_state = int(d_state / 2)
+                nfa.update_transition_fn(e_state, symbol, d_state)
+
+                # Check whether we already did process this state
+                if not nfa.has_state_with_value(d_state):
+                    # State might be reachable from multiple locations, this
+                    # discovery does not have to be the first one
+                    if d_state not in states_to_explore:
+                        states_to_explore.append(d_state)
+
+                # Check whether current state should have transition to final
+                if e_state + dot == 0:
+                    nfa.add_state('FINAL')
+                    nfa.add_final_state('FINAL')
+                    nfa.update_transition_fn(e_state, symbol, 'FINAL')
     return nfa
