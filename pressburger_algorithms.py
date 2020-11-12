@@ -110,6 +110,8 @@ def build_nfa_from_equality(eq: Relation):
 
     states_to_explore: List[int] = [eq.absolute_part]
 
+    trap_state_present = False
+
     while states_to_explore:
         e_state = states_to_explore.pop()
         nfa.add_state(e_state)
@@ -136,6 +138,17 @@ def build_nfa_from_equality(eq: Relation):
                     nfa.add_state('FINAL')
                     nfa.add_final_state('FINAL')
                     nfa.update_transition_fn(e_state, symbol, 'FINAL')
+            else:
+                # So the trasition will go to Trap state
+                if not trap_state_present:
+                    # Add trapstate to with selfloop over every symbol
+                    nfa.add_state('TRAP')
+                    for sym in alphabet.symbols:
+                        nfa.update_transition_fn('TRAP', sym, 'TRAP')
+                    trap_state_present = True
+
+                nfa.update_transition_fn(e_state, symbol, 'TRAP')
+
     return nfa
 
 
