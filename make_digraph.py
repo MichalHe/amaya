@@ -16,11 +16,10 @@ arg_parser.add_argument('-i',
 
 arg_parser.add_argument('-v',
                         '--verbose',
-                        help='Read from file instead of stdin',
+                        help='Prints parser status/progress messages',
                         default=False,
                         action='store_true'
                         )
-
 
 args = arg_parser.parse_args()
 
@@ -45,6 +44,7 @@ def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
     parse.pretty_print_smt_tree(asserts[0], printer=logger.info)
 
     logger.info('Running evaluation phase.')
+
     nfa = parse.eval_assert_tree(asserts[0])
 
     logger.info('Converting NFA to graphviz.')

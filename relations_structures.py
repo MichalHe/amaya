@@ -7,14 +7,11 @@ from typing import (
 
 
 @dataclass
-class Inequality:
+class Relation:
     variable_names: List[str]
     variable_coeficients: List[int]
     absolute_part: int
     operation: str
-
-
-Relation = Inequality  # TODO: Rename the Inequality class to Relation
 
 
 @dataclass

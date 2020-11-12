@@ -1,14 +1,12 @@
 import pytest
 
-from inequations import (
-    Inequality,
-    build_nfa_from_inequality
-)
+from relations_structures import Relation
+from pressburger_algorithms import build_nfa_from_inequality
 
 
 @pytest.fixture
-def ineq() -> Inequality:
-    return Inequality(
+def ineq() -> Relation:
+    return Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
         absolute_part=2,
@@ -17,8 +15,8 @@ def ineq() -> Inequality:
 
 
 @pytest.fixture
-def ineq2() -> Inequality:
-    return Inequality(
+def ineq2() -> Relation:
+    return Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[-3, 2],
         absolute_part=7,

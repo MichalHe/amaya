@@ -1,6 +1,6 @@
-from inequations_data import Relation
+from relations_structures import Relation
 import pytest
-from inequations import build_nfa_from_equality
+from pressburger_algorithms import build_nfa_from_equality
 from transitions import iter_transition_fn
 
 

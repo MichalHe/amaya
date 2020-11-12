@@ -23,9 +23,7 @@ from dataclasses import (
     field
 )
 
-from inequations_data import (
-    Inequality
-)
+from relations_structures import Relation
 
 from transitions import (
     Transitions,
@@ -63,7 +61,7 @@ class LSBF_Alphabet():
     variable_names: Tuple[str, ...]
 
     @staticmethod
-    def from_inequation(ineq: Inequality) -> LSBF_Alphabet:
+    def from_inequation(ineq: Relation) -> LSBF_Alphabet:
         return LSBF_Alphabet.from_variable_names(tuple(ineq.variable_names))
 
     @staticmethod
@@ -314,7 +312,7 @@ class NFA(Generic[AutomatonState]):
         )
         result.states = set(self.states)
         result.final_states = self.states.difference(self.final_states)
-        result.initial_states = set(self.states)
+        result.initial_states = set(self.initial_states)
         result.transition_fn = make_transitions_copy(self.transition_fn)
 
         return result

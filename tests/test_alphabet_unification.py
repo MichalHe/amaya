@@ -6,36 +6,36 @@ from transitions import (
     iter_transition_fn
 )
 from typing import List, Union
-from inequations_data import Inequality
-from inequations import build_nfa_from_inequality
+from relations_structures import Relation
+from pressburger_algorithms import build_nfa_from_inequality
 from automatons import NFA
 import pytest
 
 
 @pytest.fixture
 def xy_nfa_from_ineq() -> NFA[Union[int, str]]:
-    ineq1 = Inequality(['x', 'y'], [1, 1], -1, '<=')
+    ineq1 = Relation(['x', 'y'], [1, 1], -1, '<=')
     nfa1 = build_nfa_from_inequality(ineq1)
     return nfa1
 
 
 @pytest.fixture
 def xz_nfa_from_ineq() -> NFA[Union[int, str]]:
-    ineq2 = Inequality(['x', 'z'], [1, 1], 0, '<=')
+    ineq2 = Relation(['x', 'z'], [1, 1], 0, '<=')
     nfa2 = build_nfa_from_inequality(ineq2)
     return nfa2
 
 
 @pytest.fixture
 def y_nfa_from_ineq() -> NFA[Union[int, str]]:
-    ineq1 = Inequality(['y'], [1], -1, '<=')
+    ineq1 = Relation(['y'], [1], -1, '<=')
     nfa1 = build_nfa_from_inequality(ineq1)
     return nfa1
 
 
 @pytest.fixture
 def x_nfa_from_ineq() -> NFA[Union[int, str]]:
-    ineq2 = Inequality(['x'], [1], 0, '<=')
+    ineq2 = Relation(['x'], [1], 0, '<=')
     nfa2 = build_nfa_from_inequality(ineq2)
     return nfa2
 

@@ -1,8 +1,5 @@
-from inequations import (
-    build_nfa_from_inequality,
-    extract_inquality
-)
-
+from pressburger_algorithms import build_nfa_from_inequality
+from ast_relations import extract_inquality
 from automatons import NFA, AutomatonType
 from log import logger
 from logging import INFO
@@ -11,10 +8,21 @@ from typing import (
     Tuple,
     Any
 )
+from enum import IntEnum
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
 logger.setLevel(INFO)
+
+
+class ParsingOperation(IntEnum):
+    BUILD_NFA_FROM_INEQ = 0x01
+    BUILD_NFA_FROM_EQ = 0x02
+    NFA_INTERSECT = 0x04
+    NFA_UNION = 0x08
+    NFA_PROJECTION = 0x10
+    NFA_COMPLEMENT = 0x20
+    NFA_DETERMINIZE = 0x20
 
 
 def _eval_info(msg, depth):
@@ -82,22 +90,25 @@ def filter_asserts(ast):
     return _asserts
 
 
-def eval_smt_tree(root, _debug_recursion_depth=0) -> NFA:
-    # ['assert'
-    #     ['not'
-    #         ['exists,
-    #             ['and',
-    #                 [INEQ1]
-    #                 [INEQ2]
-    #              ]]]]
+def eval_smt_tree(root,
+                  _debug_recursion_depth=0,
+                  emit_introspect=lambda nfa, operation: None) -> NFA:
+    '''
+    Params:
+        emit_introspect:  Callable[[NFA], None] If set, it will get called whenever an operation
+                          is applied to one of the NFAs the parser build along the way.
+    '''
+
     node_name = root[0]
     if node_name in ['<', '>', '<=', '>=']:
         # We have found node which need to be translated into NFA
-        _eval_info(f' >> build_nfa_from_inequality({root})', _debug_recursion_depth)
 
         inequality = extract_inquality(root)
         nfa = build_nfa_from_inequality(inequality)
 
+        _eval_info(f' >> build_nfa_from_inequality({root}) (result size: {len(nfa.states)})', _debug_recursion_depth)
+
+        emit_introspect(nfa, ParsingOperation.BUILD_NFA_FROM_INEQ)
         return nfa
     else:
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
@@ -112,8 +123,10 @@ def eval_smt_tree(root, _debug_recursion_depth=0) -> NFA:
             assert type(lhs) == NFA
             assert type(rhs) == NFA
 
-            _eval_info(' >> intersection(lhs, rhs)', _debug_recursion_depth)
-            return lhs.intersection(rhs)
+            intersection = lhs.intersection(rhs)
+            _eval_info(f' >> intersection(lhs, rhs) (result size: {len(intersection.states)})', _debug_recursion_depth)
+            emit_introspect(intersection, ParsingOperation.NFA_INTERSECT)
+            return intersection
         elif node_name == 'or':
             lhs_term = root[1]
             rhs_term = root[2]
@@ -124,30 +137,35 @@ def eval_smt_tree(root, _debug_recursion_depth=0) -> NFA:
             assert type(rhs) == NFA
 
             _eval_info(' >> union(lhs, rhs)', _debug_recursion_depth)
-            return lhs.union(rhs)
+            u = lhs.union(rhs)
+            emit_introspect(u, ParsingOperation.NFA_UNION)
+            return u
         elif node_name == 'not':
             assert len(root) == 2
             operand = eval_smt_tree(root[1], _debug_recursion_depth+1)
 
             assert type(operand) == NFA
 
-            _eval_info(' >> complement(operand)', _debug_recursion_depth)
-
             if operand.automaton_type == AutomatonType.NFA:
-                _eval_info(' >> determinize into DFA', _debug_recursion_depth)
                 operand = operand.determinize()
+                _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _debug_recursion_depth)
+                emit_introspect(operand, ParsingOperation.NFA_DETERMINIZE)
 
-            return operand.complement()
+            operand = operand.complement()
+            _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _debug_recursion_depth)
+            emit_introspect(operand, ParsingOperation.NFA_COMPLEMENT)
+            return operand
         elif node_name == 'exists':
             assert len(root) == 3
             variable_names = get_variable_names_from_bindings(root[1])
             nfa = eval_smt_tree(root[2], _debug_recursion_depth+1)
 
             # TODO: Check whether variables are in fact present in alphabet
-            _eval_info(f' >> projection({variable_names})', _debug_recursion_depth)
             for var in variable_names:
                 nfa = nfa.do_projection(var)
 
+            _eval_info(f' >> projection({variable_names}) (result_size: {len(nfa.states)})', _debug_recursion_depth)
+            emit_introspect(nfa, ParsingOperation.NFA_PROJECTION)
             return nfa
 
         else:

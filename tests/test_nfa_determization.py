@@ -1,7 +1,7 @@
 import pytest
-from inequations_data import Inequality
-from inequations import build_nfa_from_inequality
-from typing import Union
+from relations_structures import Relation
+from pressburger_algorithms import build_nfa_from_inequality
+from typing import Union, Dict
 from automatons import (
     AutomatonType,
     NFA
@@ -10,7 +10,7 @@ from automatons import (
 
 @pytest.fixture
 def simple_nfa() -> NFA:
-    ineq = Inequality(
+    ineq = Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
         absolute_part=2,
@@ -35,6 +35,7 @@ def test_simple_nfa_determinization(simple_nfa: NFA[Union[int, str]]):
     assert simple_nfa.automaton_type == AutomatonType.NFA
 
     trans_map: Dict[Union[int, str], int] = {}
+
     def state_rename_occured(automaton_id: int, old_name: Union[int, str], new_name: int):
         trans_map[old_name] = new_name
 
@@ -50,7 +51,6 @@ def test_simple_nfa_determinization(simple_nfa: NFA[Union[int, str]]):
     assert len(dfa.final_states) == 4
     assert len(dfa.initial_states) == 1
     assert dfa.automaton_type == AutomatonType.DFA
-
 
     def translate(state: Union[str, int]) -> int:
         return trans_map[state]
@@ -86,8 +86,7 @@ def test_simple_nfa_determinization(simple_nfa: NFA[Union[int, str]]):
     ]
 
     e_transitions_translated = translate_transitions(e_transitions, translate)
-    ne_transitions_translated = translate_transitions(ne_transitions, translate)
-
+    #  ne_transitions_translated = translate_transitions(ne_transitions, translate)
 
     for transition in e_transitions_translated:
         origin, symbol, dest = transition

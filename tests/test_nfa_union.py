@@ -1,7 +1,7 @@
 import pytest
 from automatons import NFA
-from inequations_data import Inequality
-from inequations import build_nfa_from_inequality
+from relations_structures import Relation
+from pressburger_algorithms import build_nfa_from_inequality
 from utils import transition_fn_size
 from transitions import iter_transition_fn
 from log import logger
@@ -13,7 +13,7 @@ from typing import (
 
 @pytest.fixture
 def nfa1() -> NFA:
-    ineq = Inequality(
+    ineq = Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
         absolute_part=2,
@@ -24,7 +24,7 @@ def nfa1() -> NFA:
 
 @pytest.fixture
 def nfa2() -> NFA:
-    ineq = Inequality(
+    ineq = Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[3, -1],
         absolute_part=3, operation='<='
