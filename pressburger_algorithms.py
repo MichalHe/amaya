@@ -137,3 +137,35 @@ def build_nfa_from_equality(eq: Relation):
                     nfa.add_final_state('FINAL')
                     nfa.update_transition_fn(e_state, symbol, 'FINAL')
     return nfa
+
+
+def build_dfa_from_sharp_inequality(s_ineq: Relation):
+    alphabet = LSBF_Alphabet.from_inequation(s_ineq)
+    nfa: NFA[NFA_AutomatonStateType] = NFA(
+        alphabet=alphabet,
+        automaton_type=AutomatonType.NFA,
+    )
+    nfa.add_initial_state(s_ineq.absolute_part)
+
+    work_queue: List[int] = [s_ineq.absolute_part]
+
+    while work_queue:
+        current_state = work_queue.pop()
+        nfa.add_state(current_state)
+
+        for alphabet_symbol in alphabet.symbols:
+            dot = vector_dot(alphabet_symbol, s_ineq.variable_coeficients)
+            destination_state = math.floor(0.5 * (current_state - dot))
+
+            if not nfa.has_state_with_value(destination_state):
+                work_queue.append(destination_state)
+
+            nfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
+
+            if current_state + dot > 0:
+                final_state = 'FINAL'
+                nfa.add_state(final_state)
+                nfa.add_final_state(final_state)
+                nfa.update_transition_fn(current_state, alphabet_symbol, final_state)
+
+    return nfa
