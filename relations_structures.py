@@ -7,7 +7,7 @@ from typing import (
 
 
 @dataclass
-class Inequality:
+class Relation:
     variable_names: List[str]
     variable_coeficients: List[int]
     absolute_part: int

@@ -1,32 +1,8 @@
 from __future__ import annotations
-from log import logger
 from dataclasses import dataclass
-from typing import (
-    List,
-    Dict,
-    Tuple,
-    Union
-)
-from utils import vector_dot
-from automatons import (
-    DFA,
-    NFA,
-    LSBF_Alphabet,
-    AutomatonType
-)
-from inequations_data import (
-    Inequality
-)
-
-import math
-
-
-INEQUALITY_COMPARISON_COMPLEMENTS = {
-    '>': '<',
-    '<': '>',
-    '<=': '>=',
-    '>=': '<=',
-}
+from typing import Dict
+from log import logger
+from relations_structures import Relation
 
 
 @dataclass
@@ -127,7 +103,7 @@ def evaluate_expression(expr) -> PresburgerExpr:
         raise ValueError(f'Unsupported operation type: {operation} in expr: {expr}')
 
 
-def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: PresburgerExpr) -> Inequality:
+def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: PresburgerExpr) -> Relation:
     '''Takes inequation, and produces output in form of:
         <VARIABLES> <= <ABS>, when op is `<=` or `>=`
         <VARIABLES> < <ABS>, when op is `<` or `>`
@@ -137,37 +113,38 @@ def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: Presburger
         unified_expr = lhs_expr - rhs_expr
     elif op == '>=' or op == '>':
         unified_expr = rhs_expr - lhs_expr
+    elif op == '=':
+        # It does not matter, equation can be rotated around = without problems
+        unified_expr = rhs_expr - lhs_expr
+
     # Now the unified expr has form of <everything> <= 0 or <everything> < 0
-    logger.debug(f'{op}0 (unified expr): {unified_expr}')
+    logger.debug(f'(unified expr): {unified_expr}{op}0')
 
-    # Deduce resulting ineqation relation op
-    if op == '<' or op == '>':
-        ineq_op = '<'
-    else:
-        ineq_op = '<='
+    # Deduce resulting ineqation relation op after rearangement
+    if op in ['<', '>']:
+        rel_op = '<'
+    elif op in ['<=', '>=']:
+        rel_op = '<='
+    elif op == '=':
+        rel_op = '='
 
-    ineq_variable_names = []
-    ineq_variable_coeficients = []
+    relation_variable_names = []
+    relation_variable_coeficients = []
 
-    ineq_abs = -unified_expr.absolute_part  # move it to the right side
+    relation_abs = -unified_expr.absolute_part  # move it to the right side
     for var_name, var_coef in unified_expr.variables.items():
-        ineq_variable_names.append(var_name)
-        ineq_variable_coeficients.append(var_coef)
+        relation_variable_names.append(var_name)
+        relation_variable_coeficients.append(var_coef)
 
-        # @Debug: See whether the system can process variables with coeficients
-        # bigger than 1
-        if abs(var_coef) > 1:
-            logger.info(f'Found variable coeficient which is bigger than expected- {var_name}:{var_coef}')
-
-    return Inequality(
-        ineq_variable_names,
-        ineq_variable_coeficients,
-        ineq_abs,
-        ineq_op
+    return Relation(
+        relation_variable_names,
+        relation_variable_coeficients,
+        relation_abs,
+        rel_op
     )
 
 
-def extract_inquality(ast) -> Inequality:
+def extract_relation(ast) -> Relation:
     # (<= 2 ?X)  <=> [<=, 2, ?X]
     logger.debug(f'Extracting inequality from: {ast}')
     assert(len(ast) == 3)
@@ -178,85 +155,3 @@ def extract_inquality(ast) -> Inequality:
     rhs_expr = evaluate_expression(rhs)
 
     return normalize_inequation(op, lhs_expr, rhs_expr)
-
-
-DFA_AlphabetSymbolType = Tuple[int, ...]
-DFA_AutomatonStateType = int
-NFA_AutomatonStateType = Union[int, str]
-NFA_AlphabetSymbolType = Tuple[int, ...]
-
-
-def build_dfa_from_inequality(ineq: Inequality) -> DFA:
-    '''Builds DFA with Lang same as solutions to the inequation over N'''
-    logger.debug(f'Building DFA (over N) to inequation: {ineq}')
-
-    alphabet = LSBF_Alphabet.from_inequation(ineq)
-    dfa: DFA[DFA_AutomatonStateType] = DFA(
-        alphabet=alphabet,
-        automaton_type=AutomatonType.DFA
-    )
-    dfa.add_initial_state(ineq.absolute_part)
-
-    work_queue: List[DFA_AutomatonStateType] = [ineq.absolute_part]
-
-    logger.info(f'Generated alphabet for automaton: {alphabet}')
-
-    while work_queue:
-        currently_processed_state = work_queue.pop()
-        print(dfa.states)
-        dfa.add_state(currently_processed_state)
-
-        # Check whether current state satisfies property that it accepts an
-        # empty word
-        if currently_processed_state >= 0:
-            dfa.add_final_state(currently_processed_state)
-
-        for alphabet_symbol in alphabet.symbols:
-            # @Optimize: Precompute dot before graph traversal
-            dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
-            next_state = math.floor(0.5 * (currently_processed_state - dot))
-
-            # Add newly discovered transition
-            dfa.update_transition_fn(currently_processed_state, alphabet_symbol, next_state)
-
-            if not dfa.has_state_with_value(next_state):
-                if next_state not in work_queue:
-                    work_queue.append(next_state)
-
-    logger.debug(f'Extracted dfa: {dfa}')
-
-    return dfa
-
-
-def build_nfa_from_inequality(ineq: Inequality) -> NFA[NFA_AutomatonStateType]:
-    # Initialize nfa structures
-    alphabet = LSBF_Alphabet.from_inequation(ineq)
-    nfa: NFA[NFA_AutomatonStateType] = NFA(
-        alphabet=alphabet,
-        automaton_type=AutomatonType.NFA,
-    )
-    nfa.add_initial_state(ineq.absolute_part)
-
-    work_queue: List[int] = [ineq.absolute_part]
-
-    while work_queue:
-        current_state = work_queue.pop()
-        nfa.add_state(current_state)
-
-        for alphabet_symbol in alphabet.symbols:
-            dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
-            destination_state = math.floor(0.5 * (current_state - dot))
-
-            if not nfa.has_state_with_value(destination_state):
-                work_queue.append(destination_state)
-
-            nfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
-
-            # Check whether state is final
-            if current_state + dot >= 0:
-                final_state = 'FINAL'
-                nfa.add_state(final_state)
-                nfa.add_final_state(final_state)
-                nfa.update_transition_fn(current_state, alphabet_symbol, final_state)
-
-    return nfa

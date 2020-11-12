@@ -1,7 +1,7 @@
 import pytest
 from automatons import NFA, AutomatonType
-from inequations_data import Inequality
-from inequations import build_nfa_from_inequality
+from relations_structures import Relation
+from pressburger_algorithms import build_nfa_from_inequality
 from typing import (
     Any,
     Dict,
@@ -10,7 +10,7 @@ from typing import (
 
 @pytest.fixture
 def nfa() -> NFA:
-    ineq = Inequality(
+    ineq = Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
         absolute_part=3,

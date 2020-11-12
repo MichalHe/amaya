@@ -23,9 +23,7 @@ from dataclasses import (
     field
 )
 
-from inequations_data import (
-    Inequality
-)
+from relations_structures import Relation
 
 from transitions import (
     Transitions,
@@ -63,7 +61,7 @@ class LSBF_Alphabet():
     variable_names: Tuple[str, ...]
 
     @staticmethod
-    def from_inequation(ineq: Inequality) -> LSBF_Alphabet:
+    def from_inequation(ineq: Relation) -> LSBF_Alphabet:
         return LSBF_Alphabet.from_variable_names(tuple(ineq.variable_names))
 
     @staticmethod
@@ -93,30 +91,6 @@ class LSBF_Alphabet():
                 number_to_bit_tuple, range(2**len(new_variable_names))))
 
         return LSBF_Alphabet(symbols=new_symbols, variable_names=new_variable_names)
-
-    def get_downcaster_from_higher_dim(self, higher_alphabet: LSBF_Alphabet) -> Callable[[LSBF_AlphabetSymbol], LSBF_AlphabetSymbol]:
-        # 1) compute indices for where the current variables lie within the old
-        # symbols
-        variable_indices = []
-
-        processed_self_variables = 0
-        for i, variable_name in enumerate(higher_alphabet.variable_names):
-            if variable_name == self.variable_names[processed_self_variables]:
-                variable_indices.append(i)
-                processed_self_variables += 1
-
-            if processed_self_variables == len(self.variable_names):
-                break
-
-        # 2) generate function accepts a bigger symbol, loops over it, and just
-        # selects the needed variables
-
-        def downcaster(higher_symbol: LSBF_AlphabetSymbol) -> LSBF_AlphabetSymbol:
-            downcasted_letter = []
-            for i in variable_indices:
-                downcasted_letter.append(higher_symbol[i])
-            return tuple(downcasted_letter)
-        return downcaster
 
 
 @dataclass
@@ -271,9 +245,11 @@ class NFA(Generic[AutomatonState]):
                     if dfa_state not in working_queue:
                         working_queue.append(dfa_state)
 
-                determinized_automaton.update_transition_fn(unexplored_dfa_state, symbol, dfa_state)
+                if dfa_state:
+                    determinized_automaton.update_transition_fn(unexplored_dfa_state, symbol, dfa_state)
 
         return determinized_automaton
+
 
     def _rename_own_states(self):
         debug_fn: Optional[functools.partial[None]]
@@ -293,12 +269,9 @@ class NFA(Generic[AutomatonState]):
         self.transition_fn = translate_transition_fn_states(self.transition_fn, state_name_translation)
 
     def do_projection(self, variable_name: str) -> Optional[NFA]:
-        new_alphabet = self.alphabet.new_with_variable_removed(variable_name)
-        if new_alphabet is None:
-            return None
 
         new_nfa: NFA[AutomatonState] = NFA(
-            alphabet=new_alphabet,
+            alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA,
         )
 
@@ -341,7 +314,7 @@ class NFA(Generic[AutomatonState]):
         )
         result.states = set(self.states)
         result.final_states = self.states.difference(self.final_states)
-        result.initial_states = set(self.states)
+        result.initial_states = set(self.initial_states)
         result.transition_fn = make_transitions_copy(self.transition_fn)
 
         return result

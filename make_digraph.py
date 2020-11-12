@@ -1,9 +1,10 @@
-from inequations import build_nfa_from_inequality, extract_inquality
 from visualization import convert_automaton_to_graphviz
 from argparse import ArgumentParser
 import parse
 import sys
-import utils
+import logging
+from log import logger
+
 
 arg_parser = ArgumentParser()
 arg_parser.add_argument('-i',
@@ -13,23 +14,40 @@ arg_parser.add_argument('-i',
                         type=str,
                         default=None)
 
+arg_parser.add_argument('-v',
+                        '--verbose',
+                        help='Prints parser status/progress messages',
+                        default=False,
+                        action='store_true'
+                        )
+
 args = arg_parser.parse_args()
+
+if args.verbose:
+    logger.setLevel(logging.INFO)
+else:
+    logger.setLevel(logging.CRITICAL)
 
 
 def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
+    logger.info('Parsing source.')
     tokens = parse.lex(smtlib_src)
+    logger.info('Building AST.')
     expr_tree = parse.build_syntax_tree(tokens)
 
     asserts = parse.filter_asserts(expr_tree)
+    logger.info(f'Extracted {len(asserts)} assert statement(s).')
+    if len(asserts) > 1:
+        logger.info('Selecting the first one.')
 
-    # FIXME: Get other types of inequalities too
-    formula = parse.get_formula(asserts[0])
-    ineq_tree = utils.search_tree(formula, '<=')
+    logger.info('Extracted following assert tree:')
+    parse.pretty_print_smt_tree(asserts[0], printer=logger.info)
 
-    ineq = extract_inquality(ineq_tree)
+    logger.info('Running evaluation phase.')
 
-    nfa = build_nfa_from_inequality(ineq)
+    nfa = parse.eval_assert_tree(asserts[0])
 
+    logger.info('Converting NFA to graphviz.')
     return convert_automaton_to_graphviz(nfa)
 
 
