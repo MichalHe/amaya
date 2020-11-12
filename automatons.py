@@ -245,9 +245,11 @@ class NFA(Generic[AutomatonState]):
                     if dfa_state not in working_queue:
                         working_queue.append(dfa_state)
 
-                determinized_automaton.update_transition_fn(unexplored_dfa_state, symbol, dfa_state)
+                if dfa_state:
+                    determinized_automaton.update_transition_fn(unexplored_dfa_state, symbol, dfa_state)
 
         return determinized_automaton
+
 
     def _rename_own_states(self):
         debug_fn: Optional[functools.partial[None]]

@@ -1,5 +1,10 @@
-from pressburger_algorithms import build_nfa_from_inequality
-from ast_relations import extract_inquality
+from pressburger_algorithms import (
+    build_nfa_from_inequality,
+    build_nfa_from_equality,
+    build_nfa_from_sharp_inequality,
+)
+
+from ast_relations import extract_relation
 from automatons import NFA, AutomatonType
 from log import logger
 from logging import INFO
@@ -17,12 +22,13 @@ logger.setLevel(INFO)
 
 class ParsingOperation(IntEnum):
     BUILD_NFA_FROM_INEQ = 0x01
-    BUILD_NFA_FROM_EQ = 0x02
-    NFA_INTERSECT = 0x04
+    BUILD_NFA_FROM_SHARP_INEQ = 0x02
+    BUILD_NFA_FROM_EQ = 0x04
     NFA_UNION = 0x08
     NFA_PROJECTION = 0x10
     NFA_COMPLEMENT = 0x20
     NFA_DETERMINIZE = 0x20
+    NFA_INTERSECT = 0x40
 
 
 def _eval_info(msg, depth):
@@ -100,15 +106,27 @@ def eval_smt_tree(root,
     '''
 
     node_name = root[0]
-    if node_name in ['<', '>', '<=', '>=']:
+    if node_name in ['<', '>', '<=', '>=', '=']:
         # We have found node which need to be translated into NFA
 
-        inequality = extract_inquality(root)
-        nfa = build_nfa_from_inequality(inequality)
+        relation = extract_relation(root)
 
-        _eval_info(f' >> build_nfa_from_inequality({root}) (result size: {len(nfa.states)})', _debug_recursion_depth)
+        if relation.operation == '<':
+            build_func = 'build_nfa_from_sharp_inequality'
+            parse_op = ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ
+            nfa = build_nfa_from_sharp_inequality(relation)
+        elif relation.operation == '<=':
+            build_func = 'build_nfa_from_inequality'
+            parse_op = ParsingOperation.BUILD_NFA_FROM_INEQ
+            nfa = build_nfa_from_inequality(relation)
+        elif relation.operation == '=':
+            build_func = 'build_nfa_from_equality'
+            parse_op = ParsingOperation.BUILD_NFA_FROM_EQ
+            nfa = build_nfa_from_equality(relation)
 
-        emit_introspect(nfa, ParsingOperation.BUILD_NFA_FROM_INEQ)
+        _eval_info(f' >> {build_func}({root}) (result size: {len(nfa.states)})', _debug_recursion_depth)
+
+        emit_introspect(nfa, parse_op)
         return nfa
     else:
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)

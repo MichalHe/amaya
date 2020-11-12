@@ -113,32 +113,38 @@ def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: Presburger
         unified_expr = lhs_expr - rhs_expr
     elif op == '>=' or op == '>':
         unified_expr = rhs_expr - lhs_expr
+    elif op == '=':
+        # It does not matter, equation can be rotated around = without problems
+        unified_expr = rhs_expr - lhs_expr
+
     # Now the unified expr has form of <everything> <= 0 or <everything> < 0
-    logger.debug(f'{op}0 (unified expr): {unified_expr}')
+    logger.debug(f'(unified expr): {unified_expr}{op}0')
 
-    # Deduce resulting ineqation relation op
-    if op == '<' or op == '>':
-        ineq_op = '<'
-    else:
-        ineq_op = '<='
+    # Deduce resulting ineqation relation op after rearangement
+    if op in ['<', '>']:
+        rel_op = '<'
+    elif op in ['<=', '>=']:
+        rel_op = '<='
+    elif op == '=':
+        rel_op = '='
 
-    ineq_variable_names = []
-    ineq_variable_coeficients = []
+    relation_variable_names = []
+    relation_variable_coeficients = []
 
-    ineq_abs = -unified_expr.absolute_part  # move it to the right side
+    relation_abs = -unified_expr.absolute_part  # move it to the right side
     for var_name, var_coef in unified_expr.variables.items():
-        ineq_variable_names.append(var_name)
-        ineq_variable_coeficients.append(var_coef)
+        relation_variable_names.append(var_name)
+        relation_variable_coeficients.append(var_coef)
 
     return Relation(
-        ineq_variable_names,
-        ineq_variable_coeficients,
-        ineq_abs,
-        ineq_op
+        relation_variable_names,
+        relation_variable_coeficients,
+        relation_abs,
+        rel_op
     )
 
 
-def extract_inquality(ast) -> Relation:
+def extract_relation(ast) -> Relation:
     # (<= 2 ?X)  <=> [<=, 2, ?X]
     logger.debug(f'Extracting inequality from: {ast}')
     assert(len(ast) == 3)

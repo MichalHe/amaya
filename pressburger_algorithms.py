@@ -139,7 +139,7 @@ def build_nfa_from_equality(eq: Relation):
     return nfa
 
 
-def build_dfa_from_sharp_inequality(s_ineq: Relation):
+def build_nfa_from_sharp_inequality(s_ineq: Relation):
     alphabet = LSBF_Alphabet.from_inequation(s_ineq)
     nfa: NFA[NFA_AutomatonStateType] = NFA(
         alphabet=alphabet,
