@@ -132,7 +132,11 @@ def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: Presburger
     relation_variable_coeficients = []
 
     relation_abs = -unified_expr.absolute_part  # move it to the right side
-    for var_name, var_coef in unified_expr.variables.items():
+
+    # Keep variables in alphabetical order - required for fast projections
+    sorted_vars = sorted(unified_expr.variables.keys())
+    for var_name in sorted_vars:
+        var_coef = unified_expr.variables[var_name]
         relation_variable_names.append(var_name)
         relation_variable_coeficients.append(var_coef)
 
