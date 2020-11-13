@@ -192,6 +192,8 @@ def eval_smt_tree(root,
 
 def eval_assert_tree(assert_tree):
     assert assert_tree[0] == 'assert'
+    forall_cnt = replace_forall_with_exists(assert_tree)
+    logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
     return eval_smt_tree(assert_tree[1])
 
 
@@ -218,7 +220,17 @@ def expand_multivariable_bindings(assertion_tree):
 
 
 def replace_forall_with_exists(assertion_tree):
+    '''
+    The forall quantifiers (nodes) are replaced by not-exists-not inplace,
+    mutating assertion tree.
+    Params:
+        assertion_tree @mutable
+    Returns:
+        The count of how many forall expansions occured.
+    '''
+    node_replaced_const = 0
     if assertion_tree[0] == 'forall':
+        print(assertion_tree)
         forall_kw, binders, stmt = assertion_tree
 
         not_stmt = ['not', stmt]
@@ -226,10 +238,13 @@ def replace_forall_with_exists(assertion_tree):
 
         assertion_tree[0] = 'not'
         assertion_tree[1] = exists
-        assertion_tree.pop(-1)
+        assertion_tree.pop(-1)  # Remove the original stmt from [forall, binders, stmt] -> [not, [exists, [not, stmt]]]
+        node_replaced_const = 1
 
     if assertion_tree[0] in ['exists', 'not', 'forall', 'assert']:
-        replace_forall_with_exists(assertion_tree[-1])
+        return node_replaced_const + replace_forall_with_exists(assertion_tree[-1])
+    else:
+        return node_replaced_const  # Bottom of the recursion
 
 
 def remove_multiple_negations(assertion_tree):
