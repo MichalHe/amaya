@@ -46,7 +46,8 @@ def inequation_source__valid_arithmetic_operations():
 
 def test_inequality_extraction(inequality_tree):
     # @TODO: Add more inequations to test agains
-    ineq = ast_relations.extract_inquality(inequality_tree)
+    ineq = ast_relations.extract_relation(inequality_tree)
+    assert ineq.operation == "<="
 
     print(ineq)
     assert ineq.variable_names
@@ -61,7 +62,8 @@ def test_inequality_extraction(inequality_tree):
 def test_inequality_arithmetic_operations_evaluation(inequation_source__valid_arithmetic_operations):
     expr_tree = parse.build_syntax_tree(parse.lex(inequation_source__valid_arithmetic_operations))
 
-    ineq = ast_relations.extract_inquality(search_tree(expr_tree, 'exists')[2])
+    ineq = ast_relations.extract_relation(search_tree(expr_tree, 'exists')[2])
+    assert ineq.operation == "<="
 
     assert ineq.absolute_part == -58
     assert len(ineq.variable_coeficients) == 1
