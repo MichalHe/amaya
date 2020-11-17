@@ -179,3 +179,31 @@ def iter_transition_fn(t: Transitions[State]) -> Generator[Tuple[State, Symbol, 
         for dest in t[origin]:
             for sym in t[origin][dest]:
                 yield (origin, sym, dest)
+
+
+def get_word_from_dfs_results(t: Transitions[State],
+                              traversal_history: Dict[State, State],
+                              last_state: State,
+                              initial_states: Set[State]) -> List[Symbol]:
+
+    backtrack_state_path_to_origin = []
+    state = last_state
+
+    added_initial_state = False
+    while not added_initial_state:
+        backtrack_state_path_to_origin.append(state)
+        if state in initial_states:
+            added_initial_state = True
+        else:
+            state = traversal_history[state]
+
+    path = list(reversed(backtrack_state_path_to_origin))
+    used_word = []
+
+    for i in range(len(path) - 1):
+        origin = path[i]
+        dest = path[i + 1]
+        symbol = tuple(t[origin][dest])[0]
+        used_word.append(symbol)
+
+    return used_word

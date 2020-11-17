@@ -35,7 +35,8 @@ from transitions import (
     calculate_variable_bit_position,
     make_transitions_copy,
     unite_alphabets,
-    extend_transitions_to_new_alphabet_symbols
+    extend_transitions_to_new_alphabet_symbols,
+    get_word_from_dfs_results
 )
 import functools
 
@@ -250,7 +251,6 @@ class NFA(Generic[AutomatonState]):
 
         return determinized_automaton
 
-
     def _rename_own_states(self):
         debug_fn: Optional[functools.partial[None]]
         if self._debug_state_rename is not None:
@@ -318,6 +318,45 @@ class NFA(Generic[AutomatonState]):
         result.transition_fn = make_transitions_copy(self.transition_fn)
 
         return result
+
+    def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
+        # Implementation of DFS
+
+        # Implementation for determinized automaton
+        state_stack: List[AutomatonState] = list(self.initial_states)
+        traversal_history: Dict[AutomatonState, AutomatonState] = dict()
+
+        explored_states: Set[AutomatonState] = set()
+        used_word: List[LSBF_AlphabetSymbol] = list()
+
+        while state_stack:
+            current_state = state_stack.pop(-1)
+
+            explored_states.add(current_state)
+
+            if current_state in self.final_states:
+                used_word = get_word_from_dfs_results(self.transition_fn,
+                                                      traversal_history,
+                                                      current_state,
+                                                      self.initial_states)
+
+                # The NFA cannot accept empty words - that happens when after
+                # determinization and complement some of the initial states
+                # becomes accepting
+                if used_word:
+                    return (True, used_word)
+
+            if current_state not in self.transition_fn:
+                if used_word:
+                    used_word.pop(-1)
+            else:
+
+                transitions = self.transition_fn[current_state]
+                for destination, symbols in transitions.items():
+                    if destination not in explored_states:
+                        traversal_history[destination] = current_state
+                        state_stack.append(destination)
+        return (False, [])
 
 
 DFA = NFA
