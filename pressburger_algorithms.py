@@ -166,6 +166,9 @@ def build_nfa_from_sharp_inequality(s_ineq: Relation):
         current_state = work_queue.pop()
         nfa.add_state(current_state)
 
+        final_symbols = []
+        self_loop_symbols = []
+
         for alphabet_symbol in alphabet.symbols:
             dot = vector_dot(alphabet_symbol, s_ineq.variable_coeficients)
             destination_state = math.floor(0.5 * (current_state - dot))
@@ -174,11 +177,38 @@ def build_nfa_from_sharp_inequality(s_ineq: Relation):
                 work_queue.append(destination_state)
 
             nfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
+            if current_state == destination_state:
+                self_loop_symbols.append(alphabet_symbol)
 
-            if current_state + dot > 0:
-                final_state = 'FINAL'
-                nfa.add_state(final_state)
-                nfa.add_final_state(final_state)
-                nfa.update_transition_fn(current_state, alphabet_symbol, final_state)
+            if current_state + dot >= 0:
+                # We need to wait till every alphabet symbol has beed explored
+                final_symbols.append(alphabet_symbol)
+
+        if final_symbols:
+            # We know that a symbol which is leads to final state and also is
+            # self loop, would be present also in equation with exact same
+            # structure
+            final_set = set(final_symbols)
+            self_loop_set = set(self_loop_symbols)
+            eq_set = final_set.intersection(self_loop_set)
+
+            final_state = 'FINAL'
+            nfa.add_state(final_state)
+            nfa.add_final_state(final_state)
+
+            prefinal_state = f'{current_state}\'prefinal'
+            nfa.add_state(prefinal_state)
+
+            # Link current_state and prefinal
+            for symbol in (self_loop_set - eq_set):
+                nfa.update_transition_fn(current_state, symbol, prefinal_state)
+
+            # Create selfloop
+            for self_loop_symbol in self_loop_set:
+                nfa.update_transition_fn(prefinal_state, self_loop_symbol, prefinal_state)
+
+            # Link prefinal and final
+            for fin_symbol in final_set:
+                nfa.update_transition_fn(prefinal_state, fin_symbol, final_state)
 
     return nfa
