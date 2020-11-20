@@ -226,6 +226,8 @@ def eval_assert_tree(assert_tree):
     assert assert_tree[0] == 'assert'
     forall_cnt = replace_forall_with_exists(assert_tree)
     logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
+    implications_cnt = expand_implications(assert_tree)
+    logger.info(f'Performed {implications_cnt} implications expansions in the AST.')
     return eval_smt_tree(assert_tree[1])
 
 
@@ -276,6 +278,38 @@ def replace_forall_with_exists(assertion_tree):
         return node_replaced_const + replace_forall_with_exists(assertion_tree[-1])
     else:
         return node_replaced_const  # Bottom of the recursion
+
+
+def expand_implications(assertion_tree) -> int:
+    root_node_name = assertion_tree[0]
+    if root_node_name == '=>':
+        left_statement = assertion_tree[1]
+        right_statement = assertion_tree[2]
+
+        left_negated = ['not', left_statement]
+        assertion_tree[0] = 'or'
+        assertion_tree[1] = left_negated
+        assertion_tree[2] = right_statement
+
+        implications_expanded = 1
+        # Implications might be used somewhere down the tree
+        implications_expanded += expand_implications(assertion_tree[1])
+        implications_expanded += expand_implications(assertion_tree[2])
+
+        return implications_expanded
+    else:
+        if root_node_name in ['and', 'or', '=']:
+            # Since and,or,= are n-ary, we need to descend into all of their
+            # subterms
+            implications_expanded = 0
+            for term_i in range(1, len(assertion_tree)):
+                implications_expanded += expand_implications(assertion_tree[term_i])
+            return implications_expanded
+        elif root_node_name in ['forall', 'exists', 'not', 'assert']:
+            # Those contain only one formula - descend into it
+            return expand_implications(assertion_tree[-1])
+        else:
+            return 0
 
 
 def remove_multiple_negations(assertion_tree):
