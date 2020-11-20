@@ -164,32 +164,32 @@ def eval_smt_tree(root,
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
         # Current node is NFA operation
         if node_name == 'and':
-            assert len(root) == 3
+            assert len(root) >= 3
             lhs_term = root[1]
-            rhs_term = root[2]
             lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1)
-            rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1)
 
-            assert type(lhs) == NFA
-            assert type(rhs) == NFA
-
-            intersection = lhs.intersection(rhs)
-            _eval_info(f' >> intersection(lhs, rhs) (result size: {len(intersection.states)})', _debug_recursion_depth)
-            emit_introspect(intersection, ParsingOperation.NFA_INTERSECT)
-            return intersection
+            for term_i in range(2, len(root)):
+                rhs_term = root[term_i]
+                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1)
+                assert type(rhs) == NFA
+                lhs = lhs.intersection(rhs)
+                _eval_info(f' >> intersection(lhs, rhs) (result size: {len(lhs.states)})', _debug_recursion_depth)
+                emit_introspect(lhs, ParsingOperation.NFA_INTERSECT)
+            return lhs
         elif node_name == 'or':
+            assert len(root) >= 3
             lhs_term = root[1]
-            rhs_term = root[2]
             lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1)
-            rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1)
 
-            assert type(lhs) == NFA
-            assert type(rhs) == NFA
+            for term_i in range(2, len(root)):
+                rhs_term = root[2]
+                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1)
+                assert type(rhs) == NFA
 
-            _eval_info(' >> union(lhs, rhs)', _debug_recursion_depth)
-            u = lhs.union(rhs)
-            emit_introspect(u, ParsingOperation.NFA_UNION)
-            return u
+                _eval_info(' >> union(lhs, rhs)', _debug_recursion_depth)
+                lhs = lhs.union(rhs)
+                emit_introspect(lhs, ParsingOperation.NFA_UNION)
+            return lhs
         elif node_name == 'not':
             assert len(root) == 2
             operand = eval_smt_tree(root[1], _debug_recursion_depth+1)
