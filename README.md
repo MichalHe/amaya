@@ -13,9 +13,7 @@ By default the script reads from stdin, but by passing `-i` flag, provided file 
 inequation might (will) not work.
 
 ### TODO
-- [ ] make sure parser preprocesses the formula in order to remove _forall_
-- [ ] implement DFS search for automatons to check whether the language is nonempty
-- [ ] fix the build_nfa_from_equation.
-
-# Problems
-- [ ] the `build_nfa_from_equation` algorithm builds an automaton that is not complete - the complement is therefor incomplete
+- [ ] Implemented implication
+- [ ] Implement equivalence (probably sufficient to deal only with 'trivial' automatons)
+- [ ] Implement smt2 Let function 
+- [ ] Fix tests: NUM{688,689,675}
