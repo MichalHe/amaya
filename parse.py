@@ -11,7 +11,8 @@ from logging import INFO
 from typing import (
     List,
     Tuple,
-    Any
+    Any,
+    Dict
 )
 from enum import IntEnum
 
@@ -65,7 +66,7 @@ def get_variable_names_from_bindings(bindings: List[Tuple[str, str]]) -> List[st
 
 
 def lex(source: str) -> List[str]:
-    source = source.replace('(', '( ').replace(')', ' )')
+    source = source.replace('(', ' ( ').replace(')', ' ) ')
     tokens = source.split()
     return tokens
 
@@ -87,13 +88,43 @@ def build_syntax_tree(tokens: List[str]):
     return stack
 
 
-def filter_asserts(ast):
+def get_asserts_from_ast(ast):
     # TODO: Remove this
     _asserts = []
     for top_level_expr in ast:
         if top_level_expr[0] == 'assert':
             _asserts.append(top_level_expr)
     return _asserts
+
+
+def check_result_matches(source_text: str) -> bool:
+    tokens = lex(source_text)
+    ast = build_syntax_tree(tokens)
+
+    smt_info = get_smt_info(ast)
+    asserts = get_asserts_from_ast(ast)
+    logger.info(f'Extracted smt-info: {smt_info}')
+    logger.info(f'Extracted {len(asserts)} from source text.')
+
+    nfa = eval_assert_tree(asserts[0])
+
+    should_be_sat = True  # Assume true, in case there is no info in the smt source
+    if ':status' in smt_info:
+        if smt_info[':status'] == 'unsat':
+            should_be_sat = False
+
+    is_sat, example_word = nfa.is_sat()
+    sat_matches = is_sat == should_be_sat
+
+    if sat_matches:
+        if is_sat:
+            logger.debug(f'The automaton\'s SAT is as expected: {is_sat}, example: {example_word}')
+        else:
+            logger.debug(f'The automaton\'s SAT is as expected: {is_sat}')
+    else:
+        logger.warn(f'The automaton\'s SAT didn\'t match expected: actual={is_sat}, given word: {example_word}, expected={should_be_sat}')
+
+    return sat_matches
 
 
 def eval_smt_tree(root,
@@ -110,6 +141,7 @@ def eval_smt_tree(root,
         # We have found node which need to be translated into NFA
 
         relation = extract_relation(root)
+        _eval_info(f'Building core nfa from relation: {relation}', _debug_recursion_depth)
 
         if relation.operation == '<':
             build_func = 'build_nfa_from_sharp_inequality'
@@ -230,7 +262,6 @@ def replace_forall_with_exists(assertion_tree):
     '''
     node_replaced_const = 0
     if assertion_tree[0] == 'forall':
-        print(assertion_tree)
         forall_kw, binders, stmt = assertion_tree
 
         not_stmt = ['not', stmt]
@@ -253,3 +284,16 @@ def remove_multiple_negations(assertion_tree):
 
 def get_formula(_assert):
     return _assert[1]
+
+
+def get_smt_info(ast) -> Dict[str, Any]:
+    smt_info: Dict[str, Any] = dict()
+    for top_level_statement in ast:
+        statement_fn = top_level_statement[0]
+        if statement_fn == 'set-info':
+            info_category = top_level_statement[1]
+            info_value = top_level_statement[2]
+
+            smt_info[info_category] = info_value
+
+    return smt_info
