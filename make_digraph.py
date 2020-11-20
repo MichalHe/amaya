@@ -35,7 +35,7 @@ def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
     logger.info('Building AST.')
     expr_tree = parse.build_syntax_tree(tokens)
 
-    asserts = parse.filter_asserts(expr_tree)
+    asserts = parse.get_asserts_from_ast(expr_tree)
     logger.info(f'Extracted {len(asserts)} assert statement(s).')
     if len(asserts) > 1:
         logger.info('Selecting the first one.')
