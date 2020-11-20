@@ -60,6 +60,7 @@ AutomatonType = Enum('AutomatonType', 'DFA NFA')
 class LSBF_Alphabet():
     symbols: Tuple[LSBF_AlphabetSymbol, ...]
     variable_names: Tuple[str, ...]
+    active_variables: int
 
     @staticmethod
     def from_inequation(ineq: Relation) -> LSBF_Alphabet:
@@ -74,6 +75,7 @@ class LSBF_Alphabet():
         ))
 
         return LSBF_Alphabet(
+            active_variables=len(variable_names),
             symbols=symbols,
             variable_names=variable_names
         )
@@ -269,22 +271,31 @@ class NFA(Generic[AutomatonState]):
         self.transition_fn = translate_transition_fn_states(self.transition_fn, state_name_translation)
 
     def do_projection(self, variable_name: str) -> Optional[NFA]:
+        resulting_alphabet_var_count = self.alphabet.active_variables - 1
 
-        new_nfa: NFA[AutomatonState] = NFA(
-            alphabet=self.alphabet,
-            automaton_type=AutomatonType.NFA,
-        )
+        if resulting_alphabet_var_count == 0:
+            is_sat, word = self.is_sat()  # Check whether the language is nonempty
+            if is_sat:
+                return NFA.trivial_accepting(self.alphabet)
+            else:
+                return NFA.trivial_nonaccpting(self.alphabet)
+        else:
+            # Cross out the projected variable
+            new_nfa: NFA[AutomatonState] = NFA(
+                alphabet=self.alphabet,
+                automaton_type=AutomatonType.NFA,
+            )
 
-        new_nfa.states = set(self.states)
-        new_nfa.initial_states = set(self.initial_states)
-        new_nfa.final_states = set(self.final_states)
+            new_nfa.states = set(self.states)
+            new_nfa.initial_states = set(self.initial_states)
+            new_nfa.final_states = set(self.final_states)
 
-        bit_pos = calculate_variable_bit_position(self.alphabet.variable_names, variable_name)
-        if bit_pos is None:
-            raise ValueError(f'Could not find variable_name "{variable_name}" in current alphabet {self.alphabet}')
-        new_nfa.transition_fn = do_projection(self.transition_fn, bit_pos)
-
-        return new_nfa
+            bit_pos = calculate_variable_bit_position(self.alphabet.variable_names, variable_name)
+            if bit_pos is None:
+                raise ValueError(f'Could not find variable_name "{variable_name}" in current alphabet {self.alphabet}')
+            new_nfa.transition_fn = do_projection(self.transition_fn, bit_pos)
+            new_nfa.alphabet.active_variables -= 1
+            return new_nfa
 
     def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
         nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
@@ -320,8 +331,13 @@ class NFA(Generic[AutomatonState]):
         return result
 
     def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
-        # Implementation of DFS
+        if self.alphabet.active_variables == 0:
+            if self.final_states:
+                return (True, [])
+            else:
+                return (False, [])
 
+        # Implementation of DFS
         # Implementation for determinized automaton
         state_stack: List[AutomatonState] = list(self.initial_states)
         traversal_history: Dict[AutomatonState, AutomatonState] = dict()
@@ -357,6 +373,33 @@ class NFA(Generic[AutomatonState]):
                         traversal_history[destination] = current_state
                         state_stack.append(destination)
         return (False, [])
+
+    @staticmethod
+    def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:
+        nfa = NFA(alphabet, AutomatonType.DFA)
+
+        final_state = 'FINAL'
+        nfa.add_state(final_state)
+        nfa.add_initial_state(final_state)
+        nfa.add_final_state(final_state)
+
+        self_loop_symbol = tuple(['*'] * len(alphabet.variable_names))
+        nfa.update_transition_fn(final_state, self_loop_symbol, final_state)
+
+        return nfa
+
+    @staticmethod
+    def trivial_nonaccpting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:
+        nfa = NFA(alphabet, AutomatonType.DFA)
+
+        initial_state = 'INITIAL'
+        nfa.add_state(initial_state)
+        nfa.add_initial_state(initial_state)
+
+        self_loop_symbol = tuple(['*'] * len(alphabet.variable_names))
+        nfa.update_transition_fn(initial_state, self_loop_symbol, initial_state)
+
+        return nfa
 
 
 DFA = NFA
