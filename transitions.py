@@ -11,8 +11,8 @@ from typing import (
 
     TypeVar
 )
-
 import functools
+import utils
 
 Symbol = Tuple[Union[str, int], ...]
 # State = Union[str, int]
@@ -20,6 +20,7 @@ State = TypeVar('State')
 T = TypeVar('T')
 Transitions = Dict[State, Dict[State, Set[Symbol]]]
 VariableNames = List[str]
+
 
 # Create united alphabet
 # Function for extending to new alphabet
@@ -207,3 +208,42 @@ def get_word_from_dfs_results(t: Transitions[State],
         used_word.append(symbol)
 
     return used_word
+
+
+def iterate_over_active_variables(all_variables: Tuple[str], active_variables: Set[str]):
+    ordered_active_vars = list(sorted(active_variables))
+    missing_variables_indices = get_indices_of_missing_variables(ordered_active_vars, all_variables)
+
+    for symbol_cnt in range(2**len(active_variables)):
+        valid_bitsubtuple = utils.number_to_bit_tuple(symbol_cnt, tuple_size=len(active_variables))
+        mv_index = 0  # Missing variables iterating index
+        vv_index = 0  # Valid variables iterating index
+        bits_remaining = 0
+
+        symbol = []
+        for bit_index in range(len(all_variables)):
+            if mv_index == len(missing_variables_indices):
+                bits_remaining = len(all_variables) - bit_index
+                break
+            if vv_index == len(valid_bitsubtuple):
+                bits_remaining = len(all_variables) - bit_index
+                break
+
+            if bit_index == missing_variables_indices[mv_index]:
+                symbol.append('*')
+                mv_index += 1
+            else:
+                symbol.append(valid_bitsubtuple[vv_index])
+                vv_index += 1
+
+        if bits_remaining > 0:
+            if mv_index == len(missing_variables_indices):
+                # We need to fill in the rest of valid bits
+                for i in range(vv_index, len(valid_bitsubtuple)):
+                    symbol.append(valid_bitsubtuple[i])
+            if vv_index == len(valid_bitsubtuple):
+                # We need to fill the rest with *
+                for i in range(bits_remaining):
+                    symbol.append('*')
+
+        yield tuple(symbol)
