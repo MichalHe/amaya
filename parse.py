@@ -22,14 +22,14 @@ logger.setLevel(INFO)
 
 
 class ParsingOperation(IntEnum):
-    BUILD_NFA_FROM_INEQ = 0x01
-    BUILD_NFA_FROM_SHARP_INEQ = 0x02
-    BUILD_NFA_FROM_EQ = 0x04
-    NFA_UNION = 0x08
-    NFA_PROJECTION = 0x10
-    NFA_COMPLEMENT = 0x20
-    NFA_DETERMINIZE = 0x20
-    NFA_INTERSECT = 0x40
+    BUILD_NFA_FROM_INEQ = 1
+    BUILD_NFA_FROM_SHARP_INEQ = 2
+    BUILD_NFA_FROM_EQ = 3
+    NFA_UNION = 4
+    NFA_PROJECTION = 5
+    NFA_COMPLEMENT = 6
+    NFA_DETERMINIZE = 7
+    NFA_INTERSECT = 8
 
 
 def _eval_info(msg, depth):
@@ -200,8 +200,6 @@ def eval_smt_tree(root,
             if operand.automaton_type == AutomatonType.NFA:
                 operand = operand.determinize()
                 _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _debug_recursion_depth)
-                emit_introspect(operand, ParsingOperation.NFA_DETERMINIZE)
-
             operand = operand.complement()
             _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _debug_recursion_depth)
             emit_introspect(operand, ParsingOperation.NFA_COMPLEMENT)
@@ -214,8 +212,6 @@ def eval_smt_tree(root,
             # TODO: Check whether variables are in fact present in alphabet
             for var in variable_names:
                 nfa = nfa.do_projection(var)
-                nfa = nfa.determinize()
-                emit_introspect(nfa, ParsingOperation.NFA_DETERMINIZE)
 
             _eval_info(f' >> projection({variable_names}) (result_size: {len(nfa.states)})', _debug_recursion_depth)
             emit_introspect(nfa, ParsingOperation.NFA_PROJECTION)
