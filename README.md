@@ -17,3 +17,10 @@ inequation might (will) not work.
 - [ ] Implement equivalence (probably sufficient to deal only with 'trivial' automatons)
 - [ ] Implement smt2 Let function 
 - [ ] Fix tests: NUM{688,689,675}
+
+### Currently not passing TPTP tests:
+- [ ] NUM915=1.smt2 
+- [ ] NUM916=1.smt2  -- currently under debug
+- [ ] NUM917=1.smt2 
+- [ ] NUM918=1.smt2 
+- [ ] ARI590=1.smt2
