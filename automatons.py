@@ -278,7 +278,8 @@ class NFA(Generic[AutomatonState]):
             if is_sat:
                 return NFA.trivial_accepting(self.alphabet)
             else:
-                return NFA.trivial_nonaccpting(self.alphabet)
+                return NFA.trivial_nonaccepting(self.alphabet)
+
         else:
             # Cross out the projected variable
             new_nfa: NFA[AutomatonState] = NFA(
@@ -385,11 +386,12 @@ class NFA(Generic[AutomatonState]):
 
         self_loop_symbol = tuple(['*'] * len(alphabet.variable_names))
         nfa.update_transition_fn(final_state, self_loop_symbol, final_state)
+        nfa.alphabet.active_variables = 0
 
         return nfa
 
     @staticmethod
-    def trivial_nonaccpting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:
+    def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:
         nfa = NFA(alphabet, AutomatonType.DFA)
 
         initial_state = 'INITIAL'
@@ -398,6 +400,7 @@ class NFA(Generic[AutomatonState]):
 
         self_loop_symbol = tuple(['*'] * len(alphabet.variable_names))
         nfa.update_transition_fn(initial_state, self_loop_symbol, initial_state)
+        nfa.alphabet.active_variables = 0
 
         return nfa
 
