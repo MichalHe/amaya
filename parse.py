@@ -97,7 +97,7 @@ def get_asserts_from_ast(ast):
     return _asserts
 
 
-def check_result_matches(source_text: str) -> bool:
+def check_result_matches(source_text: str, emit_introspect=None) -> bool:
     tokens = lex(source_text)
     ast = build_syntax_tree(tokens)
 
@@ -106,7 +106,7 @@ def check_result_matches(source_text: str) -> bool:
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Extracted {len(asserts)} from source text.')
 
-    nfa = eval_assert_tree(asserts[0])
+    nfa = eval_assert_tree(asserts[0], emit_introspect=emit_introspect)
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
     if ':status' in smt_info:
@@ -129,7 +129,8 @@ def check_result_matches(source_text: str) -> bool:
 
 def eval_smt_tree(root,
                   _debug_recursion_depth=0,
-                  emit_introspect=lambda nfa, operation: None) -> NFA:
+                  emit_introspect=lambda nfa,
+                  operation: None) -> NFA:
     '''
     Params:
         emit_introspect:  Callable[[NFA], None] If set, it will get called whenever an operation
@@ -166,11 +167,11 @@ def eval_smt_tree(root,
         if node_name == 'and':
             assert len(root) >= 3
             lhs_term = root[1]
-            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1)
+            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[term_i]
-                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1)
+                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect)
                 assert type(rhs) == NFA
                 lhs = lhs.intersection(rhs)
                 _eval_info(f' >> intersection(lhs, rhs) (result size: {len(lhs.states)})', _debug_recursion_depth)
@@ -179,11 +180,11 @@ def eval_smt_tree(root,
         elif node_name == 'or':
             assert len(root) >= 3
             lhs_term = root[1]
-            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1)
+            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[2]
-                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1)
+                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect)
                 assert type(rhs) == NFA
 
                 _eval_info(' >> union(lhs, rhs)', _debug_recursion_depth)
@@ -192,7 +193,7 @@ def eval_smt_tree(root,
             return lhs
         elif node_name == 'not':
             assert len(root) == 2
-            operand = eval_smt_tree(root[1], _debug_recursion_depth+1)
+            operand = eval_smt_tree(root[1], _debug_recursion_depth+1, emit_introspect=emit_introspect)
 
             assert type(operand) == NFA
 
@@ -208,11 +209,13 @@ def eval_smt_tree(root,
         elif node_name == 'exists':
             assert len(root) == 3
             variable_names = get_variable_names_from_bindings(root[1])
-            nfa = eval_smt_tree(root[2], _debug_recursion_depth+1)
+            nfa = eval_smt_tree(root[2], _debug_recursion_depth+1, emit_introspect=emit_introspect)
 
             # TODO: Check whether variables are in fact present in alphabet
             for var in variable_names:
                 nfa = nfa.do_projection(var)
+                nfa = nfa.determinize()
+                emit_introspect(nfa, ParsingOperation.NFA_DETERMINIZE)
 
             _eval_info(f' >> projection({variable_names}) (result_size: {len(nfa.states)})', _debug_recursion_depth)
             emit_introspect(nfa, ParsingOperation.NFA_PROJECTION)
@@ -222,13 +225,16 @@ def eval_smt_tree(root,
             raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}, assert_tree')
 
 
-def eval_assert_tree(assert_tree):
+def eval_assert_tree(assert_tree, emit_introspect=None):
     assert assert_tree[0] == 'assert'
     forall_cnt = replace_forall_with_exists(assert_tree)
     logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
     implications_cnt = expand_implications(assert_tree)
     logger.info(f'Performed {implications_cnt} implications expansions in the AST.')
-    return eval_smt_tree(assert_tree[1])
+    if emit_introspect is not None:
+        return eval_smt_tree(assert_tree[1], emit_introspect=emit_introspect)
+    else:
+        return eval_smt_tree(assert_tree[1])
 
 
 def expand_multivariable_bindings(assertion_tree):
