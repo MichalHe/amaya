@@ -141,8 +141,8 @@ def build_nfa_from_equality(eq: Relation):
                 if not trap_state_present:
                     # Add trapstate to with selfloop over every symbol
                     nfa.add_state('TRAP')
-                    for sym in alphabet.symbols:
-                        nfa.update_transition_fn('TRAP', sym, 'TRAP')
+                    universal_symbol = tuple(['*' for var in alphabet.variable_names])
+                    nfa.update_transition_fn('TRAP', universal_symbol, 'TRAP')
                     trap_state_present = True
 
                 nfa.update_transition_fn(e_state, symbol, 'TRAP')
