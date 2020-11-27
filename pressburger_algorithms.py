@@ -39,7 +39,6 @@ def build_dfa_from_inequality(ineq: Relation) -> DFA:
 
     while work_queue:
         currently_processed_state = work_queue.pop()
-        print(dfa.states)
         dfa.add_state(currently_processed_state)
 
         # Check whether current state satisfies property that it accepts an
@@ -118,7 +117,6 @@ def build_nfa_from_equality(eq: Relation):
 
         for symbol in alphabet.symbols:
             dot = vector_dot(symbol, eq.variable_coeficients)
-
             d_state = e_state - dot  # Discovered state
 
             # Process only even states
