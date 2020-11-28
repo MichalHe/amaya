@@ -299,7 +299,59 @@ class NFA(Generic[AutomatonState]):
 
             new_nfa.alphabet.active_variables -= set((variable_name, ))
 
+            new_nfa.perform_pad_closure()
             return new_nfa
+
+    def perform_pad_closure(self):
+        work_queue = list(self.final_states)
+
+        padding_final_states = set()
+
+        while work_queue:
+            current_final_state = work_queue.pop(0)
+            padding_final_states.add(current_final_state)
+
+            for origin_state in self.get_states_with_transition_destination(current_final_state):
+                padding_symbols = self.get_padding_symbols_for_state_leading_to_final_state(
+                    origin_state,
+                    current_final_state)
+                if padding_symbols:
+                    if origin_state not in work_queue and origin_state not in padding_final_states:
+                        work_queue.append(origin_state)
+
+        self.final_states = padding_final_states
+
+    def get_states_with_transition_destination(self, destination: AutomatonState) -> Set[AutomatonState]:
+        states = set()
+        for origin in self.transition_fn:
+            for dest in self.transition_fn[origin]:
+                if dest == destination:
+                    states.add(origin)
+        return states
+
+    def get_padding_symbols_for_state_leading_to_final_state(self,
+                                                             from_state: AutomatonState,
+                                                             final_state: AutomatonState) -> Set[LSBF_AlphabetSymbol]:
+        self_loop_symbols = self.get_self_loop_symbols_state(from_state)
+        final_symbols = self.get_symbols_leading_from_state_to_state(from_state, final_state)
+        return self_loop_symbols.intersection(final_symbols)
+
+    def get_self_loop_symbols_state(self, state) -> Set[LSBF_AlphabetSymbol]:
+        if state in self.transition_fn:
+            if state in self.transition_fn[state]:
+                return set(self.transition_fn[state][state])
+            else:
+                return set()
+        else:
+            return set()
+
+    def get_symbols_leading_from_state_to_state(self,
+                                                from_state: AutomatonState,
+                                                to_state: AutomatonState) -> Set[LSBF_AlphabetSymbol]:
+        if from_state in self.transition_fn:
+            if to_state in self.transition_fn[from_state]:
+                return set(self.transition_fn[from_state][to_state])
+        return set()
 
     def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
         nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
