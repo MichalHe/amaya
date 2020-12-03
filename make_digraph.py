@@ -32,6 +32,15 @@ arg_parser.add_argument('-v',
                         )
 
 
+arg_parser.add_argument('-p',
+                        '--purge-nonfinishing',
+                        help='After the final automaton is build, remove states which cannot lead to any final state',
+                        dest='purge_nonfinishing',
+                        default=False,
+                        action='store_true'
+                        )
+
+
 args = arg_parser.parse_args()
 
 if args.verbose:
@@ -63,6 +72,9 @@ def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
         domain = parse.SolutionDomain.INTEGERS
 
     nfa = parse.eval_assert_tree(asserts[0], domain=domain)
+
+    if args.purge_nonfinishing:
+        nfa.remove_nonfinishing_states()
 
     logger.info('Converting NFA to graphviz.')
     return convert_automaton_to_graphviz(nfa, automaton_label)

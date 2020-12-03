@@ -37,9 +37,12 @@ from transitions import (
     unite_alphabets,
     extend_transitions_to_new_alphabet_symbols,
     get_word_from_dfs_results,
-    iterate_over_active_variables
+    iterate_over_active_variables,
+    make_rotate_transition_function,
+    remove_all_transitions_that_contain_states,
 )
 import functools
+import collections
 
 
 AutomatonState = TypeVar('AutomatonState')
@@ -429,6 +432,30 @@ class NFA(Generic[AutomatonState]):
                         traversal_history[destination] = current_state
                         state_stack.append(destination)
         return (False, [])
+
+    def remove_nonfinishing_states(self):
+        '''BFS on rotated transitions'''
+        rotated_transitions = make_rotate_transition_function(self.transition_fn)
+
+        queue = collections.deque(self.final_states)
+        reachable_states = set()
+
+        while queue:
+            current_state = queue.popleft()
+            reachable_states.add(current_state)
+
+            # We might be processing a state that is terminal
+            if current_state not in rotated_transitions:
+                continue
+
+            for reachable_state in rotated_transitions[current_state]:
+                if reachable_state not in reachable_states:
+                    queue.append(reachable_state)
+
+        unreachable_states = self.states - reachable_states
+        if unreachable_states:
+            self.transition_fn = remove_all_transitions_that_contain_states(self.transition_fn, unreachable_states)
+            self.states = reachable_states
 
     @staticmethod
     def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:

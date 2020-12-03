@@ -251,3 +251,29 @@ def iterate_over_active_variables(all_variables: Tuple[str], active_variables: S
                     symbol.append('*')
 
         yield tuple(symbol)
+
+
+def make_rotate_transition_function(t: Transitions[State]) -> Transitions[State]:
+    rotated_transitions: Transitions[State] = {}
+
+    for origin in t:
+        for destination in t[origin]:
+            if destination not in rotated_transitions:
+                rotated_transitions[destination] = {}
+
+            rotated_transitions[destination][origin] = set(t[origin][destination])
+
+    return rotated_transitions
+
+
+def remove_all_transitions_that_contain_states(t: Transitions[State], states: Set[State]) -> Transitions[State]:
+    purged_transitions: Transitions[State] = {}
+    for origin in t:
+        if origin not in states:
+            for destination in t[origin]:
+                if destination not in states:
+                    if origin not in purged_transitions:
+                        purged_transitions[origin] = {}
+
+                    purged_transitions[origin][destination] = set(t[origin][destination])
+    return purged_transitions
