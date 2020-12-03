@@ -72,7 +72,24 @@ def get_variable_names_from_bindings(bindings: List[Tuple[str, str]]) -> List[st
     return list(map(lambda binding: binding[0], bindings))
 
 
+def strip_comments(source: str) -> str:
+    new_src = ''
+    inside_comment = False
+    for char in source:
+        if char == ';':
+            inside_comment = True
+        elif char == '\n':
+            inside_comment = False
+
+        if not inside_comment:
+            new_src += char
+    return new_src
+
+
 def lex(source: str) -> List[str]:
+    source = strip_comments(source)
+    import sys
+    print(source, file=sys.stderr)
     source = source.replace('(', ' ( ').replace(')', ' ) ')
     tokens = source.split()
     return tokens
