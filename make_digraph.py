@@ -1,4 +1,5 @@
 from visualization import convert_automaton_to_graphviz
+from smt_tools import translate_smtformula_to_human_readable
 from argparse import ArgumentParser
 import parse
 import sys
@@ -42,13 +43,14 @@ def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
 
     logger.info('Extracted following assert tree:')
     parse.pretty_print_smt_tree(asserts[0], printer=logger.info)
+    automaton_label = translate_smtformula_to_human_readable(asserts[0][1])
 
     logger.info('Running evaluation phase.')
 
     nfa = parse.eval_assert_tree(asserts[0])
 
     logger.info('Converting NFA to graphviz.')
-    return convert_automaton_to_graphviz(nfa)
+    return convert_automaton_to_graphviz(nfa, automaton_label)
 
 
 if args.file_input:

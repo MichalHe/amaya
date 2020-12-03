@@ -32,7 +32,9 @@ def compute_html_label_for_symbols(variable_names: List[str], symbols: List[Tupl
     return label
 
 
-def convert_automaton_to_graphviz(nfa: NFA, node_naming_fn: Callable[[int], str] = None):
+def convert_automaton_to_graphviz(nfa: NFA,
+                                  automaton_label: str = '',
+                                  node_naming_fn: Callable[[int], str] = None):
     graph = Digraph('automaton', strict=True, graph_attr={'rankdir': 'LR', 'ranksep': '1'})
 
     if not node_naming_fn:
@@ -68,5 +70,7 @@ def convert_automaton_to_graphviz(nfa: NFA, node_naming_fn: Callable[[int], str]
                     list(transition_symbols),
                     )
             )
+
+    graph.attr(label=f'<<FONT POINT-SIZE="27">{automaton_label}</FONT>>')
 
     return graph
