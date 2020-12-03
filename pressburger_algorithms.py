@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import (
     List,
     Tuple,
-    Union
+    Union,
+    Set
 )
 from log import logger
 from utils import vector_dot
@@ -226,6 +227,29 @@ def build_nfa_from_equality(eq: Relation):
     return nfa
 
 
+def create_and_link_prefinal_state(automaton: NFA,
+                                   current_state: int,
+                                   final_noteq_symbols: Set[Tuple[int, ...]],
+                                   self_loop_set: Set[Tuple[int, ...]],
+                                   final_set: Set[Tuple[int, ...]],
+                                   final_state: str):
+
+    prefinal_state = f'{current_state}\'prefinal'
+    automaton.add_state(prefinal_state)
+
+    # Link current_state and prefinal
+    for symbol in final_noteq_symbols:
+        automaton.update_transition_fn(current_state, symbol, prefinal_state)
+
+    # Create selfloop
+    for self_loop_symbol in self_loop_set:
+        automaton.update_transition_fn(prefinal_state, self_loop_symbol, prefinal_state)
+
+    # Link prefinal and final
+    for fin_symbol in final_set:
+        automaton.update_transition_fn(prefinal_state, fin_symbol, final_state)
+
+
 def build_nfa_from_sharp_inequality(s_ineq: Relation):
     alphabet = LSBF_Alphabet.from_inequation(s_ineq)
     nfa: NFA[NFA_AutomatonStateType] = NFA(
@@ -265,24 +289,27 @@ def build_nfa_from_sharp_inequality(s_ineq: Relation):
             final_set = set(final_symbols)
             self_loop_set = set(self_loop_symbols)
             eq_set = final_set.intersection(self_loop_set)
+            final_noteq_symbols = final_set - eq_set
 
             final_state = 'FINAL'
             nfa.add_state(final_state)
             nfa.add_final_state(final_state)
 
-            prefinal_state = f'{current_state}\'prefinal'
-            nfa.add_state(prefinal_state)
-
-            # Link current_state and prefinal
-            for symbol in (self_loop_set - eq_set):
-                nfa.update_transition_fn(current_state, symbol, prefinal_state)
-
-            # Create selfloop
-            for self_loop_symbol in self_loop_set:
-                nfa.update_transition_fn(prefinal_state, self_loop_symbol, prefinal_state)
-
-            # Link prefinal and final
-            for fin_symbol in final_set:
-                nfa.update_transition_fn(prefinal_state, fin_symbol, final_state)
-
+            # All symbols did lead to final, without selfloop
+            # So there is no such symbol which would be accepted by =
+            if final_noteq_symbols == final_set:
+                for symbol in final_set:
+                    nfa.update_transition_fn(current_state, symbol, final_state)
+            else:
+                # Otherwise we wanna take only symbols different from those
+                # accepted by =
+                if final_noteq_symbols:
+                    # There needs to be at least one such symbol (because all
+                    # might have been =
+                    create_and_link_prefinal_state(nfa,
+                                                   current_state,
+                                                   final_noteq_symbols,
+                                                   self_loop_set,
+                                                   final_set,
+                                                   final_state)
     return nfa
