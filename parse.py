@@ -1,9 +1,4 @@
-from pressburger_algorithms import (
-    build_nfa_from_inequality,
-    build_nfa_from_equality,
-    build_nfa_from_sharp_inequality,
-)
-
+import pressburger_algorithms as pa
 from ast_relations import extract_relation
 from automatons import NFA, AutomatonType
 from log import logger
@@ -12,24 +7,36 @@ from typing import (
     List,
     Tuple,
     Any,
-    Dict
+    Dict,
+    Callable
 )
-from enum import IntEnum
+from enum import IntEnum, Enum
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
 logger.setLevel(INFO)
 
 
-class ParsingOperation(IntEnum):
-    BUILD_NFA_FROM_INEQ = 1
-    BUILD_NFA_FROM_SHARP_INEQ = 2
-    BUILD_NFA_FROM_EQ = 3
-    NFA_UNION = 4
-    NFA_PROJECTION = 5
-    NFA_COMPLEMENT = 6
-    NFA_DETERMINIZE = 7
-    NFA_INTERSECT = 8
+class SolutionDomain(IntEnum):
+    NATURALS = 0
+    INTEGERS = 1
+
+
+class ParsingOperation(Enum):
+    BUILD_NFA_FROM_INEQ = 'build_nfa_from_ineq'
+    BUILD_NFA_FROM_SHARP_INEQ = 'build_nfa_from_sharp_ineq'
+    BUILD_NFA_FROM_EQ = 'build_nfa_from_sharp_ineq'
+    NFA_UNION = 'union'
+    NFA_PROJECTION = 'projection'
+    NFA_COMPLEMENT = 'complement'
+    NFA_DETERMINIZE = 'determinize'
+    NFA_INTERSECT = 'intersection'
+    BUILD_DFA_FROM_INEQ = 'build_dfa_from_ineq'
+    BUILD_DFA_FROM_SHARP_INEQ = 'build_dfa_from_ineq'
+    BUILD_DFA_FROM_EQ = 'build_dfa_from_ineq'
+
+
+IntrospectHandle = Callable[[NFA, ParsingOperation], None]
 
 
 def _eval_info(msg, depth):
@@ -127,10 +134,40 @@ def check_result_matches(source_text: str, emit_introspect=None) -> bool:
     return sat_matches
 
 
+def build_automaton_from_pressburger_relation_ast(relation_root,
+                                                  emit_introspect: IntrospectHandle,
+                                                  domain: SolutionDomain,
+                                                  depth: int) -> NFA:
+
+    # Encode the logic as data
+    building_handlers = {
+        SolutionDomain.INTEGERS: {
+            '<':  (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, pa.build_nfa_from_sharp_inequality),
+            '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ, pa.build_nfa_from_inequality),
+            '=':  (ParsingOperation.BUILD_NFA_FROM_EQ, pa.build_nfa_from_sharp_inequality)
+        },
+        SolutionDomain.NATURALS: {
+            '<':  (ParsingOperation.BUILD_DFA_FROM_SHARP_INEQ, pa.build_dfa_from_sharp_inequality),
+            '<=': (ParsingOperation.BUILD_DFA_FROM_INEQ, pa.build_dfa_from_inequality),
+            '=':  (ParsingOperation.BUILD_DFA_FROM_EQ, pa.build_dfa_from_sharp_inequality)
+        }
+    }
+
+    relation = extract_relation(relation_root)
+    operation, handle = building_handlers[domain][relation.operation]
+
+    automaton = handle(relation)
+    _eval_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)})', depth)
+    emit_introspect(automaton, operation)
+
+    return automaton
+
+
 def eval_smt_tree(root,
                   _debug_recursion_depth=0,
-                  emit_introspect=lambda nfa,
-                  operation: None) -> NFA:
+                  emit_introspect=lambda nfa, operation: None,
+                  domain: SolutionDomain = SolutionDomain.INTEGERS
+                  ) -> NFA:
     '''
     Params:
         emit_introspect:  Callable[[NFA], None] If set, it will get called whenever an operation
@@ -140,38 +177,18 @@ def eval_smt_tree(root,
     node_name = root[0]
     if node_name in ['<', '>', '<=', '>=', '=']:
         # We have found node which need to be translated into NFA
-
-        relation = extract_relation(root)
-        _eval_info(f'Building core nfa from relation: {relation}', _debug_recursion_depth)
-
-        if relation.operation == '<':
-            build_func = 'build_nfa_from_sharp_inequality'
-            parse_op = ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ
-            nfa = build_nfa_from_sharp_inequality(relation)
-        elif relation.operation == '<=':
-            build_func = 'build_nfa_from_inequality'
-            parse_op = ParsingOperation.BUILD_NFA_FROM_INEQ
-            nfa = build_nfa_from_inequality(relation)
-        elif relation.operation == '=':
-            build_func = 'build_nfa_from_equality'
-            parse_op = ParsingOperation.BUILD_NFA_FROM_EQ
-            nfa = build_nfa_from_equality(relation)
-
-        _eval_info(f' >> {build_func}({root}) (result size: {len(nfa.states)})', _debug_recursion_depth)
-
-        emit_introspect(nfa, parse_op)
-        return nfa
+        return build_automaton_from_pressburger_relation_ast(root, emit_introspect, domain, _debug_recursion_depth)
     else:
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
         # Current node is NFA operation
         if node_name == 'and':
             assert len(root) >= 3
             lhs_term = root[1]
-            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect)
+            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[term_i]
-                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect)
+                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
                 assert type(rhs) == NFA
                 lhs = lhs.intersection(rhs)
                 _eval_info(f' >> intersection(lhs, rhs) (result size: {len(lhs.states)})', _debug_recursion_depth)
@@ -180,11 +197,12 @@ def eval_smt_tree(root,
         elif node_name == 'or':
             assert len(root) >= 3
             lhs_term = root[1]
-            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect)
+            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[2]
-                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect)
+                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
+
                 assert type(rhs) == NFA
 
                 _eval_info(' >> union(lhs, rhs)', _debug_recursion_depth)
@@ -193,7 +211,7 @@ def eval_smt_tree(root,
             return lhs
         elif node_name == 'not':
             assert len(root) == 2
-            operand = eval_smt_tree(root[1], _debug_recursion_depth+1, emit_introspect=emit_introspect)
+            operand = eval_smt_tree(root[1], _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
 
             assert type(operand) == NFA
 
@@ -207,7 +225,7 @@ def eval_smt_tree(root,
         elif node_name == 'exists':
             assert len(root) == 3
             variable_names = get_variable_names_from_bindings(root[1])
-            nfa = eval_smt_tree(root[2], _debug_recursion_depth+1, emit_introspect=emit_introspect)
+            nfa = eval_smt_tree(root[2], _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
 
             # TODO: Check whether variables are in fact present in alphabet
             for var in variable_names:
@@ -221,16 +239,13 @@ def eval_smt_tree(root,
             raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}, assert_tree')
 
 
-def eval_assert_tree(assert_tree, emit_introspect=None):
+def eval_assert_tree(assert_tree, emit_introspect=lambda automaton, parse_op: None, domain=SolutionDomain.INTEGERS):
     assert assert_tree[0] == 'assert'
     forall_cnt = replace_forall_with_exists(assert_tree)
     logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
     implications_cnt = expand_implications(assert_tree)
     logger.info(f'Performed {implications_cnt} implications expansions in the AST.')
-    if emit_introspect is not None:
-        return eval_smt_tree(assert_tree[1], emit_introspect=emit_introspect)
-    else:
-        return eval_smt_tree(assert_tree[1])
+    return eval_smt_tree(assert_tree[1], emit_introspect=emit_introspect, domain=domain)
 
 
 def expand_multivariable_bindings(assertion_tree):

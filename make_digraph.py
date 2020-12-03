@@ -5,6 +5,7 @@ import parse
 import sys
 import logging
 from log import logger
+import cgi
 
 
 arg_parser = ArgumentParser()
@@ -15,12 +16,21 @@ arg_parser.add_argument('-i',
                         type=str,
                         default=None)
 
+arg_parser.add_argument('-d',
+                        '--domain',
+                        choices=['naturals', 'integers'],
+                        help='Choose which in which domain should the solution lie',
+                        dest='domain',
+                        type=str,
+                        default='integers')
+
 arg_parser.add_argument('-v',
                         '--verbose',
                         help='Prints parser status/progress messages',
                         default=False,
                         action='store_true'
                         )
+
 
 args = arg_parser.parse_args()
 
@@ -43,11 +53,16 @@ def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
 
     logger.info('Extracted following assert tree:')
     parse.pretty_print_smt_tree(asserts[0], printer=logger.info)
-    automaton_label = translate_smtformula_to_human_readable(asserts[0][1])
+    automaton_label = cgi.escape(translate_smtformula_to_human_readable(asserts[0][1]))
 
     logger.info('Running evaluation phase.')
 
-    nfa = parse.eval_assert_tree(asserts[0])
+    if args.domain == 'naturals':
+        domain = parse.SolutionDomain.NATURALS
+    else:
+        domain = parse.SolutionDomain.INTEGERS
+
+    nfa = parse.eval_assert_tree(asserts[0], domain=domain)
 
     logger.info('Converting NFA to graphviz.')
     return convert_automaton_to_graphviz(nfa, automaton_label)
