@@ -5,7 +5,7 @@ import parse
 import sys
 import logging
 from log import logger
-import cgi
+import html
 
 
 arg_parser = ArgumentParser()
@@ -19,7 +19,7 @@ arg_parser.add_argument('-i',
 arg_parser.add_argument('-d',
                         '--domain',
                         choices=['naturals', 'integers'],
-                        help='Choose which in which domain should the solution lie',
+                        help='Choose in which domain should the solution lie',
                         dest='domain',
                         type=str,
                         default='integers')
@@ -53,7 +53,7 @@ def export_dot_from_stmlibsrc(smtlib_src: str) -> str:
 
     logger.info('Extracted following assert tree:')
     parse.pretty_print_smt_tree(asserts[0], printer=logger.info)
-    automaton_label = cgi.escape(translate_smtformula_to_human_readable(asserts[0][1]))
+    automaton_label = html.escape(translate_smtformula_to_human_readable(asserts[0][1]))
 
     logger.info('Running evaluation phase.')
 
