@@ -109,6 +109,37 @@ def build_dfa_from_equality(eq: Relation) -> DFA:
     return dfa
 
 
+def build_dfa_from_sharp_inequality(ineq: Relation) -> DFA:
+    alphabet = LSBF_Alphabet.from_inequation(ineq)
+    dfa: DFA[NFA_AutomatonStateType] = DFA(
+        alphabet=alphabet,
+        automaton_type=AutomatonType.DFA,
+    )
+    dfa.add_initial_state(ineq.absolute_part)
+
+    work_queue: List[int] = [ineq.absolute_part]
+
+    while work_queue:
+        current_state = work_queue.pop()
+        dfa.add_state(current_state)
+
+        if current_state > 0:
+            dfa.add_final_state(current_state)
+
+        for alphabet_symbol in alphabet.symbols:
+            dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
+            next_value = current_state - dot
+
+            destination_state = math.floor(0.5 * next_value)
+
+            if not dfa.has_state_with_value(destination_state):
+                work_queue.append(destination_state)
+
+            dfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
+
+    return dfa
+
+
 def build_nfa_from_inequality(ineq: Relation) -> NFA[NFA_AutomatonStateType]:
     alphabet = LSBF_Alphabet.from_inequation(ineq)
     nfa: NFA[NFA_AutomatonStateType] = NFA(
