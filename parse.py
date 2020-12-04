@@ -130,7 +130,7 @@ def check_result_matches(source_text: str, emit_introspect=None) -> bool:
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Extracted {len(asserts)} from source text.')
 
-    nfa = eval_assert_tree(asserts[0], emit_introspect=emit_introspect)
+    nfa = eval_assert_tree(asserts[0])
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
     if ':status' in smt_info:
