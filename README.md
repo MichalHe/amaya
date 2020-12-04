@@ -8,19 +8,7 @@ python3 ./make_digraph.py -i <your_input_file>
 ```
 
 By default the script reads from stdin, but by passing `-i` flag, provided file is read instead. The output is to stdout.
-
-**Warning**: I haven't progressed as far as combining multiple inequations into one, so am quite sure a file contaning more then just one
-inequation might (will) not work.
-
-### TODO
-- [ ] Implemented implication
-- [ ] Implement equivalence (probably sufficient to deal only with 'trivial' automatons)
-- [ ] Implement smt2 Let function 
-- [ ] Fix tests: NUM{688,689,675}
-
-### Currently not passing TPTP tests:
-- [ ] NUM915=1.smt2 
-- [ ] NUM916=1.smt2  -- currently under debug
-- [ ] NUM917=1.smt2 
-- [ ] NUM918=1.smt2 
-- [ ] ARI590=1.smt2
+For more information run: 
+```sh
+python3 ./make_digraph.py --help
+```
