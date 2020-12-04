@@ -25,7 +25,7 @@ class SolutionDomain(IntEnum):
 class ParsingOperation(Enum):
     BUILD_NFA_FROM_INEQ = 'build_nfa_from_ineq'
     BUILD_NFA_FROM_SHARP_INEQ = 'build_nfa_from_sharp_ineq'
-    BUILD_NFA_FROM_EQ = 'build_nfa_from_sharp_ineq'
+    BUILD_NFA_FROM_EQ = 'build_nfa_from_eq'
     NFA_UNION = 'union'
     NFA_PROJECTION = 'projection'
     NFA_COMPLEMENT = 'complement'
@@ -88,8 +88,6 @@ def strip_comments(source: str) -> str:
 
 def lex(source: str) -> List[str]:
     source = strip_comments(source)
-    import sys
-    print(source, file=sys.stderr)
     source = source.replace('(', ' ( ').replace(')', ' ) ')
     tokens = source.split()
     return tokens
@@ -121,7 +119,7 @@ def get_asserts_from_ast(ast):
     return _asserts
 
 
-def check_result_matches(source_text: str, emit_introspect=None) -> bool:
+def check_result_matches(source_text: str, emit_introspect=lambda nfa, op: None) -> bool:
     tokens = lex(source_text)
     ast = build_syntax_tree(tokens)
 
@@ -130,7 +128,7 @@ def check_result_matches(source_text: str, emit_introspect=None) -> bool:
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Extracted {len(asserts)} from source text.')
 
-    nfa = eval_assert_tree(asserts[0])
+    nfa = eval_assert_tree(asserts[0], emit_introspect=emit_introspect)
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
     if ':status' in smt_info:
@@ -161,7 +159,7 @@ def build_automaton_from_pressburger_relation_ast(relation_root,
         SolutionDomain.INTEGERS: {
             '<':  (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, pa.build_nfa_from_sharp_inequality),
             '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ, pa.build_nfa_from_inequality),
-            '=':  (ParsingOperation.BUILD_NFA_FROM_EQ, pa.build_nfa_from_sharp_inequality)
+            '=':  (ParsingOperation.BUILD_NFA_FROM_EQ, pa.build_nfa_from_equality)
         },
         SolutionDomain.NATURALS: {
             '<':  (ParsingOperation.BUILD_DFA_FROM_SHARP_INEQ, pa.build_dfa_from_sharp_inequality),
