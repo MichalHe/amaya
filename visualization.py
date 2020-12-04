@@ -33,7 +33,7 @@ def compute_html_label_for_symbols(variable_names: List[str], symbols: List[Tupl
 
 
 def convert_automaton_to_graphviz(nfa: NFA,
-                                  automaton_label: str = '',
+                                  automaton_label: str = 'No label provided.',
                                   node_naming_fn: Callable[[int], str] = None):
     graph = Digraph('automaton', strict=True, graph_attr={'rankdir': 'LR', 'ranksep': '1'})
 
