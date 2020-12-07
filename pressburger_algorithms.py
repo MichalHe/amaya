@@ -229,7 +229,6 @@ def build_nfa_from_equality(eq: Relation):
 
 def create_and_link_prefinal_state(automaton: NFA,
                                    current_state: int,
-                                   final_noteq_symbols: Set[Tuple[int, ...]],
                                    self_loop_set: Set[Tuple[int, ...]],
                                    final_set: Set[Tuple[int, ...]],
                                    final_state: str):
@@ -238,7 +237,7 @@ def create_and_link_prefinal_state(automaton: NFA,
     automaton.add_state(prefinal_state)
 
     # Link current_state and prefinal
-    for symbol in final_noteq_symbols:
+    for symbol in (self_loop_set - final_set):
         automaton.update_transition_fn(current_state, symbol, prefinal_state)
 
     # Create selfloop
@@ -289,26 +288,27 @@ def build_nfa_from_sharp_inequality(s_ineq: Relation):
             final_set = set(final_symbols)
             self_loop_set = set(self_loop_symbols)
             eq_set = final_set.intersection(self_loop_set)
-            final_noteq_symbols = final_set - eq_set
+            final_state = None
 
-            final_state = 'FINAL'
-            nfa.add_state(final_state)
-            nfa.add_final_state(final_state)
+            if self_loop_set - final_set:
+                final_state = 'FINAL'
+                nfa.add_state(final_state)
+                nfa.add_final_state(final_state)
 
             # All symbols did lead to final, without selfloop
             # So there is no such symbol which would be accepted by =
-            if final_noteq_symbols == final_set:
+            if not eq_set:
                 for symbol in final_set:
                     nfa.update_transition_fn(current_state, symbol, final_state)
             else:
                 # Otherwise we wanna take only symbols different from those
                 # accepted by =
-                if final_noteq_symbols:
-                    # There needs to be at least one such symbol (because all
-                    # might have been =
+
+                # There needs to be at least one such symbol (because all
+                # might have been =
+                if final_state is not None:
                     create_and_link_prefinal_state(nfa,
                                                    current_state,
-                                                   final_noteq_symbols,
                                                    self_loop_set,
                                                    final_set,
                                                    final_state)
