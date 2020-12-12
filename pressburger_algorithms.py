@@ -11,7 +11,8 @@ from automatons import (
     DFA,
     NFA,
     LSBF_Alphabet,
-    AutomatonType
+    AutomatonType,
+    AutomatonState
 )
 from relations_structures import Relation
 import math
@@ -313,3 +314,39 @@ def build_nfa_from_sharp_inequality(s_ineq: Relation):
                                                    final_set,
                                                    final_state)
     return nfa
+
+
+def do_padding_closure(nfa: NFA):
+    finishing_set: Set[AutomatonState] = set()
+    for final_state in nfa.final_states:
+        finishing_states = nfa.get_states_with_transition_destination(final_state)
+        finishing_set.update(finishing_states)
+
+    work_queue: List[AutomatonState] = list(finishing_set)
+    while work_queue:
+        # Current state has transition to final for sure
+        current_state = work_queue.pop()
+
+        potential_states = nfa.get_states_with_transition_destination(current_state)
+        for potential_state in potential_states:
+            symbols_from_potential_to_current = nfa.get_symbols_leading_from_state_to_state(potential_state, current_state)
+            symbols_from_current_to_final = nfa.get_symbols_leading_from_state_to_state(current_state, final_state)
+
+            intersect = symbols_from_potential_to_current.intersection(symbols_from_current_to_final)
+
+            # Lookup symbols leading from potential state to final to see whether something changed
+            symbols_from_potential_to_final = nfa.get_symbols_leading_from_state_to_state(potential_state, final_state)
+
+            # (intersect - symbols_from_potential_to_final)  ===> check whether intersect brings any new symbols to transitions P->F
+            if intersect and (intersect - symbols_from_potential_to_final):
+                # Propagate the finishing ability
+                if final_state in nfa.transition_fn[potential_state]:
+                    # Some transition from potential to final was already made - just update it
+                    nfa.transition_fn[potential_state][final_state].update(intersect)
+                else:
+                    # There is no transition from potential to final
+                    nfa.transition_fn[potential_state][final_state] = intersect
+
+                # We need to check all states that could reach 'potential' -- they can now become finishing
+                if potential_state not in work_queue and potential_state != current_state:
+                    work_queue.append(potential_state)
