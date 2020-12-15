@@ -1,5 +1,5 @@
 from __future__ import annotations
-from enum import Enum
+from enum import IntEnum, Enum
 from typing import (
     Set,
     Dict,
@@ -57,7 +57,10 @@ TransitionFn = Dict[AutomatonState,
                     ]]
 
 
-AutomatonType = Enum('AutomatonType', 'DFA NFA')
+class AutomatonType(IntEnum):
+    DFA = 0x01
+    NFA = 0x02
+    TRIVIAL = 0x04
 
 
 @dataclass
@@ -434,8 +437,16 @@ class NFA(Generic[AutomatonState]):
             alphabet=self.alphabet,
             automaton_type=self.automaton_type
         )
+        
+
+
         result.states = set(self.states)
-        result.final_states = self.states - self.initial_states - self.final_states
+        if self.automaton_type & AutomatonType.TRIVIAL:
+            # In trivial automaton we only need to do alternation.
+            result.final_states = result.initial_states - result.final_states
+        else:
+            result.final_states = self.states - self.initial_states - self.final_states
+
         result.initial_states = set(self.initial_states)
         result.transition_fn = make_transitions_copy(self.transition_fn)
 
@@ -511,7 +522,7 @@ class NFA(Generic[AutomatonState]):
 
     @staticmethod
     def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:
-        nfa = NFA(alphabet, AutomatonType.DFA)
+        nfa = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
 
         final_state = 'FINAL'
         nfa.add_state(final_state)
@@ -526,7 +537,7 @@ class NFA(Generic[AutomatonState]):
 
     @staticmethod
     def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:
-        nfa = NFA(alphabet, AutomatonType.DFA)
+        nfa = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
 
         initial_state = 'INITIAL'
         nfa.add_state(initial_state)
