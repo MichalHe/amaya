@@ -103,7 +103,7 @@ def real_nfa() -> fsms.NFA:
 
 def test_simple_finality_propagation(simple_nfa: fsms.NFA):
     # Expect finallity propagation via sigma to every state
-    simple_nfa.do_padding_closure()
+    simple_nfa.perform_pad_closure()
 
     sigma = (0,)
     expected_transitions = [
@@ -118,7 +118,7 @@ def test_simple_finality_propagation(simple_nfa: fsms.NFA):
 
 
 def test_multipath_propagation(multipath_nfa: fsms.NFA):
-    multipath_nfa.do_padding_closure()
+    multipath_nfa.perform_pad_closure()
 
     sigma_1 = (0, 0)
     sigma_2 = (1, 1)
@@ -143,9 +143,9 @@ def test_multipath_propagation(multipath_nfa: fsms.NFA):
     assert transition_size == len(expected_trans)
 
 
-def test_advanced_propagation(advanced_pa: fsms.NFA):
-    transitions_before_padding = list(trans.iter_transition_fn(advanced_pa.transition_fn))
-    advanced_pa.do_padding_closure()
+def test_advanced_propagation(advanced_nfa: fsms.NFA):
+    transitions_before_padding = list(trans.iter_transition_fn(advanced_nfa.transition_fn))
+    advanced_nfa.perform_pad_closure()
 
     sigma_0 = (0, 0)
     sigma_1 = (0, 1)
@@ -164,38 +164,39 @@ def test_advanced_propagation(advanced_pa: fsms.NFA):
     all_transitions = expected_transitions + transitions_before_padding
 
     tc = 0
-    for t in trans.iter_transition_fn(advanced_pa.transition_fn):
+    for t in trans.iter_transition_fn(advanced_nfa.transition_fn):
         assert t in all_transitions
         tc += 1
     assert tc == len(all_transitions)
 
 
-def test_real_pressburger_automaton_after_projection(real_pa: fsms.NFA):
-    final_state = list(real_pa.final_states)[0]
+def test_real_pressburger_automaton_after_projection(real_nfa: fsms.NFA):
+    final_state = list(real_nfa.final_states)[0]
     sigma_0 = (0, '*')  # NOQA
     sigma_1 = (1, '*')  # NOQA
 
     expected_new_transition = (2, sigma_0, final_state)
     origin, symbol, dest = expected_new_transition
 
-    assert dest not in real_pa.get_transition_target(origin, symbol)
+    assert dest not in real_nfa.get_transition_target(origin, symbol)
 
-    real_pa.do_projection('y')
-    real_pa.do_padding_closure()
+    real_nfa = real_nfa.do_projection('y')  # Pad closure is done inside projection
 
-    assert dest in real_pa.get_transition_target(origin, symbol)
+    assert dest in real_nfa.get_transition_target(origin, symbol)
 
     # In fact every ending state (so except TRAP) should lead to final via every symbol
     all_symbols = set([sigma_0, sigma_1])
-    for state in real_pa.states - real_pa.final_states:
+    for state in real_nfa.states - real_nfa.final_states:
         if state == 'TRAP':
             continue
-        assert real_pa.get_symbols_leading_from_state_to_state(state, 'FINAL') == all_symbols
+        assert real_nfa.get_symbols_leading_from_state_to_state(state, 'FINAL') == all_symbols
 
-    real_pa.complement()
-    for state in real_pa.states - real_pa.final_states:
-        if state == 'TRAP':
-            continue
-        assert real_pa.get_symbols_leading_from_state_to_state(state, 'FINAL') == set()
+    dfa = real_nfa.determinize()
+    # TODO: Check for
+    # dfa = real_nfa.complement()
+    # for state in real_nfa.states - real_nfa.final_states:
+    #     if state == 'TRAP':
+    #         continue
+    #     assert real_nfa.get_symbols_leading_from_state_to_state(state, 'FINAL') == set()
 
-    print(real_pa.is_sat())
+    # print(real_nfa.is_sat())

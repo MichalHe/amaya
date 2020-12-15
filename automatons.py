@@ -278,7 +278,7 @@ class NFA(Generic[AutomatonState]):
         resulting_alphabet_var_count = len(self.alphabet.active_variables) - 1
 
         if resulting_alphabet_var_count == 0:
-            is_sat, word = self.is_sat()  # Check whether the language is nonempty
+            is_sat, _ = self.is_sat()  # Check whether the language is nonempty
             if is_sat:
                 return NFA.trivial_accepting(self.alphabet)
             else:
@@ -306,23 +306,40 @@ class NFA(Generic[AutomatonState]):
             return new_nfa
 
     def perform_pad_closure(self):
-        work_queue = list(self.final_states)
+        '''Performs in place padding closure on self.'''
+        finishing_set: Set[AutomatonState] = set()
+        for final_state in self.final_states:
+            finishing_states = self.get_states_with_transition_destination(final_state)
+            finishing_set.update(finishing_states)
 
-        padding_final_states = set()
-
+        work_queue: List[AutomatonState] = list(finishing_set)
         while work_queue:
-            current_final_state = work_queue.pop(0)
-            padding_final_states.add(current_final_state)
+            # Current state has transition to final for sure
+            current_state = work_queue.pop()
 
-            for origin_state in self.get_states_with_transition_destination(current_final_state):
-                padding_symbols = self.get_padding_symbols_for_state_leading_to_final_state(
-                    origin_state,
-                    current_final_state)
-                if padding_symbols:
-                    if origin_state not in work_queue and origin_state not in padding_final_states:
-                        work_queue.append(origin_state)
+            potential_states = self.get_states_with_transition_destination(current_state)
+            for potential_state in potential_states:
+                symbols_from_potential_to_current = self.get_symbols_leading_from_state_to_state(potential_state, current_state)
+                symbols_from_current_to_final = self.get_symbols_leading_from_state_to_state(current_state, final_state)
 
-        self.final_states = padding_final_states
+                intersect = symbols_from_potential_to_current.intersection(symbols_from_current_to_final)
+
+                # Lookup symbols leading from potential state to final to see whether something changed
+                symbols_from_potential_to_final = self.get_symbols_leading_from_state_to_state(potential_state, final_state)
+
+                # (intersect - symbols_from_potential_to_final)  ===> check whether intersect brings any new symbols to transitions P->F
+                if intersect and (intersect - symbols_from_potential_to_final):
+                    # Propagate the finishing ability
+                    if final_state in self.transition_fn[potential_state]:
+                        # Some transition from potential to final was already made - just update it
+                        self.transition_fn[potential_state][final_state].update(intersect)
+                    else:
+                        # There is no transition from potential to final
+                        self.transition_fn[potential_state][final_state] = intersect
+
+                    # We need to check all states that could reach 'potential' -- they can now become finishing
+                    if potential_state not in work_queue and potential_state != current_state:
+                        work_queue.append(potential_state)
 
     def get_states_with_transition_destination(self, destination: AutomatonState) -> Set[AutomatonState]:
         states = set()
