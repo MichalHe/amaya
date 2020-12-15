@@ -192,11 +192,6 @@ def test_real_pressburger_automaton_after_projection(real_nfa: fsms.NFA):
         assert real_nfa.get_symbols_leading_from_state_to_state(state, 'FINAL') == all_symbols
 
     dfa = real_nfa.determinize()
-    # TODO: Check for
-    # dfa = real_nfa.complement()
-    # for state in real_nfa.states - real_nfa.final_states:
-    #     if state == 'TRAP':
-    #         continue
-    #     assert real_nfa.get_symbols_leading_from_state_to_state(state, 'FINAL') == set()
-
-    # print(real_nfa.is_sat())
+    dfa = dfa.complement()
+    for state in real_nfa.states - real_nfa.final_states:
+        assert not real_nfa.get_symbols_leading_from_state_to_state(state, 'FINAL')
