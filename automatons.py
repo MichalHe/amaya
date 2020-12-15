@@ -254,8 +254,40 @@ class NFA(Generic[AutomatonState]):
 
                 if dfa_state:
                     determinized_automaton.update_transition_fn(unexplored_dfa_state, symbol, dfa_state)
-
+        
+        determinized_automaton.add_trap_state()
         return determinized_automaton
+
+    def add_trap_state(self):
+        '''Adds trap (sink) state with transitions to it as needed.
+        The Given automaton should be determinized first. 
+        '''
+        trap_state_present: bool = False
+        # Whole alphabet..
+        alphabet_active_symbols = set(iterate_over_active_variables(self.alphabet.variable_names, self.alphabet.active_variables))
+        trap_state = 'TRAP'
+
+        new_transitions = make_transitions_copy(self.transition_fn)
+
+        states = list(self.states)
+        for origin in states:
+            out_symbols = set()
+            for dest in self.transition_fn[origin]:
+                out_symbols.update(self.transition_fn[origin][dest])
+
+            missing_symbols = alphabet_active_symbols - out_symbols
+
+            if missing_symbols and not trap_state_present:
+                self.add_state(trap_state)
+                universal_symbol = tuple(['*' for v in self.alphabet.variable_names])
+                insert_into_transition_fn(new_transitions, trap_state, universal_symbol, trap_state)
+                trap_state_present = True
+
+            for missing_symbol in missing_symbols:
+                # Mutating dictionary while iterating over it.
+                print(f'State {origin} is missing transition for {missing_symbol}')
+                insert_into_transition_fn(new_transitions, trap_state, missing_symbol, trap_state)
+
 
     def _rename_own_states(self):
         debug_fn: Optional[functools.partial[None]]
@@ -264,7 +296,7 @@ class NFA(Generic[AutomatonState]):
         else:
             debug_fn = None
 
-        hightest_state, state_name_translation = create_enumeration_state_translation_map(self.states, debug_fn, start_from=0)
+        _, state_name_translation = create_enumeration_state_translation_map(self.states, debug_fn, start_from=0)
 
         def translate(state: AutomatonState) -> int:
             return state_name_translation[state]
@@ -395,12 +427,15 @@ class NFA(Generic[AutomatonState]):
         return (hightest_state, nfa)
 
     def complement(self) -> NFA:
+        ''' The complement is done with respect to \\Sigma^{+},
+            since empty word encodes nothing.
+        '''
         result: NFA[AutomatonState] = NFA(
             alphabet=self.alphabet,
             automaton_type=self.automaton_type
         )
         result.states = set(self.states)
-        result.final_states = self.states.difference(self.final_states)
+        result.final_states = self.states - self.initial_states - self.final_states
         result.initial_states = set(self.initial_states)
         result.transition_fn = make_transitions_copy(self.transition_fn)
 
@@ -444,7 +479,7 @@ class NFA(Generic[AutomatonState]):
             else:
 
                 transitions = self.transition_fn[current_state]
-                for destination, symbols in transitions.items():
+                for destination, _ in transitions.items():
                     if destination not in explored_states:
                         traversal_history[destination] = current_state
                         state_stack.append(destination)
