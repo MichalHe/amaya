@@ -245,9 +245,9 @@ def eval_smt_tree(root,
             # TODO: Check whether variables are in fact present in alphabet
             for var in variable_names:
                 nfa = nfa.do_projection(var)
+                emit_introspect(nfa, ParsingOperation.NFA_PROJECTION)
 
             _eval_info(f' >> projection({variable_names}) (result_size: {len(nfa.states)})', _debug_recursion_depth)
-            emit_introspect(nfa, ParsingOperation.NFA_PROJECTION)
             return nfa
 
         else:

@@ -288,8 +288,9 @@ class NFA(Generic[AutomatonState]):
 
             for missing_symbol in missing_symbols:
                 # Mutating dictionary while iterating over it.
-                print(f'State {origin} is missing transition for {missing_symbol}')
-                insert_into_transition_fn(new_transitions, trap_state, missing_symbol, trap_state)
+                insert_into_transition_fn(new_transitions, origin, missing_symbol, trap_state)
+        
+        self.transition_fn = new_transitions
 
 
     def _rename_own_states(self):
@@ -437,17 +438,15 @@ class NFA(Generic[AutomatonState]):
             alphabet=self.alphabet,
             automaton_type=self.automaton_type
         )
-        
 
-
+        result.initial_states = set(self.initial_states)
         result.states = set(self.states)
         if self.automaton_type & AutomatonType.TRIVIAL:
             # In trivial automaton we only need to do alternation.
-            result.final_states = result.initial_states - result.final_states
+            result.final_states = result.initial_states - self.final_states
         else:
             result.final_states = self.states - self.initial_states - self.final_states
 
-        result.initial_states = set(self.initial_states)
         result.transition_fn = make_transitions_copy(self.transition_fn)
 
         return result
