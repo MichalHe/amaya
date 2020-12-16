@@ -113,7 +113,7 @@ def test_simple_finality_propagation(simple_nfa: fsms.NFA):
     ]
 
     for expected_transition in expected_transitions:
-        origin, symbol, destination = expected_transition
+        origin, symbol, _ = expected_transition
         assert 'F' in simple_nfa.get_transition_target(origin, symbol)
 
 
