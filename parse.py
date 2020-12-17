@@ -171,9 +171,18 @@ def build_automaton_from_pressburger_relation_ast(relation_root,
     relation = extract_relation(relation_root)
     operation, handle = building_handlers[domain][relation.operation]
 
-    automaton = handle(relation)
+    if relation.operation == '<':
+        eq = pa.build_nfa_from_equality(relation)
+        emit_introspect(eq, ParsingOperation.BUILD_NFA_FROM_EQ)
+        neq = eq.determinize().complement()
+        ineq = pa.build_nfa_from_inequality(relation)
+        emit_introspect(ineq, ParsingOperation.BUILD_DFA_FROM_INEQ)
+        automaton = neq.intersection(ineq)
+        emit_introspect(automaton, ParsingOperation.NFA_INTERSECT)
+    else:
+        automaton = handle(relation)
+        emit_introspect(automaton, operation)
     _eval_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)})', depth)
-    emit_introspect(automaton, operation)
 
     return automaton
 
@@ -296,7 +305,7 @@ def replace_forall_with_exists(assertion_tree):
     '''
     node_replaced_const = 0
     if assertion_tree[0] == 'forall':
-        forall_kw, binders, stmt = assertion_tree
+        _, binders, stmt = assertion_tree
 
         not_stmt = ['not', stmt]
         exists = ['exists', binders, not_stmt]
