@@ -275,8 +275,9 @@ class NFA(Generic[AutomatonState]):
         states = list(self.states)
         for origin in states:
             out_symbols = set()
-            for dest in self.transition_fn[origin]:
-                out_symbols.update(self.transition_fn[origin][dest])
+            if origin in self.transition_fn:
+                for dest in self.transition_fn[origin]:
+                    out_symbols.update(self.transition_fn[origin][dest])
 
             missing_symbols = alphabet_active_symbols - out_symbols
 
