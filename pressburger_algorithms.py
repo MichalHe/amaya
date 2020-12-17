@@ -238,7 +238,17 @@ def create_and_link_prefinal_state(automaton: NFA,
         automaton.update_transition_fn(prefinal_state, fin_symbol, final_state)
 
 
-def build_nfa_from_sharp_inequality(s_ineq: Relation):
+def build_nfa_from_sharp_inequality(ineq: Relation, emit_handle=None):
+    nfa_eq = build_nfa_from_equality(ineq)
+    nfa_neq = nfa_eq.complement()
+    nfa_ineq = build_nfa_from_inequality(ineq)
+
+    result = nfa_neq.intersection(nfa_ineq)
+    result.remove_nonfinishing_states()
+    return result
+
+
+def build_nfa_from_sharp_inequality2(s_ineq: Relation):
     alphabet = LSBF_Alphabet.from_inequation(s_ineq)
     nfa: NFA[NFA_AutomatonStateType] = NFA(
         alphabet=alphabet,
@@ -287,6 +297,7 @@ def build_nfa_from_sharp_inequality(s_ineq: Relation):
             # All symbols did lead to final, without selfloop
             # So there is no such symbol which would be accepted by =
             if not eq_set:
+                final_state = 'FINAL'
                 for symbol in final_set:
                     nfa.update_transition_fn(current_state, symbol, final_state)
             else:
