@@ -22,13 +22,8 @@ Transitions = Dict[State, Dict[State, Set[Symbol]]]
 VariableNames = List[str]
 
 
-# Create united alphabet
-# Function for extending to new alphabet
-# already implemented unite_transitions
-
-
 def unite_alphabets(alphabet1: VariableNames, alphabet2: VariableNames) -> VariableNames:
-    return list(sorted(set(alphabet1 + alphabet2)))
+    return list(sorted(set(alphabet1).union(set(alphabet2))))
 
 
 def get_indices_of_missing_variables(variables: VariableNames, variables_subset: VariableNames) -> List[int]:
@@ -76,7 +71,7 @@ def extend_symbol_with_missing_indices(symbol: Tuple[int, ...], missing_indices:
 
 
 def extend_transitions_to_new_alphabet_symbols(old_variables: VariableNames, new_variables: VariableNames, t: Transitions) -> Transitions:
-    missing_indices = get_indices_of_missing_variables(old_variables, new_variables)
+    missing_indices = get_indices_of_missing_variables(new_variables, old_variables)
     extended_transitions = make_transitions_copy(t)
 
     for origin in t:
