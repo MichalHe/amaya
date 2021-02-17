@@ -41,8 +41,8 @@ def check_file(test_filepath, timings=None):
         smt_text = smt_file.read()
 
         if timings is not None:
-            runtime = timeit.timeit(functools.partial(check_result_matches, smt_text), number=1)
-            timings[test_filepath] = runtime
+            runtime = timeit.timeit(functools.partial(check_result_matches, smt_text), number=10)
+            timings[test_filepath] = round(runtime / 10, 4)
 
         return check_result_matches(smt_text)
 
