@@ -36,6 +36,11 @@ class ParsingOperation(Enum):
     BUILD_DFA_FROM_EQ = 'build_dfa_from_ineq'
 
 
+class VariableType(IntEnum):
+    Int = 0x01
+    Bool = 0x02
+
+
 IntrospectHandle = Callable[[NFA, ParsingOperation], None]
 
 
@@ -68,8 +73,19 @@ def pretty_print_smt_tree(tree, printer=None, depth=0):
         printer(PRETTY_PRINT_INDENT * depth + f'{tree}')
 
 
-def get_variable_names_from_bindings(bindings: List[Tuple[str, str]]) -> List[str]:
-    return list(map(lambda binding: binding[0], bindings))
+def get_variable_binding_info(bindings: List[Tuple[str, str]]) -> Dict[str, VariableType]:
+    var_info: Dict[str, VariableType] = {}
+    for binding in bindings:
+        var_name, var_type_raw = binding
+        if var_type_raw == 'Int':
+            var_type = VariableType.Int
+        elif var_type_raw == 'Bool':
+            var_type = VariableType.Bool
+        else:
+            raise ValueError("Unknown datatype bound to a variable: {var_type_raw}")
+        var_info[var_name] = var_type
+
+    return var_info
 
 
 def strip_comments(source: str) -> str:
@@ -188,6 +204,7 @@ def build_automaton_from_pressburger_relation_ast(relation_root,
 
 
 def eval_smt_tree(root,
+                  variable_types: Dict[str, VariableType] = dict(),
                   _debug_recursion_depth=0,
                   emit_introspect=lambda nfa, operation: None,
                   domain: SolutionDomain = SolutionDomain.INTEGERS
@@ -201,6 +218,7 @@ def eval_smt_tree(root,
     node_name = root[0]
     if node_name in ['<', '>', '<=', '>=', '=']:
         # We have found node which need to be translated into NFA
+        # TODO(Psyco): this subformula might contain `ite` expression
         return build_automaton_from_pressburger_relation_ast(root, emit_introspect, domain, _debug_recursion_depth)
     else:
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
@@ -208,11 +226,20 @@ def eval_smt_tree(root,
         if node_name == 'and':
             assert len(root) >= 3
             lhs_term = root[1]
-            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
+            lhs = eval_smt_tree(lhs_term,
+                                variable_types=variable_types,
+                                _debug_recursion_depth=_debug_recursion_depth+1,
+                                emit_introspect=emit_introspect,
+                                domain=domain)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[term_i]
-                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
+                rhs = eval_smt_tree(rhs_term,
+                                    variable_types=variable_types,
+                                    _debug_recursion_depth=_debug_recursion_depth+1,
+                                    emit_introspect=emit_introspect,
+                                    domain=domain)
+
                 assert type(rhs) == NFA
                 lhs = lhs.intersection(rhs)
                 _eval_info(f' >> intersection(lhs, rhs) (result size: {len(lhs.states)})', _debug_recursion_depth)
@@ -221,11 +248,19 @@ def eval_smt_tree(root,
         elif node_name == 'or':
             assert len(root) >= 3
             lhs_term = root[1]
-            lhs = eval_smt_tree(lhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
+            lhs = eval_smt_tree(lhs_term,
+                                variable_types=variable_types,
+                                _debug_recursion_depth=_debug_recursion_depth+1,
+                                emit_introspect=emit_introspect,
+                                domain=domain)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[2]
-                rhs = eval_smt_tree(rhs_term, _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
+                rhs = eval_smt_tree(rhs_term,
+                                    variable_types=variable_types,
+                                    _debug_recursion_depth=_debug_recursion_depth+1,
+                                    emit_introspect=emit_introspect,
+                                    domain=domain)
 
                 assert type(rhs) == NFA
 
@@ -235,7 +270,11 @@ def eval_smt_tree(root,
             return lhs
         elif node_name == 'not':
             assert len(root) == 2
-            operand = eval_smt_tree(root[1], _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
+            operand = eval_smt_tree(root[1],
+                                    variable_types=variable_types,
+                                    _debug_recursion_depth=_debug_recursion_depth+1,
+                                    emit_introspect=emit_introspect,
+                                    domain=domain)
 
             assert type(operand) == NFA
 
@@ -248,15 +287,27 @@ def eval_smt_tree(root,
             return operand
         elif node_name == 'exists':
             assert len(root) == 3
-            variable_names = get_variable_names_from_bindings(root[1])
-            nfa = eval_smt_tree(root[2], _debug_recursion_depth+1, emit_introspect=emit_introspect, domain=domain)
 
-            # TODO: Check whether variables are in fact present in alphabet
-            for var in variable_names:
-                nfa = nfa.do_projection(var)
+            # TODO(Psyco): Here we need to further extract the types of the variables
+            variable_bindings = get_variable_binding_info(root[1])
+
+            # Maybe some variable information was already passed down to us -
+            # in that case we want to merge the two dictionaries together
+            if len(variable_types) > 0:
+                variable_bindings.update(variable_types)
+
+            nfa = eval_smt_tree(root[2],
+                                variable_types=variable_bindings,
+                                _debug_recursion_depth=_debug_recursion_depth+1,
+                                emit_introspect=emit_introspect,
+                                domain=domain)
+
+            # TODO: Check whether variables are in fact present in the alphabet
+            for var_name in variable_bindings:
+                nfa = nfa.do_projection(var_name)
                 emit_introspect(nfa, ParsingOperation.NFA_PROJECTION)
 
-            _eval_info(f' >> projection({variable_names}) (result_size: {len(nfa.states)})', _debug_recursion_depth)
+            _eval_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _debug_recursion_depth)
             return nfa
 
         else:
