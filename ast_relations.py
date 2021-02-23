@@ -221,6 +221,13 @@ def expand_relation_on_ite(ast):
     ite_ctl_variables = get_ite_info(ast)
     ctl_var_count = len(ite_ctl_variables)
 
+    logger.info(
+        'Found {0} ITE control variables when evaluating {1}'.format(
+            ctl_var_count,
+            ast
+        )
+    )
+
     if ctl_var_count == 0:
         return ast  # No expansions need to be performed
 
@@ -237,4 +244,12 @@ def expand_relation_on_ite(ast):
         ite_ctl_eval_expr.append(ite_eval_tree)
         relation_expr.append(ite_ctl_eval_expr)
 
+        logger.debug(
+            'ITE expanded for assigment: {0} into: {1}'.format(
+                var_assignment,
+                ite_ctl_eval_expr
+            )
+        )
+
+    logger.info('AST was ITE expanded into {0}'.format(relation_expr))
     return relation_expr
