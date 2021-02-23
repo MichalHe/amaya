@@ -1,8 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Set
 from log import logger
 from relations_structures import Relation
+from utils import number_to_bit_tuple
 
 
 @dataclass
@@ -159,3 +160,77 @@ def extract_relation(ast) -> Relation:
     rhs_expr = evaluate_expression(rhs)
 
     return normalize_inequation(op, lhs_expr, rhs_expr)
+
+
+def get_ite_info(ast) -> Set[str]:
+    if type(ast) != list:
+        return set()
+
+    root = ast[0]
+    if root == 'ite':
+        assert len(ast) == 4
+        ite_variable = ast[1]
+        ite_true_tree = ast[2]
+        ite_false_tree = ast[3]
+
+        ite_true_info = get_ite_info(ite_true_tree)
+        ite_false_info = get_ite_info(ite_false_tree)
+
+        return set([ite_variable]).union(ite_true_info).union(ite_false_info)
+    elif root in ['+', '-', '*', '<=', '>=', '>', '<', '=']:
+        return get_ite_info(ast[1]).union(get_ite_info(ast[2]))
+
+
+def evaluate_ite_for_var_assignment(ast, assignment: Dict[str, bool]):
+    if type(ast) != list:
+        # We have found a leaf, no processing is to be done
+        return ast
+
+    root = ast[0]
+    if root == 'ite':
+        ite_variable = ast[1]
+        ite_val = assignment[ite_variable]
+
+        if ite_val is True:
+            true_subtree = ast[2]
+            return evaluate_ite_for_var_assignment(true_subtree, assignment)
+        else:
+            false_subtree = ast[3]
+            return evaluate_ite_for_var_assignment(false_subtree, assignment)
+    elif root in ['+', '-', '*', '<=', '>=', '>', '<', '=']:
+        return [
+            root,
+            evaluate_ite_for_var_assignment(ast[1], assignment),
+            evaluate_ite_for_var_assignment(ast[2], assignment),
+        ]
+
+
+def gen_conjunction_expr_from_bool_vars(bool_assignment: Dict[str, bool]):
+    expr = ['and']
+    for name, value in bool_assignment.items():
+        if value is True:
+            expr.append(name)
+        else:
+            expr.append(['not', name])
+    return expr
+
+
+def extract_relation_v2(ast):
+    # (>= sub sub)
+    ite_ctl_variables = get_ite_info(ast)
+    ctl_var_count = len(ite_ctl_variables)
+
+    relation_expr = ['or']
+    for i in range(2**ctl_var_count):
+        var_raw_values = number_to_bit_tuple(i, ctl_var_count)
+        # Convert bit values to their Bool form
+        var_values = [True if x == 1 else False for x in var_raw_values]
+        var_assignment: Dict[str, bool] = dict(zip(ite_ctl_variables, var_values))
+
+        ite_ctl_eval_expr = gen_conjunction_expr_from_bool_vars(var_assignment)
+        ite_eval_tree = evaluate_ite_for_var_assignment(ast, var_assignment)
+
+        ite_ctl_eval_expr.append(ite_eval_tree)
+        relation_expr.append(ite_ctl_eval_expr)
+
+    return relation_expr
