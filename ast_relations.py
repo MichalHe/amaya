@@ -215,10 +215,14 @@ def gen_conjunction_expr_from_bool_vars(bool_assignment: Dict[str, bool]):
     return expr
 
 
-def extract_relation_v2(ast):
+def expand_relation_on_ite(ast):
+    '''Converts the AST containing ITE expressions into an equivalent disjunction.'''
     # (>= sub sub)
     ite_ctl_variables = get_ite_info(ast)
     ctl_var_count = len(ite_ctl_variables)
+
+    if ctl_var_count == 0:
+        return ast  # No expansions need to be performed
 
     relation_expr = ['or']
     for i in range(2**ctl_var_count):
