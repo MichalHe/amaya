@@ -277,6 +277,61 @@ def get_nfa_for_term(term: Union[str, List],
         return nfa
 
 
+def evaluate_binary_conjunction_term(term: Union[str, List],
+                                     ctx: EvaluationContext,
+                                     reduction_fn: Callable[[NFA, NFA], NFA],
+                                     reduction_name: str,
+                                     variable_types: Dict[str, VariableType],
+                                     _depth: int) -> NFA:
+    ''' Evaluates AND, OR terms'''
+    assert len(term) >= 3
+    lhs_term = term[1]
+
+    lhs = get_nfa_for_term(lhs_term, ctx, variable_types, _depth)
+
+    for term_i in range(2, len(term)):
+        rhs_term = term[term_i]
+        rhs = get_nfa_for_term(rhs_term, ctx, variable_types, _depth)
+
+        assert type(rhs) == NFA
+        lhs = reduction_fn(lhs, rhs)
+        _eval_info(f' >> {reduction_name}(lhs, rhs) (result size: {len(lhs.states)})', _depth)
+        ctx.emit_evaluation_introspection_info(lhs, ParsingOperation.NFA_INTERSECT)
+
+    return lhs
+
+
+def evaluate_and_term(term: Union[str, List],
+                      ctx: EvaluationContext,
+                      variable_types: Dict[str, VariableType],
+                      _depth: int) -> NFA:
+
+    return evaluate_binary_conjunction_term(
+        term,
+        ctx,
+        lambda nfa1, nfa2: nfa1.intersection(nfa2),
+        'intersection',
+        variable_types,
+        _depth
+    )
+
+
+def evaluate_or_term(term: Union[str, List],
+                     ctx: EvaluationContext,
+                     variable_types: Dict[str, VariableType],
+                     _depth: int) -> NFA:
+
+    return evaluate_binary_conjunction_term(
+        term,
+        ctx,
+        lambda nfa1, nfa2: nfa1.union(nfa2),
+        'union',
+        variable_types,
+        _depth
+    )
+
+
+
 def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
                   ctx: EvaluationContext,
                   variable_types: Dict[str, VariableType] = dict(),
@@ -324,51 +379,22 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
         # Current node is a NFA operation
         if node_name == 'and':
-            assert len(root) >= 3
-            lhs_term = root[1]
-
-            lhs = get_nfa_for_term(lhs_term, ctx, variable_types, _debug_recursion_depth)
-
-            for term_i in range(2, len(root)):
-                rhs_term = root[term_i]
-                rhs = get_nfa_for_term(rhs_term, ctx, variable_types, _debug_recursion_depth)
-
-                assert type(rhs) == NFA
-                lhs = lhs.intersection(rhs)
-                _eval_info(f' >> intersection(lhs, rhs) (result size: {len(lhs.states)})', _debug_recursion_depth)
-                ctx.emit_evaluation_introspection_info(lhs, ParsingOperation.NFA_INTERSECT)
-
-            return lhs
+            return evaluate_and_term(root, ctx, variable_types, _debug_recursion_depth)
         elif node_name == 'or':
-            assert len(root) >= 3
-            lhs_term = root[1]
-
-            lhs = get_nfa_for_term(lhs_term, ctx, variable_types, _debug_recursion_depth)
-
-            for term_i in range(2, len(root)):
-                rhs_term = root[2]
-                rhs = get_nfa_for_term(rhs_term, ctx, variable_types, _debug_recursion_depth)
-
-                assert type(rhs) == NFA
-
-                _eval_info(' >> union(lhs, rhs)', _debug_recursion_depth)
-                lhs = lhs.union(rhs)
-                ctx.emit_evaluation_introspection_info(lhs, ParsingOperation.NFA_UNION)
-            return lhs
+            return evaluate_or_term(root, ctx, variable_types, _debug_recursion_depth)
         elif node_name == 'not':
             assert len(root) == 2
-            operand = eval_smt_tree(root[1],
-                                    ctx,
-                                    variable_types=variable_types,
-                                    _debug_recursion_depth=_debug_recursion_depth+1)
+            operand = get_nfa_for_term(root[1], ctx, variable_types, _debug_recursion_depth)
 
             assert type(operand) == NFA
 
             if operand.automaton_type == AutomatonType.NFA:
                 operand = operand.determinize()
                 _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _debug_recursion_depth)
+
             operand = operand.complement()
             _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _debug_recursion_depth)
+
             ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_COMPLEMENT)
             return operand
         elif node_name == 'exists':
@@ -381,10 +407,7 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
             if len(variable_types) > 0:
                 variable_bindings.update(variable_types)
 
-            nfa = eval_smt_tree(root[2],
-                                ctx,
-                                variable_types=variable_bindings,
-                                _debug_recursion_depth=_debug_recursion_depth+1)
+            nfa = get_nfa_for_term(root[2], ctx, variable_types, _debug_recursion_depth)
 
             # TODO: Check whether variables are in fact present in the alphabet
             for var_name in variable_bindings:
