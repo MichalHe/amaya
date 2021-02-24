@@ -63,6 +63,10 @@ class EvaluationContext():
     def insert_binding(self, var_name: str, nfa: NFA):
         self.binding_stack[-1][var_name] = nfa
 
+    def populate_current_binding_context_with(self, binding: Dict[str, NFA]):
+        for var_name, nfa in binding.items():
+            self.binding_stack[-1][var_name] = nfa
+
     def pop_binding_context(self):
         self.binding_stack.pop(-1)
 
@@ -237,7 +241,7 @@ def build_automaton_for_boolean_variable(var_name: str, var_value: bool) -> NFA:
     return NFA.for_bool_variable(var_name, var_value)
 
 
-def evaluate_bindings(binding_list) -> Dict[str, NFA]:
+def evaluate_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA]:
     logger.debug(f'Evaluating binding list of size: {len(binding_list)}')
     binding: Dict[str, NFA] = {}
     for var_name, expr in binding_list:
@@ -375,9 +379,24 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
             return nfa
 
         elif node_name == 'let':
+            # `let` has this structure [`let`, `<binding_list>`, <term>]
+            assert len(root) == 3
             binding_list = root[1]
-            bindings = evaluate_bindings(binding_list)
-            return bindings
+            term = root[2]
+
+            ctx.new_binding_context()
+
+            # The variables in bindings can be evaluated to their automatons.
+            bindings = evaluate_bindings(binding_list, ctx)  # TODO(psyco): Lookup variables when evaluating bindings.
+            ctx.populate_current_binding_context_with(bindings)
+
+            # The we evaluate the term, in fact represents the value of the
+            # whole `let` block
+            term_nfa = eval_assert_tree(term, ctx)
+
+            ctx.pop_binding_context()  # We are leaving the `let` block
+            return term_nfa
+
         else:
             raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}, assert_tree')
 
