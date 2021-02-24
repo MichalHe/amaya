@@ -7,6 +7,7 @@ from typing import (
     List,
     Tuple,
     Any,
+    Union,
     Dict,
     Callable,
     Optional
@@ -246,10 +247,34 @@ def evaluate_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA]:
     binding: Dict[str, NFA] = {}
     for var_name, expr in binding_list:
         logger.debug(f'Building automaton for var {var_name} with expr: {expr}')
-        nfa = eval_smt_tree(expr)  # Indirect recursion, here we go
+        nfa = eval_smt_tree(expr, ctx)  # Indirect recursion, here we go
         binding[var_name] = nfa
 
     return binding
+
+
+def get_nfa_for_term(term: Union[str, List],
+                     ctx: EvaluationContext,
+                     variable_types: Dict[str, VariableType],
+                     _depth: int) -> NFA:
+    if type(term) == str:
+        # If it is a string, then it should reference a variable
+        # previously bound to a value
+        logger.debug('Found a usage of bound variable in evaluated node.')
+        nfa = ctx.get_binding(term)
+        if nfa is None:
+            logger.fatal('A referenced variable: `{term}` was not found in any of the binding contexts, is SMT2 file malformed?.')
+            raise ValueError('A variable `{term}` referenced inside AND could not be queried for its NFA.')
+        else:
+            logger.debug('Value query for variable `{term}` OK.')
+        return nfa
+    else:
+        # The node must be evaluated first
+        nfa = eval_smt_tree(term,
+                            ctx,
+                            variable_types=variable_types,
+                            _debug_recursion_depth=_depth+1)
+        return nfa
 
 
 def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
@@ -297,41 +322,32 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
                                                                  _debug_recursion_depth)
     else:
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
-        # Current node is NFA operation
+        # Current node is a NFA operation
         if node_name == 'and':
             assert len(root) >= 3
             lhs_term = root[1]
-            lhs = eval_smt_tree(lhs_term,
-                                ctx,
-                                variable_types=variable_types,
-                                _debug_recursion_depth=_debug_recursion_depth+1)
+
+            lhs = get_nfa_for_term(lhs_term, ctx, variable_types, _debug_recursion_depth)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[term_i]
-                rhs = eval_smt_tree(rhs_term,
-                                    ctx,
-                                    variable_types=variable_types,
-                                    _debug_recursion_depth=_debug_recursion_depth+1)
+                rhs = get_nfa_for_term(rhs_term, ctx, variable_types, _debug_recursion_depth)
 
                 assert type(rhs) == NFA
                 lhs = lhs.intersection(rhs)
                 _eval_info(f' >> intersection(lhs, rhs) (result size: {len(lhs.states)})', _debug_recursion_depth)
                 ctx.emit_evaluation_introspection_info(lhs, ParsingOperation.NFA_INTERSECT)
+
             return lhs
         elif node_name == 'or':
             assert len(root) >= 3
             lhs_term = root[1]
-            lhs = eval_smt_tree(lhs_term,
-                                ctx,
-                                variable_types=variable_types,
-                                _debug_recursion_depth=_debug_recursion_depth+1)
+
+            lhs = get_nfa_for_term(lhs_term, ctx, variable_types, _debug_recursion_depth)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[2]
-                rhs = eval_smt_tree(rhs_term,
-                                    ctx,
-                                    variable_types=variable_types,
-                                    _debug_recursion_depth=_debug_recursion_depth+1)
+                rhs = get_nfa_for_term(rhs_term, ctx, variable_types, _debug_recursion_depth)
 
                 assert type(rhs) == NFA
 
