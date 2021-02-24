@@ -197,8 +197,7 @@ def check_result_matches(source_text: str, emit_introspect=lambda nfa, op: None)
 
 def build_automaton_from_pressburger_relation_ast(relation_root,
                                                   variable_types: Dict[str, VariableType],
-                                                  emit_introspect: IntrospectHandle,
-                                                  domain: SolutionDomain,
+                                                  ctx: EvaluationContext,
                                                   depth: int) -> NFA:
     building_handlers = {
         SolutionDomain.INTEGERS: {
@@ -214,19 +213,20 @@ def build_automaton_from_pressburger_relation_ast(relation_root,
     }
 
     relation = extract_relation(relation_root)
-    operation, handle = building_handlers[domain][relation.operation]
+    operation, handle = building_handlers[ctx.domain][relation.operation]
 
     if relation.operation == '<':
         eq = pa.build_nfa_from_equality(relation)
-        emit_introspect(eq, ParsingOperation.BUILD_NFA_FROM_EQ)
+        ctx.emit_evaluation_introspection_info(eq, ParsingOperation.BUILD_NFA_FROM_EQ)
+
         neq = eq.determinize().complement()
         ineq = pa.build_nfa_from_inequality(relation)
-        emit_introspect(ineq, ParsingOperation.BUILD_DFA_FROM_INEQ)
+        ctx.emit_evaluation_introspection_info(ineq, ParsingOperation.BUILD_DFA_FROM_INEQ)
         automaton = neq.intersection(ineq)
-        emit_introspect(automaton, ParsingOperation.NFA_INTERSECT)
+        ctx.emit_evaluation_introspection_info(automaton, ParsingOperation.NFA_INTERSECT)
     else:
         automaton = handle(relation)
-        emit_introspect(automaton, operation)
+        ctx.emit_evaluation_introspection_info(automaton, operation)
     _eval_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)})', depth)
 
     return automaton
@@ -289,8 +289,7 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
             # (maybe a second evaluation pass, after the first expansion)
             return build_automaton_from_pressburger_relation_ast(root,
                                                                  variable_types,
-                                                                 ctx.introspect_handle,
-                                                                 ctx.domain,
+                                                                 ctx,
                                                                  _debug_recursion_depth)
     else:
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
