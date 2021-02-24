@@ -1,5 +1,5 @@
 import pressburger_algorithms as pa
-from ast_relations import extract_relation
+from ast_relations import extract_relation, expand_relation_on_ite
 from automatons import NFA, AutomatonType
 from log import logger
 from logging import INFO
@@ -8,7 +8,8 @@ from typing import (
     Tuple,
     Any,
     Dict,
-    Callable
+    Callable,
+    Optional
 )
 from enum import IntEnum, Enum
 
@@ -39,6 +40,34 @@ class ParsingOperation(Enum):
 class VariableType(IntEnum):
     Int = 0x01
     Bool = 0x02
+
+
+class EvaluationContext():
+    def __init__(self,
+                 domain: SolutionDomain,
+                 emit_introspect=lambda nfa, operation: None,
+                 ):
+        self.binding_stack: List[Dict[str, NFA]] = dict()
+        self.domain = domain
+        self.introspect_handle = emit_introspect
+
+    def get_binding(self, var_name: str) -> Optional[NFA]:
+        for binding_record in reversed(self.binding_stack):
+            if var_name in binding_record:
+                return binding_record[var_name]
+        return None
+
+    def new_binding_context(self):
+        self.binding_stack.append(dict())
+
+    def insert_binding(self, var_name: str, nfa: NFA):
+        self.binding_stack[-1][var_name] = nfa
+
+    def pop_binding_context(self):
+        self.binding_stack.pop(-1)
+
+    def emit_evaluation_introspection_info(self, nfa: NFA, operation: ParsingOperation):
+        self.introspect_handle(nfa, operation)
 
 
 IntrospectHandle = Callable[[NFA, ParsingOperation], None]
@@ -144,7 +173,8 @@ def check_result_matches(source_text: str, emit_introspect=lambda nfa, op: None)
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Extracted {len(asserts)} from source text.')
 
-    nfa = eval_assert_tree(asserts[0], emit_introspect=emit_introspect)
+    eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, emit_introspect)
+    nfa = eval_assert_tree(asserts[0], eval_ctx)
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
     if ':status' in smt_info:
@@ -166,11 +196,10 @@ def check_result_matches(source_text: str, emit_introspect=lambda nfa, op: None)
 
 
 def build_automaton_from_pressburger_relation_ast(relation_root,
+                                                  variable_types: Dict[str, VariableType],
                                                   emit_introspect: IntrospectHandle,
                                                   domain: SolutionDomain,
                                                   depth: int) -> NFA:
-
-    # Encode the logic as data
     building_handlers = {
         SolutionDomain.INTEGERS: {
             '<':  (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, pa.build_nfa_from_sharp_inequality),
@@ -203,23 +232,66 @@ def build_automaton_from_pressburger_relation_ast(relation_root,
     return automaton
 
 
-def eval_smt_tree(root,
+def build_automaton_for_boolean_variable(var_name: str, var_value: bool) -> NFA:
+    logger.debug(f'Building an equivalent automaton for the bool variable {var_name}, with value {var_value}.')
+    return NFA.for_bool_variable(var_name, var_value)
+
+
+def evaluate_bindings(binding_list) -> Dict[str, NFA]:
+    logger.debug(f'Evaluating binding list of size: {len(binding_list)}')
+    binding: Dict[str, NFA] = {}
+    for var_name, expr in binding_list:
+        logger.debug(f'Building automaton for var {var_name} with expr: {expr}')
+        nfa = eval_smt_tree(expr)  # Indirect recursion, here we go
+        binding[var_name] = nfa
+
+    return binding
+
+
+def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
+                  ctx: EvaluationContext,
                   variable_types: Dict[str, VariableType] = dict(),
                   _debug_recursion_depth=0,
-                  emit_introspect=lambda nfa, operation: None,
-                  domain: SolutionDomain = SolutionDomain.INTEGERS
                   ) -> NFA:
-    '''
-    Params:
-        emit_introspect:  Callable[[NFA], None] If set, it will get called whenever an operation
-                          is applied to one of the NFAs the parser build along the way.
-    '''
+
+    if not type(root) == list:
+        # This means that either we hit a SMT2 term (boolean variable) or
+        # the tree is malformed, and therefore we cannot continue.
+
+        # Is the term a bool variable?
+        is_bool_var = False
+        if root in variable_types:
+            if variable_types[root] == VariableType.Bool:
+                is_bool_var = True
+
+        if is_bool_var:
+            logger.debug('Reached a SMT2 term {0}, which was queried as a boolean variable.'.format(root))
+            # We build an automaton for `var_name` with True value. Should
+            # the boolean be considered False, it would be encoded
+            # ['not', 'var_name'], which is equivalent to the complement of the
+            # automaton.
+            return build_automaton_for_boolean_variable(root, True)
+        else:
+            raise ValueError(f'Unknown SMT2 term: {root}.')
 
     node_name = root[0]
     if node_name in ['<', '>', '<=', '>=', '=']:
-        # We have found node which need to be translated into NFA
-        # TODO(Psyco): this subformula might contain `ite` expression
-        return build_automaton_from_pressburger_relation_ast(root, emit_introspect, domain, _debug_recursion_depth)
+        # We have found node which needs to be translated into NFA
+        logger.info('Reached relation root, performing ITE expansion...')
+
+        expanded_tree = expand_relation_on_ite(root)
+
+        # If the relation was indeed expanded, the root will be 'or'
+        if expanded_tree[0] == 'or':
+            return eval_smt_tree(expanded_tree, ctx, variable_types, _debug_recursion_depth)
+        else:
+            # The relation was no expanded
+            # (maybe a second evaluation pass, after the first expansion)
+            return build_automaton_from_pressburger_relation_ast(root,
+                                                                 variable_types,
+                                                                 ctx.introspect_handle,
+                                                                 ctx.domain,
+                                                                 _debug_recursion_depth)
     else:
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
         # Current node is NFA operation
@@ -227,54 +299,49 @@ def eval_smt_tree(root,
             assert len(root) >= 3
             lhs_term = root[1]
             lhs = eval_smt_tree(lhs_term,
+                                ctx,
                                 variable_types=variable_types,
-                                _debug_recursion_depth=_debug_recursion_depth+1,
-                                emit_introspect=emit_introspect,
-                                domain=domain)
+                                _debug_recursion_depth=_debug_recursion_depth+1)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[term_i]
                 rhs = eval_smt_tree(rhs_term,
+                                    ctx,
                                     variable_types=variable_types,
-                                    _debug_recursion_depth=_debug_recursion_depth+1,
-                                    emit_introspect=emit_introspect,
-                                    domain=domain)
+                                    _debug_recursion_depth=_debug_recursion_depth+1)
 
                 assert type(rhs) == NFA
                 lhs = lhs.intersection(rhs)
                 _eval_info(f' >> intersection(lhs, rhs) (result size: {len(lhs.states)})', _debug_recursion_depth)
-                emit_introspect(lhs, ParsingOperation.NFA_INTERSECT)
+                ctx.emit_evaluation_introspection_info(lhs, ParsingOperation.NFA_INTERSECT)
             return lhs
         elif node_name == 'or':
             assert len(root) >= 3
             lhs_term = root[1]
             lhs = eval_smt_tree(lhs_term,
+                                ctx,
                                 variable_types=variable_types,
-                                _debug_recursion_depth=_debug_recursion_depth+1,
-                                emit_introspect=emit_introspect,
-                                domain=domain)
+                                _debug_recursion_depth=_debug_recursion_depth+1)
 
             for term_i in range(2, len(root)):
                 rhs_term = root[2]
                 rhs = eval_smt_tree(rhs_term,
+                                    ctx,
                                     variable_types=variable_types,
-                                    _debug_recursion_depth=_debug_recursion_depth+1,
-                                    emit_introspect=emit_introspect,
-                                    domain=domain)
+                                    _debug_recursion_depth=_debug_recursion_depth+1)
 
                 assert type(rhs) == NFA
 
                 _eval_info(' >> union(lhs, rhs)', _debug_recursion_depth)
                 lhs = lhs.union(rhs)
-                emit_introspect(lhs, ParsingOperation.NFA_UNION)
+                ctx.emit_evaluation_introspection_info(lhs, ParsingOperation.NFA_UNION)
             return lhs
         elif node_name == 'not':
             assert len(root) == 2
             operand = eval_smt_tree(root[1],
+                                    ctx,
                                     variable_types=variable_types,
-                                    _debug_recursion_depth=_debug_recursion_depth+1,
-                                    emit_introspect=emit_introspect,
-                                    domain=domain)
+                                    _debug_recursion_depth=_debug_recursion_depth+1)
 
             assert type(operand) == NFA
 
@@ -283,13 +350,12 @@ def eval_smt_tree(root,
                 _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _debug_recursion_depth)
             operand = operand.complement()
             _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _debug_recursion_depth)
-            emit_introspect(operand, ParsingOperation.NFA_COMPLEMENT)
+            ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_COMPLEMENT)
             return operand
         elif node_name == 'exists':
             assert len(root) == 3
 
-            # TODO(Psyco): Here we need to further extract the types of the variables
-            variable_bindings = get_variable_binding_info(root[1])
+            variable_bindings: Dict[str, VariableType] = get_variable_binding_info(root[1])
 
             # Maybe some variable information was already passed down to us -
             # in that case we want to merge the two dictionaries together
@@ -297,30 +363,33 @@ def eval_smt_tree(root,
                 variable_bindings.update(variable_types)
 
             nfa = eval_smt_tree(root[2],
+                                ctx,
                                 variable_types=variable_bindings,
-                                _debug_recursion_depth=_debug_recursion_depth+1,
-                                emit_introspect=emit_introspect,
-                                domain=domain)
+                                _debug_recursion_depth=_debug_recursion_depth+1)
 
             # TODO: Check whether variables are in fact present in the alphabet
             for var_name in variable_bindings:
                 nfa = nfa.do_projection(var_name)
-                emit_introspect(nfa, ParsingOperation.NFA_PROJECTION)
+                ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
 
             _eval_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _debug_recursion_depth)
             return nfa
 
+        elif node_name == 'let':
+            binding_list = root[1]
+            bindings = evaluate_bindings(binding_list)
+            return bindings
         else:
             raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}, assert_tree')
 
 
-def eval_assert_tree(assert_tree, emit_introspect=lambda automaton, parse_op: None, domain=SolutionDomain.INTEGERS):
+def eval_assert_tree(assert_tree, ctx: EvaluationContext):
     assert assert_tree[0] == 'assert'
     forall_cnt = replace_forall_with_exists(assert_tree)
     logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
     implications_cnt = expand_implications(assert_tree)
     logger.info(f'Performed {implications_cnt} implications expansions in the AST.')
-    return eval_smt_tree(assert_tree[1], emit_introspect=emit_introspect, domain=domain)
+    return eval_smt_tree(assert_tree[1], ctx)
 
 
 def expand_multivariable_bindings(assertion_tree):
@@ -423,3 +492,12 @@ def get_smt_info(ast) -> Dict[str, Any]:
             smt_info[info_category] = info_value
 
     return smt_info
+
+
+S0_SMT_TREE = ['<=', 10, 'x']
+
+S1_SMT_TREE = ['and',
+               ['<=', 10, 'x'],
+               ['<=', 10, 'y']]
+
+S2_SMT_TREE = ['=', ['ite', 'b0', 'x', ['*', '2', 'x']], '0']
