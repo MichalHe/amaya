@@ -331,6 +331,50 @@ def evaluate_or_term(term: Union[str, List],
     )
 
 
+def evaluate_not_term(term: Union[str, List],
+                      ctx: EvaluationContext,
+                      variable_types: Dict[str, VariableType],
+                      _depth: int) -> NFA:
+
+    assert len(term) == 2
+    operand = get_nfa_for_term(term[1], ctx, variable_types, _depth)
+
+    assert type(operand) == NFA
+
+    if operand.automaton_type == AutomatonType.NFA:
+        operand = operand.determinize()
+        _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
+
+    operand = operand.complement()
+    _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _depth)
+
+    ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_COMPLEMENT)
+    return operand
+
+
+def evaluate_exists_term(term: Union[str, List],
+                         ctx: EvaluationContext,
+                         variable_types: Dict[str, VariableType],
+                         _depth: int) -> NFA:
+    assert len(term) == 3
+
+    variable_bindings: Dict[str, VariableType] = get_variable_binding_info(term[1])
+
+    # Maybe some variable information was already passed down to us -
+    # in that case we want to merge the two dictionaries together
+    if len(variable_types) > 0:
+        variable_bindings.update(variable_types)
+
+    nfa = get_nfa_for_term(term[2], ctx, variable_types, _depth)
+
+    # TODO: Check whether variables are in fact present in the alphabet
+    for var_name in variable_bindings:
+        nfa = nfa.do_projection(var_name)
+        ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
+
+    _eval_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
+    return nfa
+
 
 def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
                   ctx: EvaluationContext,
@@ -383,40 +427,9 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
         elif node_name == 'or':
             return evaluate_or_term(root, ctx, variable_types, _debug_recursion_depth)
         elif node_name == 'not':
-            assert len(root) == 2
-            operand = get_nfa_for_term(root[1], ctx, variable_types, _debug_recursion_depth)
-
-            assert type(operand) == NFA
-
-            if operand.automaton_type == AutomatonType.NFA:
-                operand = operand.determinize()
-                _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _debug_recursion_depth)
-
-            operand = operand.complement()
-            _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _debug_recursion_depth)
-
-            ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_COMPLEMENT)
-            return operand
+            return evaluate_not_term(root, ctx, variable_types, _debug_recursion_depth)
         elif node_name == 'exists':
-            assert len(root) == 3
-
-            variable_bindings: Dict[str, VariableType] = get_variable_binding_info(root[1])
-
-            # Maybe some variable information was already passed down to us -
-            # in that case we want to merge the two dictionaries together
-            if len(variable_types) > 0:
-                variable_bindings.update(variable_types)
-
-            nfa = get_nfa_for_term(root[2], ctx, variable_types, _debug_recursion_depth)
-
-            # TODO: Check whether variables are in fact present in the alphabet
-            for var_name in variable_bindings:
-                nfa = nfa.do_projection(var_name)
-                ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
-
-            _eval_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _debug_recursion_depth)
-            return nfa
-
+            return evaluate_exists_term(root, ctx, variable_types, _debug_recursion_depth)
         elif node_name == 'let':
             # `let` has this structure [`let`, `<binding_list>`, <term>]
             assert len(root) == 3
