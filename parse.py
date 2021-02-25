@@ -48,7 +48,7 @@ class EvaluationContext():
                  domain: SolutionDomain,
                  emit_introspect=lambda nfa, operation: None,
                  ):
-        self.binding_stack: List[Dict[str, NFA]] = dict()
+        self.binding_stack: List[Dict[str, NFA]] = []
         self.domain = domain
         self.introspect_handle = emit_introspect
 
@@ -266,7 +266,7 @@ def get_nfa_for_term(term: Union[str, List],
             logger.fatal('A referenced variable: `{term}` was not found in any of the binding contexts, is SMT2 file malformed?.')
             raise ValueError('A variable `{term}` referenced inside AND could not be queried for its NFA.')
         else:
-            logger.debug('Value query for variable `{term}` OK.')
+            logger.debug(f'Value query for variable `{term}` OK.')
         return nfa
     else:
         # The node must be evaluated first
@@ -400,7 +400,11 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
             # automaton.
             return build_automaton_for_boolean_variable(root, True)
         else:
-            raise ValueError(f'Unknown SMT2 term: {root}.')
+            nfa = ctx.get_binding(root)
+            if nfa is None:
+                raise ValueError(f'Unknown SMT2 term: {root}.')
+            else:
+                return nfa
 
     node_name = root[0]
     if node_name in ['<', '>', '<=', '>=', '=']:
@@ -440,11 +444,12 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
 
             # The variables in bindings can be evaluated to their automatons.
             bindings = evaluate_bindings(binding_list, ctx)  # TODO(psyco): Lookup variables when evaluating bindings.
+            logger.debug(f'Extracted bindings {bindings.keys()}')
             ctx.populate_current_binding_context_with(bindings)
 
             # The we evaluate the term, in fact represents the value of the
             # whole `let` block
-            term_nfa = eval_assert_tree(term, ctx)
+            term_nfa = eval_smt_tree(term, ctx)
 
             ctx.pop_binding_context()  # We are leaving the `let` block
             return term_nfa
