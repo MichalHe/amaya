@@ -169,7 +169,9 @@ def get_asserts_from_ast(ast):
     return _asserts
 
 
-def check_result_matches(source_text: str, emit_introspect=lambda nfa, op: None) -> bool:
+def check_result_matches(source_text: str,
+                         emit_introspect=lambda nfa, op: None) -> bool:
+
     tokens = lex(source_text)
     ast = build_syntax_tree(tokens)
 
@@ -178,8 +180,10 @@ def check_result_matches(source_text: str, emit_introspect=lambda nfa, op: None)
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Extracted {len(asserts)} from source text.')
 
+    const_symbols = extract_constant_fn_symbol_definitions(ast)
+
     eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, emit_introspect)
-    nfa = eval_assert_tree(asserts[0], eval_ctx)
+    nfa = eval_assert_tree(asserts[0], eval_ctx, const_symbols)
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
     if ':status' in smt_info:
@@ -242,12 +246,12 @@ def build_automaton_for_boolean_variable(var_name: str, var_value: bool) -> NFA:
     return NFA.for_bool_variable(var_name, var_value)
 
 
-def evaluate_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA]:
+def evaluate_bindings(binding_list, ctx: EvaluationContext, variable_types: Dict[str, VariableType]) -> Dict[str, NFA]:
     logger.debug(f'Evaluating binding list of size: {len(binding_list)}')
     binding: Dict[str, NFA] = {}
     for var_name, expr in binding_list:
         logger.debug(f'Building automaton for var {var_name} with expr: {expr}')
-        nfa = eval_smt_tree(expr, ctx)  # Indirect recursion, here we go
+        nfa = eval_smt_tree(expr, ctx, variable_types)  # Indirect recursion, here we go
         binding[var_name] = nfa
 
     return binding
@@ -259,12 +263,30 @@ def get_nfa_for_term(term: Union[str, List],
                      _depth: int) -> NFA:
     if type(term) == str:
         # If it is a string, then it should reference a variable
-        # previously bound to a value
-        logger.debug('Found a usage of bound variable in evaluated node.')
+        # previously bound to a value, or a bool variable which can be
+        # converted to Automaton directly
+        logger.debug('Found a usage of a bound variable in evaluated node.')
+
+        is_bool_var = False
+        if term in variable_types:
+            if variable_types[term] == VariableType.Bool:
+                is_bool_var = True
+
+        if is_bool_var:
+            logger.debug(f'The reached variable {term} was queried as a boolean variable.')
+            # We build an automaton for `var_name` with True value. Should
+            # the boolean be considered False, it would be encoded
+            # ['not', 'var_name'], which is equivalent to the complement of the
+            # automaton.
+            return build_automaton_for_boolean_variable(term, True)
+        else:
+            logger.debug(f'The variable {term} is not boolean, searching `let` bindings.')
+
         nfa = ctx.get_binding(term)
         if nfa is None:
-            logger.fatal('A referenced variable: `{term}` was not found in any of the binding contexts, is SMT2 file malformed?.')
-            raise ValueError('A variable `{term}` referenced inside AND could not be queried for its NFA.')
+            logger.fatal(f'A referenced variable: `{term}` was not found in any of the binding contexts, is SMT2 file malformed?.')
+            logger.debug(f'Bound variables: `{variable_types}`')
+            raise ValueError(f'A variable `{term}` referenced inside AND could not be queried for its NFA.')
         else:
             logger.debug(f'Value query for variable `{term}` OK.')
         return nfa
@@ -272,7 +294,7 @@ def get_nfa_for_term(term: Union[str, List],
         # The node must be evaluated first
         nfa = eval_smt_tree(term,
                             ctx,
-                            variable_types=variable_types,
+                            variable_types,
                             _debug_recursion_depth=_depth+1)
         return nfa
 
@@ -341,9 +363,18 @@ def evaluate_not_term(term: Union[str, List],
 
     assert type(operand) == NFA
 
-    if operand.automaton_type == AutomatonType.NFA:
+    if (operand.automaton_type & AutomatonType.NFA):
         operand = operand.determinize()
         _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
+
+    # TODO(psyco): Here we should check, whether the automaton is Complete
+    # (Determinism is not enough)
+
+    if (operand.automaton_type & AutomatonType.BOOL):
+        assert len(operand.alphabet.variable_names) == 1
+        variable_name = operand.alphabet.variable_names[0]
+        logger.debug('Complementing an automaton for a bool variable {variable_name}, returninig direct complement.')
+        return NFA.for_bool_variable(variable_name, False)
 
     operand = operand.complement()
     _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _depth)
@@ -359,13 +390,14 @@ def evaluate_exists_term(term: Union[str, List],
     assert len(term) == 3
 
     variable_bindings: Dict[str, VariableType] = get_variable_binding_info(term[1])
+    logger.debug(f'FORALL - Extracted variable bindings for {variable_bindings.keys()}')
 
     # Maybe some variable information was already passed down to us -
     # in that case we want to merge the two dictionaries together
     if len(variable_types) > 0:
         variable_bindings.update(variable_types)
 
-    nfa = get_nfa_for_term(term[2], ctx, variable_types, _depth)
+    nfa = get_nfa_for_term(term[2], ctx, variable_bindings, _depth)
 
     # TODO: Check whether variables are in fact present in the alphabet
     for var_name in variable_bindings:
@@ -378,14 +410,18 @@ def evaluate_exists_term(term: Union[str, List],
 
 def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
                   ctx: EvaluationContext,
-                  variable_types: Dict[str, VariableType] = dict(),
+                  variable_types: Dict[str, VariableType],
                   _debug_recursion_depth=0,
                   ) -> NFA:
+
+    logger.critical(f'Variable types: {variable_types}')
 
     if not type(root) == list:
         # This means that either we hit a SMT2 term (boolean variable) or
         # the tree is malformed, and therefore we cannot continue.
 
+        # TODO(psyco): This will be moved to get_nfa, replace this with a call
+        # to get_nfa.
         # Is the term a bool variable?
         is_bool_var = False
         if root in variable_types:
@@ -443,13 +479,13 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
             ctx.new_binding_context()
 
             # The variables in bindings can be evaluated to their automatons.
-            bindings = evaluate_bindings(binding_list, ctx)  # TODO(psyco): Lookup variables when evaluating bindings.
+            bindings = evaluate_bindings(binding_list, ctx, variable_types)  # TODO(psyco): Lookup variables when evaluating bindings.
             logger.debug(f'Extracted bindings {bindings.keys()}')
             ctx.populate_current_binding_context_with(bindings)
 
             # The we evaluate the term, in fact represents the value of the
             # whole `let` block
-            term_nfa = eval_smt_tree(term, ctx)
+            term_nfa = eval_smt_tree(term, ctx, variable_types, _debug_recursion_depth)
 
             ctx.pop_binding_context()  # We are leaving the `let` block
             return term_nfa
@@ -458,13 +494,34 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
             raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}, assert_tree')
 
 
-def eval_assert_tree(assert_tree, ctx: EvaluationContext):
+def eval_assert_tree(assert_tree,
+                     ctx: EvaluationContext,
+                     fn_definitions: List[Dict[str, VariableType]]):
     assert assert_tree[0] == 'assert'
     forall_cnt = replace_forall_with_exists(assert_tree)
     logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
     implications_cnt = expand_implications(assert_tree)
     logger.info(f'Performed {implications_cnt} implications expansions in the AST.')
-    return eval_smt_tree(assert_tree[1], ctx)
+    return eval_smt_tree(assert_tree[1], ctx, fn_definitions)
+
+
+def extract_constant_fn_symbol_definitions(statements) -> Dict[str, bool]:
+    const_symbols: Dict[str, VariableType] = {}
+    logger.debug('Extracting contant symbols from toplevel statments...')
+
+    for top_level_statement in statements:
+        statement_kw = top_level_statement[0]
+        if statement_kw == 'declare-fun':
+            kw, sym_name, args, return_value = top_level_statement
+            if len(args) > 0:
+                raise NotImplementedError('Non constant symbols are not supported now.')
+            if return_value == 'Bool':
+                const_symbols[sym_name] = VariableType.Bool
+            else:
+                raise ValueError('Unknown top level symbol type.')
+
+    logger.info(f'Extracted constant symbols: {const_symbols.keys()}')
+    return const_symbols
 
 
 def expand_multivariable_bindings(assertion_tree):
@@ -512,6 +569,16 @@ def replace_forall_with_exists(assertion_tree):
 
     if assertion_tree[0] in ['exists', 'not', 'forall', 'assert']:
         return node_replaced_const + replace_forall_with_exists(assertion_tree[-1])
+    if assertion_tree[0] in ['let']:
+        expansion_acc = node_replaced_const
+
+        binding_list = assertion_tree[1]
+        for var, expr in binding_list:
+            expansion_acc += replace_forall_with_exists(expr)
+
+        term = assertion_tree[2]
+        expansion_acc += replace_forall_with_exists(term)
+        return expansion_acc
     else:
         return node_replaced_const  # Bottom of the recursion
 
