@@ -1,5 +1,6 @@
 from __future__ import annotations
-from enum import IntEnum, Enum
+from enum import IntEnum
+from log import logger
 from typing import (
     Set,
     Dict,
@@ -61,6 +62,7 @@ class AutomatonType(IntEnum):
     DFA = 0x01
     NFA = 0x02
     TRIVIAL = 0x04
+    BOOL = 0x08
 
 
 @dataclass
@@ -149,6 +151,8 @@ class NFA(Generic[AutomatonState]):
         if self.alphabet != other.alphabet:
             self.extend_to_common_alphabet(other)
 
+        logger.debug(f'Calculating intercestion with alphabet size: {len(self.alphabet.variable_names)}')
+
         self_renamed_highest_state, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
 
@@ -166,6 +170,8 @@ class NFA(Generic[AutomatonState]):
         while work_queue:
             current_state: Tuple[int, int] = work_queue.pop(0)
             resulting_nfa.add_state(current_state)
+
+            logger.debug(f'Processed state {current_state}, remaining in queue {len(work_queue)}')
 
             # States in work_queue are boxed
             self_state, others_state = current_state
@@ -257,13 +263,13 @@ class NFA(Generic[AutomatonState]):
 
                 if dfa_state:
                     determinized_automaton.update_transition_fn(unexplored_dfa_state, symbol, dfa_state)
-        
+
         determinized_automaton.add_trap_state()
         return determinized_automaton
 
     def add_trap_state(self):
         '''Adds trap (sink) state with transitions to it as needed.
-        The Given automaton should be determinized first. 
+        The Given automaton should be determinized first.
         '''
         trap_state_present: bool = False
         # Whole alphabet..
@@ -290,9 +296,8 @@ class NFA(Generic[AutomatonState]):
             for missing_symbol in missing_symbols:
                 # Mutating dictionary while iterating over it.
                 insert_into_transition_fn(new_transitions, origin, missing_symbol, trap_state)
-        
-        self.transition_fn = new_transitions
 
+        self.transition_fn = new_transitions
 
     def _rename_own_states(self):
         debug_fn: Optional[functools.partial[None]]
@@ -546,6 +551,34 @@ class NFA(Generic[AutomatonState]):
         self_loop_symbol = tuple(['*'] * len(alphabet.variable_names))
         nfa.update_transition_fn(initial_state, self_loop_symbol, initial_state)
         nfa.alphabet.active_variables = set()
+
+        return nfa
+
+    @staticmethod
+    def for_bool_variable(variable_name: str, var_value: bool):
+        '''Builds an equivalent automaton encoding the provided bool variable.
+
+        The resulting autmaton is not complete (must be completed before complement).
+        '''
+        if var_value is True:
+            states = set(['q0', 'qT'])
+            final_states = set(['qT'])
+        else:
+            states = set(['q0', 'qF'])
+            final_states = set(['qF'])
+        initial_states = set(['q0'])
+        alphabet = LSBF_Alphabet((0, 1), (variable_name, ), set([variable_name]))
+
+        a_type = AutomatonType.DFA | AutomatonType.BOOL
+
+        nfa = NFA(alphabet, a_type, initial_states, final_states, states)
+
+        if var_value is True:
+            nfa.update_transition_fn('q0', (1, ), 'qT')  # Var = True --> accepting state
+            nfa.update_transition_fn('qT', ('*', ), 'qT')
+        else:
+            nfa.update_transition_fn('q0', (0, ), 'qF')  # Var = False --> accepting state
+            nfa.update_transition_fn('qF', ('*', ), 'qF')
 
         return nfa
 
