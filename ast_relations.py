@@ -177,8 +177,13 @@ def get_ite_info(ast) -> Set[str]:
         ite_false_info = get_ite_info(ite_false_tree)
 
         return set([ite_variable]).union(ite_true_info).union(ite_false_info)
-    elif root in ['+', '-', '*', '<=', '>=', '>', '<', '=']:
+    elif root in ['+',  '*', '<=', '>=', '>', '<', '=']:
         return get_ite_info(ast[1]).union(get_ite_info(ast[2]))
+    elif root in ['-']:
+        if len(root) == 3:
+            return get_ite_info(ast[1]).union(get_ite_info(ast[2]))
+        else:
+            return get_ite_info(ast[1])
 
 
 def evaluate_ite_for_var_assignment(ast, assignment: Dict[str, bool]):
@@ -197,12 +202,27 @@ def evaluate_ite_for_var_assignment(ast, assignment: Dict[str, bool]):
         else:
             false_subtree = ast[3]
             return evaluate_ite_for_var_assignment(false_subtree, assignment)
-    elif root in ['+', '-', '*', '<=', '>=', '>', '<', '=']:
+    elif root in ['+', '*', '<=', '>=', '>', '<', '=']:
         return [
             root,
             evaluate_ite_for_var_assignment(ast[1], assignment),
             evaluate_ite_for_var_assignment(ast[2], assignment),
         ]
+    elif root in ['-']:
+        # - needs separate handling, because it might be binary or unary
+        if len(root) == 3:
+            # Binary
+            return [
+                root,
+                evaluate_ite_for_var_assignment(ast[1], assignment),
+                evaluate_ite_for_var_assignment(ast[2], assignment),
+            ]
+        else:
+            # Unary
+            return [
+                root,
+                evaluate_ite_for_var_assignment(ast[1], assignment)
+            ]
 
 
 def gen_conjunction_expr_from_bool_vars(bool_assignment: Dict[str, bool]):
