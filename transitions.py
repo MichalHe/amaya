@@ -8,11 +8,11 @@ from typing import (
     List,
     Iterable,
     Generator,
-
     TypeVar
 )
 import functools
 import utils
+from dd.autoref import BDD
 
 Symbol = Tuple[Union[str, int], ...]
 # State = Union[str, int]
@@ -272,3 +272,73 @@ def remove_all_transitions_that_contain_states(t: Transitions[State], states: Se
 
                     purged_transitions[origin][destination] = set(t[origin][destination])
     return purged_transitions
+
+
+def collect_all_outgoing_symbols_from_state(t: Transitions[State],
+                                            origin: State) -> Set[Symbol]:
+    if origin not in t:
+        return []
+
+    out_symbols: List[Symbol] = []
+    for dest in t[origin]:
+        for symbol in t[origin][dest]:
+            out_symbols.append(symbol)
+    return out_symbols
+
+
+def constuct_bdd_from_transition_symbols(s: Set[Symbol], variable_names: Tuple[str, ...], bdd_manager: BDD) -> BDD:
+    if not s:
+        return None
+
+    def convert_symbol_to_formula(symbol: Symbol) -> str:
+        formula_parts = []
+        for i, bit in enumerate(symbol):
+            if bit == 0:
+                formula_parts.append(f'~{variable_names[i]}')
+            elif bit == 1:
+                formula_parts.append(f'{variable_names[i]}')
+
+        if not formula_parts:
+            return 'True'        
+
+        return '&'.join(formula_parts)
+
+    exprs: List[BDD] = []
+
+    for symbol in s:
+        formula = convert_symbol_to_formula(symbol)
+        expr = bdd_manager.add_expr(formula)
+        exprs.append(expr)
+
+    return functools.reduce(lambda e0, e1: e0 | e1, exprs)
+
+def get_symbols_intersection(s0: List[Symbol], s1: List[Symbol], variable_names: Tuple[str], bdd_manager: BDD) -> List[Symbol]:
+    bdd0 = constuct_bdd_from_transition_symbols(s0, variable_names, bdd_manager)
+    bdd1 = constuct_bdd_from_transition_symbols(s1, variable_names, bdd_manager)
+
+    if bdd0 is None or bdd1 is None:
+        return []
+
+    intersection = bdd0 & bdd1
+
+    symbols = []
+    for model_eval in bdd_manager.pick_iter(intersection):
+        symbol = []
+        for vn in variable_names:
+            if vn in model_eval:
+                symbol.append(int(model_eval[vn]))
+            else:
+                symbol.append('*')
+
+        # symbol = tuple(map(lambda var_name: int(model_eval[var_name]), variable_names))
+        symbols.append(tuple(symbol))
+
+    return symbols
+
+def get_bdd_transition_function(t: Transitions[State], var_names: List[str], bdd_manager: BDD) -> Dict[State, Dict[State, BDD]]:
+    bdd_t: Dict[State, Dict[State, BDD]] = {}
+
+    for origin in t:
+        bdd_t[origin] = {}
+        for dest in t[origin]:
+            bdd_t[origin][dest] = constuct_bdd_from_transition_symbols(t[origin][dest], var_names, bdd_manager)

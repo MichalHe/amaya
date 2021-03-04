@@ -41,9 +41,13 @@ from transitions import (
     iterate_over_active_variables,
     make_rotate_transition_function,
     remove_all_transitions_that_contain_states,
+    collect_all_outgoing_symbols_from_state,
+    get_symbols_intersection
 )
+
 import functools
 import collections
+import dd
 
 
 AutomatonState = TypeVar('AutomatonState')
@@ -167,6 +171,14 @@ class NFA(Generic[AutomatonState]):
         for initial_state in work_queue:
             resulting_nfa.add_initial_state(initial_state)
 
+        bdd_manager = dd.autoref.BDD()
+        
+        _var_names = []
+        for i, _ in enumerate(self_renamed.alphabet.variable_names):
+            _var_names .append(chr(ord('A') + i))
+
+        bdd_manager.declare(*_var_names)
+
         while work_queue:
             current_state: Tuple[int, int] = work_queue.pop(0)
             resulting_nfa.add_state(current_state)
@@ -180,7 +192,20 @@ class NFA(Generic[AutomatonState]):
             if (self_state in self_renamed.final_states and others_state in other_renamed.final_states):
                 resulting_nfa.add_final_state((self_state, others_state))
 
-            for symbol in self_renamed.alphabet.symbols:
+            viable_symbols_self = collect_all_outgoing_symbols_from_state(
+                self_renamed.transition_fn, self_state)
+
+            viable_symbols_other = collect_all_outgoing_symbols_from_state(
+                other_renamed.transition_fn, others_state)
+
+            intersect_symbols = get_symbols_intersection(
+                viable_symbols_self, viable_symbols_other,
+                _var_names, bdd_manager)
+
+            logger.info('Intersection: Symbols minimize to: {0}/{1}'.format(len(intersect_symbols), len(self.alphabet.symbols)))
+
+            # for symbol in self_renamed.alphabet.symbols:
+            for symbol in intersect_symbols:
                 self_targets = self_renamed.get_transition_target(self_state, symbol)
                 other_targets = other_renamed.get_transition_target(others_state, symbol)
 
@@ -240,6 +265,7 @@ class NFA(Generic[AutomatonState]):
 
         while working_queue:
             unexplored_dfa_state: DFA_AutomatonState = working_queue.pop(0)
+            logger.debug(f'Determinization for {unexplored_dfa_state}, remaining in work queue: {len(working_queue)}')
 
             determinized_automaton.add_state(unexplored_dfa_state)
 
