@@ -42,7 +42,8 @@ from transitions import (
     make_rotate_transition_function,
     remove_all_transitions_that_contain_states,
     collect_all_outgoing_symbols_from_state,
-    get_symbols_intersection
+    get_symbols_intersection,
+    construct_transition_fn_to_bddtfn
 )
 
 import functools
@@ -179,6 +180,11 @@ class NFA(Generic[AutomatonState]):
 
         bdd_manager.declare(*_var_names)
 
+        logger.info('Converting transition FNs to BDDs.')
+        self_tfn = construct_transition_fn_to_bddtfn(self_renamed.transition_fn, _var_names, bdd_manager)
+        other_tfn = construct_transition_fn_to_bddtfn(other_renamed.transition_fn, _var_names, bdd_manager)
+        logger.info('Done.')
+
         while work_queue:
             current_state: Tuple[int, int] = work_queue.pop(0)
             resulting_nfa.add_state(current_state)
@@ -192,32 +198,48 @@ class NFA(Generic[AutomatonState]):
             if (self_state in self_renamed.final_states and others_state in other_renamed.final_states):
                 resulting_nfa.add_final_state((self_state, others_state))
 
-            viable_symbols_self = collect_all_outgoing_symbols_from_state(
-                self_renamed.transition_fn, self_state)
+            used_symbols = 0
+            
+            # optimized_intersection: Set[Tuple[LSBF_AlphabetSymbol, Tuple[int, int]]] = set()
+            if self_state in self_tfn and others_state in other_tfn:
+                for self_dest_state in self_tfn[self_state]:
+                    for other_dest_state in other_tfn[others_state]:
+                        transition_self_bdd = self_tfn[self_state][self_dest_state]
+                        transition_other_bdd = other_tfn[others_state][other_dest_state]
 
-            viable_symbols_other = collect_all_outgoing_symbols_from_state(
-                other_renamed.transition_fn, others_state)
+                        for transition_model in bdd_manager.pick_iter(transition_self_bdd & transition_other_bdd, care_vars=_var_names):
+                            symbol = tuple(map(lambda var_name: transition_model[var_name], _var_names))
+                            dest_state = (self_dest_state, other_dest_state)
+                            if dest_state not in resulting_nfa.states:
+                                if dest_state not in work_queue:
+                                    work_queue.append(dest_state)
 
-            intersect_symbols = get_symbols_intersection(
-                viable_symbols_self, viable_symbols_other,
-                _var_names, bdd_manager)
+                            resulting_nfa.update_transition_fn(current_state, symbol, (self_dest_state, other_dest_state))
+                            used_symbols += 1
 
-            logger.info('Intersection: Symbols minimize to: {0}/{1}'.format(len(intersect_symbols), len(self.alphabet.symbols)))
+            logger.info('Intersection: Used symbols minimized to: {0}/{1}'.format(used_symbols, len(self.alphabet.symbols)))
 
             # for symbol in self_renamed.alphabet.symbols:
-            for symbol in intersect_symbols:
-                self_targets = self_renamed.get_transition_target(self_state, symbol)
-                other_targets = other_renamed.get_transition_target(others_state, symbol)
+            # generated_intersection: Set[Tuple[LSBF_AlphabetSymbol, Tuple[int, int]]] = set()
+            # for symbol in intersect_symbols:
+            #     self_targets = self_renamed.get_transition_target(self_state, symbol)
+            #     other_targets = other_renamed.get_transition_target(others_state, symbol)
 
-                if self_targets is None or other_targets is None:
-                    continue
+            #     if self_targets is None or other_targets is None:
+            #         continue
 
-                for new_intersect_state in carthesian_product(self_targets, other_targets):
-                    if new_intersect_state not in resulting_nfa.states:
-                        if new_intersect_state not in work_queue:
-                            work_queue.append(new_intersect_state)
+            #     for new_intersect_state in carthesian_product(self_targets, other_targets):
+            #         if new_intersect_state not in resulting_nfa.states:
+            #             if new_intersect_state not in work_queue:
+            #                 work_queue.append(new_intersect_state)
 
-                    resulting_nfa.update_transition_fn(current_state, symbol, new_intersect_state)
+            #         generated_intersection.add((symbol, new_intersect_state))
+            #         resulting_nfa.update_transition_fn(current_state, symbol, new_intersect_state)
+            
+            # logger.info(f'Standard intersection produced: {len(generated_intersection)}')
+            # logger.info(f'Optimized intersection produced: {len(optimized_intersection)}')
+            # msg: str = 'OK' if len(generated_intersection) == len(optimized_intersection) else 'FAIL'
+            # logger.info(f'Size {msg}.')
 
         return resulting_nfa
 

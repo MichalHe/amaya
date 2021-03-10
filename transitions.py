@@ -54,7 +54,7 @@ def get_indices_of_missing_variables(variables: VariableNames, variables_subset:
     return missing_variables_indices
 
 
-def extend_symbol_on_index(symbol: Tuple[int, ...], missing_index: int) -> Tuple[int]:
+def extend_symbol_on_index(symbol: Tuple[int, ...], missing_index: int) -> Tuple[Union[int, str], ...]:
     if missing_index >= len(symbol):
         return symbol + ('*', )
     elif missing_index == 0:
@@ -275,7 +275,7 @@ def remove_all_transitions_that_contain_states(t: Transitions[State], states: Se
 
 
 def collect_all_outgoing_symbols_from_state(t: Transitions[State],
-                                            origin: State) -> Set[Symbol]:
+                                            origin: State) -> List[Symbol]:
     if origin not in t:
         return []
 
@@ -286,7 +286,7 @@ def collect_all_outgoing_symbols_from_state(t: Transitions[State],
     return out_symbols
 
 
-def constuct_bdd_from_transition_symbols(s: Set[Symbol], variable_names: Tuple[str, ...], bdd_manager: BDD) -> BDD:
+def constuct_bdd_from_transition_symbols(s: Set[Symbol], variable_names: List[str], bdd_manager: BDD) -> BDD:
     if not s:
         return None
 
@@ -299,7 +299,7 @@ def constuct_bdd_from_transition_symbols(s: Set[Symbol], variable_names: Tuple[s
                 formula_parts.append(f'{variable_names[i]}')
 
         if not formula_parts:
-            return 'True'        
+            return 'True'
 
         return '&'.join(formula_parts)
 
@@ -312,7 +312,12 @@ def constuct_bdd_from_transition_symbols(s: Set[Symbol], variable_names: Tuple[s
 
     return functools.reduce(lambda e0, e1: e0 | e1, exprs)
 
-def get_symbols_intersection(s0: List[Symbol], s1: List[Symbol], variable_names: Tuple[str], bdd_manager: BDD) -> List[Symbol]:
+
+def get_symbols_intersection(s0: List[Symbol], s1: List[Symbol],
+                             variable_names: Tuple[str],
+                             bdd_manager: BDD,
+                             compress_result: bool = False
+                             ) -> List[Symbol]:
     bdd0 = constuct_bdd_from_transition_symbols(s0, variable_names, bdd_manager)
     bdd1 = constuct_bdd_from_transition_symbols(s1, variable_names, bdd_manager)
 
@@ -322,16 +327,21 @@ def get_symbols_intersection(s0: List[Symbol], s1: List[Symbol], variable_names:
     intersection = bdd0 & bdd1
 
     symbols = []
-    for model_eval in bdd_manager.pick_iter(intersection):
-        symbol = []
-        for vn in variable_names:
-            if vn in model_eval:
-                symbol.append(int(model_eval[vn]))
-            else:
-                symbol.append('*')
+    if compress_result:
+        for model_eval in bdd_manager.pick_iter(intersection):
+            symbol = []
+            for vn in variable_names:
+                if vn in model_eval:
+                    symbol.append(int(model_eval[vn]))
+                else:
+                    symbol.append('*')
 
-        # symbol = tuple(map(lambda var_name: int(model_eval[var_name]), variable_names))
-        symbols.append(tuple(symbol))
+            # symbol = tuple(map(lambda var_name: int(model_eval[var_name]), variable_names))
+            symbols.append(tuple(symbol))
+    else:
+        for model_eval in bdd_manager.pick_iter(intersection, care_vars=variable_names):
+            symbol = tuple(map(lambda var_name: int(model_eval[var_name]), variable_names))
+            symbols.append(symbol)
 
     return symbols
 
@@ -342,3 +352,18 @@ def get_bdd_transition_function(t: Transitions[State], var_names: List[str], bdd
         bdd_t[origin] = {}
         for dest in t[origin]:
             bdd_t[origin][dest] = constuct_bdd_from_transition_symbols(t[origin][dest], var_names, bdd_manager)
+
+
+BDD_TransitionFn = Dict[State, Dict[State, BDD]]
+
+
+def construct_transition_fn_to_bddtfn(t: Transitions[State],
+                                      var_names: List[str],
+                                      bdd_manager: BDD) -> BDD_TransitionFn:
+    new_t: BDD_TransitionFn = {}
+    for source in t:
+        new_t[source] = {}
+        for dest in t[source]:
+            transition_bdd = constuct_bdd_from_transition_symbols(t[source][dest], var_names, bdd_manager) 
+            new_t[source][dest] = transition_bdd
+    return new_t
