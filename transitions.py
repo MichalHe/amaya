@@ -1,4 +1,5 @@
 from __future__ import annotations
+import collections
 from typing import (
     Set,
     Dict,
@@ -367,7 +368,7 @@ def construct_transition_fn_to_bddtfn(t: Transitions[State],
     for source in t:
         new_t[source] = {}
         for dest in t[source]:
-            transition_bdd = constuct_bdd_from_transition_symbols(t[source][dest], var_names, bdd_manager) 
+            transition_bdd = constuct_bdd_from_transition_symbols(t[source][dest], var_names, bdd_manager)
             new_t[source][dest] = transition_bdd
     return new_t
 
@@ -377,10 +378,10 @@ class SparseSimpleTransitionFunction(Generic[StateType]):
     def __init__(self):
         self.data: Dict[Any, Dict[Any, Set[Symbol]]] = dict()
 
-    def get_transition_target(self, source: StateType, symbol: Symbol) -> Set[StateType]:
+    def get_transition_target(self, source: StateType, symbol: Symbol) -> List[StateType]:
         if source not in self.data:
-            return set()
-        
+            return list()
+
         out_states: Set[StateType] = set()
         for dest in self.data[source]:
             for t_symbol in self.data[source][dest]:
@@ -388,15 +389,15 @@ class SparseSimpleTransitionFunction(Generic[StateType]):
                     out_states.add(dest)
                     break  # Stop checking symbols, continue with next dest
 
-        return out_states
-    
+        return list(out_states)
+
     def insert_transition(self, source: StateType, symbol: Symbol, dest: StateType):
         if source not in self.data:
             self.data[source] = {}
-        
+
         if dest not in self.data[source]:
             self.data[source][dest] = set()  # Represent empty relation structure
-        
+
         self.data[source][dest].add(symbol)
 
     def rename_states(self, mapping: Dict):
@@ -419,7 +420,7 @@ class SparseSimpleTransitionFunction(Generic[StateType]):
             copy_data[source] = {}
             for dest in self.data[source]:
                 copy_data[source][dest] = set(self.data[source][dest])
-        
+
         copy: SparseSimpleTransitionFunction = SparseSimpleTransitionFunction()
         copy.data = copy_data
 
@@ -446,6 +447,113 @@ class SparseSimpleTransitionFunction(Generic[StateType]):
 
         return union
 
+    def extend_to_new_alphabet_symbols(self, new_variables, old_variables):
+        missing_indices = get_indices_of_missing_variables(new_variables, old_variables)
+
+        for origin in self.data:
+            for dest in self.data[origin]:
+                self.data[origin][dest] = set(
+                    map(
+                        lambda old_symbol: extend_symbol_with_missing_indices(
+                            old_symbol, missing_indices),  # type: ignore
+                        self.data[origin][dest]))
+
+    def complete_with_trap_state(self, alphabet, states: List, trap_state: Any = 'TRAP') -> bool:
+        trap_state_present: bool = False
+
+        # This is basically the whole alphabet, with nonactive symbols compacted.
+        alphabet_active_symbols = set(iterate_over_active_variables(alphabet.variable_names, alphabet.active_variables))
+
+        for origin in states:
+            out_symbols = set()
+            if origin in self.data:
+                for dest in self.data[origin]:
+                    out_symbols.update(self.data[origin][dest])
+
+            missing_symbols = alphabet_active_symbols - out_symbols
+
+            if missing_symbols and not trap_state_present:
+                universal_symbol = tuple(['*' for v in alphabet.variable_names])
+                self.insert_transition(trap_state, universal_symbol, trap_state)
+                trap_state_present = True
+
+            for missing_symbol in missing_symbols:
+                # WARN: Mutating dictionary while iterating over it.
+                self.insert_transition(origin, missing_symbol, trap_state)
+        return trap_state_present
+
+    def project_bit_away(self, bit_pos: int):
+        def do_projection_on_symbol(pos: int, symbol: Symbol) -> Symbol:
+            return symbol[:pos] + ('*', ) + symbol[pos + 1:]
+
+        symbol_projection_func = functools.partial(do_projection_on_symbol, bit_pos)
+        for origin in self.data:
+            for dest in self.data[origin]:
+                self.data[origin][dest] = set(map(symbol_projection_func, self.data[origin][dest]))
+
+    def iter(self) -> Generator[Tuple[StateType, Symbol, StateType], None, None]:
+        for origin in self.data:
+            for dest in self.data[origin]:
+                for sym in self.data[origin][dest]:
+                    yield (origin, sym, dest)
+
+    def remove_nonfinishing_states(self, states: Set, final_states: Set) -> Set:
+        '''BFS on rotated transitions'''
+        rotated_transitions = make_rotate_transition_function(self.data)
+
+        queue = collections.deque(final_states)
+        reachable_states = set()
+
+        while queue:
+            current_state = queue.popleft()
+            reachable_states.add(current_state)
+
+            # We might be processing a state that is terminal
+            if current_state not in rotated_transitions:
+                continue
+
+            for reachable_state in rotated_transitions[current_state]:
+                if reachable_state not in reachable_states:
+                    queue.append(reachable_state)
+
+        unreachable_states = states - reachable_states
+        if unreachable_states:
+            self.data = remove_all_transitions_that_contain_states(self.data, unreachable_states)
+
+        return reachable_states
+
+    def calculate_path_from_dfs_traversal_history(self, traversal_history, current_state, initial_states: Set):
+        return get_word_from_dfs_results(self.data,
+                                         traversal_history, current_state,
+                                         initial_states)
+
+    def get_symbols_between_states(self, origin, dest) -> Set:
+        if origin not in self.data:
+            return set()
+        if dest not in self.data[origin]:
+            return set()
+        
+        return set(self.data[origin][dest])
+
+    def state_has_post(self, state) -> bool:
+        '''Checks whether there is some state reachable from given state.'''
+        return state in self.data
+
+    def is_in_state_post(self, origin, state) -> bool:
+        '''Checks whether the given state is a direct successor to origin (is in its post set)'''
+        if origin not in self.data:
+            return False
+        return (state in self.data[origin])
+
+    def get_states_with_post_containing(self, state) -> Set:
+        states = set()
+        for origin in self.data:
+            for dest in self.data[origin]:
+                if dest == state:
+                    states.add(origin)
+        return states
+
+
 
 class SparseBDDTransitionFunction(Generic[StateType]):
     def __init__(self, manager: BDD, alphabet):
@@ -453,10 +561,10 @@ class SparseBDDTransitionFunction(Generic[StateType]):
         self.alphabet = alphabet
         self.manager = manager
 
-    def get_transition_target(self, source: StateType, symbol: Symbol) -> Set[StateType]:
+    def get_transition_target(self, source: StateType, symbol: Symbol) -> List[StateType]:
         if source not in self.data:
-            return set()
-        
+            return list()
+
         out_states: Set[StateType] = set()
 
         for dest in self.data[source]:
@@ -467,7 +575,7 @@ class SparseBDDTransitionFunction(Generic[StateType]):
             if not self.manager.to_expr(subst_expr) == 'FALSE':
                 out_states.add(dest)
 
-        return out_states
+        return list(out_states)
 
     def get_cube_from_symbol(self, symbol) -> Dict:
         variable_names = self.alphabet.variable_names
@@ -482,10 +590,10 @@ class SparseBDDTransitionFunction(Generic[StateType]):
     def insert_transition(self, source: StateType, symbol: Symbol, dest: StateType):
         if source not in self.data:
             self.data[source] = {}
-        
+
         if dest not in self.data[source]:
             self.data[source][dest] = self.manager.add_expr('FALSE')  # Represent empty relation structure
-        
+
         cube = self.get_cube_from_symbol(symbol)
         new_transition_expr = self.manager.cube(cube)
 
@@ -511,7 +619,7 @@ class SparseBDDTransitionFunction(Generic[StateType]):
             copy_data[source] = {}
             for dest in self.data[source]:
                 copy_data[source][dest] = self.data[source][dest]
-        
+
         copy = SparseBDDTransitionFunction(self.manager, self.alphabet)  # type: SparseBDDTransitionFunction[Any]
         copy.data = copy_data
 

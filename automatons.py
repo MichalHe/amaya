@@ -17,12 +17,15 @@ from utils import (
     number_to_bit_tuple,
     carthesian_product,
     create_enumeration_state_translation_map,
+    get_default_if_none,
 )
 
 from dataclasses import (
     dataclass,
     field
 )
+
+import automaton_algorithms
 
 from relations_structures import Relation
 
@@ -43,12 +46,13 @@ from transitions import (
     remove_all_transitions_that_contain_states,
     collect_all_outgoing_symbols_from_state,
     get_symbols_intersection,
-    construct_transition_fn_to_bddtfn
+    construct_transition_fn_to_bddtfn,
+    SparseSimpleTransitionFunction
 )
 
 import functools
 import collections
-import dd
+import dd # type: ignore
 
 
 AutomatonState = TypeVar('AutomatonState')
@@ -119,23 +123,40 @@ class LSBF_Alphabet():
 @dataclass
 class NFA(Generic[AutomatonState]):
     alphabet:       LSBF_Alphabet
+    transition_fn:  SparseSimpleTransitionFunction
     automaton_type: AutomatonType = AutomatonType.NFA
     initial_states: Set[Any] = field(default_factory=set)
     final_states:   Set[Any] = field(default_factory=set)
     states:         Set[Any] = field(default_factory=set)
-    transition_fn:  Transitions[Any] = field(default_factory=dict)
+
 
     # Debug handle to listen to any state renaming happening during
     # intersecion/union; takes (automaton_id, old_state(int, str),
     # new_state(int))
     _debug_state_rename: Optional[Callable[[int, AutomatonState, int], None]] = None
 
+    def __init__(self,
+                 alphabet: LSBF_Alphabet,
+                 automaton_type=AutomatonType.NFA,
+                 initial_states: Optional[Set] = None,
+                 final_states: Optional[Set] = None,
+                 states: Optional[Set] = None,
+                 transition_fn: Optional[SparseSimpleTransitionFunction] = None):
+
+        self.alphabet = alphabet
+        self.automaton_type = automaton_type
+        self.final_states   = get_default_if_none(final_states, set)
+        self.states         = get_default_if_none(states, set)
+        self.initial_states = get_default_if_none(initial_states, set)
+        self.transition_fn  = get_default_if_none(transition_fn, SparseSimpleTransitionFunction)
+
+
     def update_transition_fn(self,
                              from_state: AutomatonState,
                              via_symbol: LSBF_AlphabetSymbol,
                              to_state: AutomatonState
                              ):
-        insert_into_transition_fn(self.transition_fn, from_state, via_symbol, to_state)
+        self.transition_fn.insert_transition(from_state, via_symbol, to_state)
 
     def add_state(self, state: Any):
         self.states.add(state)
@@ -155,8 +176,9 @@ class NFA(Generic[AutomatonState]):
     def get_transition_target(self,
                               origin: Any,
                               via_symbol: LSBF_AlphabetSymbol
-                              ) -> Tuple[AutomatonState, ...]:
-        return get_transition_target(self.transition_fn, origin, via_symbol)
+                              ) -> Tuple[Any, ...]:
+        # FIXME: Remove this cast.
+        return tuple(self.transition_fn.get_transition_target(origin, via_symbol))
 
     def intersection(self, other: NFA[S]):
         if self.alphabet != other.alphabet:
@@ -187,8 +209,8 @@ class NFA(Generic[AutomatonState]):
         bdd_manager.declare(*_var_names)
 
         logger.info('Converting transition FNs to BDDs.')
-        self_tfn = construct_transition_fn_to_bddtfn(self_renamed.transition_fn, _var_names, bdd_manager)
-        other_tfn = construct_transition_fn_to_bddtfn(other_renamed.transition_fn, _var_names, bdd_manager)
+        self_tfn = construct_transition_fn_to_bddtfn(self_renamed.transition_fn.data, _var_names, bdd_manager)
+        other_tfn = construct_transition_fn_to_bddtfn(other_renamed.transition_fn.data, _var_names, bdd_manager)
         logger.info('Done.')
 
         while work_queue:
@@ -200,7 +222,7 @@ class NFA(Generic[AutomatonState]):
             # States in work_queue are boxed
             self_state, others_state = current_state
 
-            # Check whether intersecti n state should be made final
+            # Check whether intersectin state should be made final
             if (self_state in self_renamed.final_states and others_state in other_renamed.final_states):
                 resulting_nfa.add_final_state((self_state, others_state))
 
@@ -257,7 +279,7 @@ class NFA(Generic[AutomatonState]):
         _, other_renamed = other.rename_states(start_from=latest_state_value)
 
         states = self_renamed.states.union(other_renamed.states)
-        transitions = unite_transitions(self_renamed.transition_fn, other_renamed.transition_fn)
+        transitions = SparseSimpleTransitionFunction.union_of(self_renamed.transition_fn, other_renamed.transition_fn)
         initial_states = self_renamed.initial_states.union(other_renamed.initial_states)
         final_states = self_renamed.final_states.union(other_renamed.final_states)
 
@@ -272,8 +294,8 @@ class NFA(Generic[AutomatonState]):
 
     def extend_to_common_alphabet(self, other: NFA[S]):
         unified_variable_names = unite_alphabets(self.alphabet.variable_names, other.alphabet.variable_names)
-        self.transition_fn = extend_transitions_to_new_alphabet_symbols(self.alphabet.variable_names, unified_variable_names, self.transition_fn)
-        other.transition_fn = extend_transitions_to_new_alphabet_symbols(other.alphabet.variable_names, unified_variable_names, other.transition_fn)
+        self.transition_fn.extend_to_new_alphabet_symbols(unified_variable_names, self.alphabet.variable_names)
+        other.transition_fn.extend_to_new_alphabet_symbols(unified_variable_names, other.alphabet.variable_names)
 
         self.alphabet = LSBF_Alphabet.from_variable_names(unified_variable_names)
         other.alphabet = self.alphabet
@@ -325,33 +347,12 @@ class NFA(Generic[AutomatonState]):
         '''Adds trap (sink) state with transitions to it as needed.
         The Given automaton should be determinized first.
         '''
-        trap_state_present: bool = False
-        # Whole alphabet..
-        alphabet_active_symbols = set(iterate_over_active_variables(self.alphabet.variable_names, self.alphabet.active_variables))
         trap_state = 'TRAP'
-
-        new_transitions = make_transitions_copy(self.transition_fn)
-
         states = list(self.states)
-        for origin in states:
-            out_symbols = set()
-            if origin in self.transition_fn:
-                for dest in self.transition_fn[origin]:
-                    out_symbols.update(self.transition_fn[origin][dest])
+        added_trap_state = self.transition_fn.complete_with_trap_state(self.alphabet, states, trap_state=trap_state)
+        if added_trap_state:
+            self.states.add(trap_state)
 
-            missing_symbols = alphabet_active_symbols - out_symbols
-
-            if missing_symbols and not trap_state_present:
-                self.add_state(trap_state)
-                universal_symbol = tuple(['*' for v in self.alphabet.variable_names])
-                insert_into_transition_fn(new_transitions, trap_state, universal_symbol, trap_state)
-                trap_state_present = True
-
-            for missing_symbol in missing_symbols:
-                # Mutating dictionary while iterating over it.
-                insert_into_transition_fn(new_transitions, origin, missing_symbol, trap_state)
-
-        self.transition_fn = new_transitions
 
     def _rename_own_states(self):
         debug_fn: Optional[functools.partial[None]]
@@ -365,10 +366,11 @@ class NFA(Generic[AutomatonState]):
         def translate(state: AutomatonState) -> int:
             return state_name_translation[state]
 
-        self.states = set(map(translate, self.states))
+        self.states         = set(map(translate, self.states))
         self.initial_states = set(map(translate, self.initial_states))
-        self.final_states = set(map(translate, self.final_states))
-        self.transition_fn = translate_transition_fn_states(self.transition_fn, state_name_translation)
+        self.final_states   = set(map(translate, self.final_states))
+
+        self.transition_fn.rename_states(state_name_translation)
 
     def do_projection(self, variable_name: str) -> Optional[NFA]:
         resulting_alphabet_var_count = len(self.alphabet.active_variables) - 1
@@ -394,7 +396,9 @@ class NFA(Generic[AutomatonState]):
             bit_pos = calculate_variable_bit_position(self.alphabet.variable_names, variable_name)
             if bit_pos is None:
                 raise ValueError(f'Could not find variable_name "{variable_name}" in current alphabet {self.alphabet}')
-            new_nfa.transition_fn = do_projection(self.transition_fn, bit_pos)
+
+            new_nfa.transition_fn = self.transition_fn.copy()
+            new_nfa.transition_fn.project_bit_away(bit_pos)
 
             new_nfa.alphabet.active_variables -= set((variable_name, ))
 
@@ -402,72 +406,13 @@ class NFA(Generic[AutomatonState]):
             return new_nfa
 
     def perform_pad_closure(self):
-        '''Performs in place padding closure on self.'''
-        finishing_set: Set[AutomatonState] = set()
-        for final_state in self.final_states:
-            finishing_states = self.get_states_with_transition_destination(final_state)
-            finishing_set.update(finishing_states)
-
-        work_queue: List[AutomatonState] = list(finishing_set)
-        while work_queue:
-            # Current state has transition to final for sure
-            current_state = work_queue.pop()
-
-            potential_states = self.get_states_with_transition_destination(current_state)
-            for potential_state in potential_states:
-                symbols_from_potential_to_current = self.get_symbols_leading_from_state_to_state(potential_state, current_state)
-                symbols_from_current_to_final = self.get_symbols_leading_from_state_to_state(current_state, final_state)
-
-                intersect = symbols_from_potential_to_current.intersection(symbols_from_current_to_final)
-
-                # Lookup symbols leading from potential state to final to see whether something changed
-                symbols_from_potential_to_final = self.get_symbols_leading_from_state_to_state(potential_state, final_state)
-
-                # (intersect - symbols_from_potential_to_final)  ===> check whether intersect brings any new symbols to transitions P->F
-                if intersect and (intersect - symbols_from_potential_to_final):
-                    # Propagate the finishing ability
-                    if final_state in self.transition_fn[potential_state]:
-                        # Some transition from potential to final was already made - just update it
-                        self.transition_fn[potential_state][final_state].update(intersect)
-                    else:
-                        # There is no transition from potential to final
-                        self.transition_fn[potential_state][final_state] = intersect
-
-                    # We need to check all states that could reach 'potential' -- they can now become finishing
-                    if potential_state not in work_queue and potential_state != current_state:
-                        work_queue.append(potential_state)
-
-    def get_states_with_transition_destination(self, destination: AutomatonState) -> Set[AutomatonState]:
-        states = set()
-        for origin in self.transition_fn:
-            for dest in self.transition_fn[origin]:
-                if dest == destination:
-                    states.add(origin)
-        return states
-
-    def get_padding_symbols_for_state_leading_to_final_state(self,
-                                                             from_state: AutomatonState,
-                                                             final_state: AutomatonState) -> Set[LSBF_AlphabetSymbol]:
-        self_loop_symbols = self.get_self_loop_symbols_state(from_state)
-        final_symbols = self.get_symbols_leading_from_state_to_state(from_state, final_state)
-        return self_loop_symbols.intersection(final_symbols)
-
-    def get_self_loop_symbols_state(self, state) -> Set[LSBF_AlphabetSymbol]:
-        if state in self.transition_fn:
-            if state in self.transition_fn[state]:
-                return set(self.transition_fn[state][state])
-            else:
-                return set()
-        else:
-            return set()
+        '''Performs inplace padding closure. See file automaton_algorithms.py:padding_closure'''
+        automaton_algorithms.pad_closure(self)
 
     def get_symbols_leading_from_state_to_state(self,
                                                 from_state: AutomatonState,
                                                 to_state: AutomatonState) -> Set[LSBF_AlphabetSymbol]:
-        if from_state in self.transition_fn:
-            if to_state in self.transition_fn[from_state]:
-                return set(self.transition_fn[from_state][to_state])
-        return set()
+        return self.transition_fn.get_symbols_between_states(from_state, to_state)
 
     def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
         nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
@@ -486,7 +431,8 @@ class NFA(Generic[AutomatonState]):
         nfa.states.update(map(translate, self.states))
         nfa.initial_states.update(map(translate, self.initial_states))
         nfa.final_states.update(map(translate, self.final_states))
-        nfa.transition_fn = translate_transition_fn_states(self.transition_fn, state_name_translation)
+        nfa.transition_fn = self.transition_fn.copy()
+        nfa.transition_fn.rename_states(state_name_translation)
 
         return (hightest_state, nfa)
 
@@ -507,7 +453,7 @@ class NFA(Generic[AutomatonState]):
         else:
             result.final_states = self.states - self.initial_states - self.final_states
 
-        result.transition_fn = make_transitions_copy(self.transition_fn)
+        result.transition_fn = self.transition_fn.copy()
 
         return result
 
@@ -532,23 +478,20 @@ class NFA(Generic[AutomatonState]):
             explored_states.add(current_state)
 
             if current_state in self.final_states:
-                used_word = get_word_from_dfs_results(self.transition_fn,
-                                                      traversal_history,
-                                                      current_state,
-                                                      self.initial_states)
+                used_word = self.transition_fn.calculate_path_from_dfs_traversal_history(
+                    traversal_history, current_state, self.initial_states)
 
                 # The NFA cannot accept empty words - that happens when after
                 # determinization and complement some of the initial states
-                # becomes accepting
+                # becomes accepting -- THIS SHOUL NOT HAPPEN anymore
                 if used_word:
                     return (True, used_word)
 
-            if current_state not in self.transition_fn:
+            if current_state not in self.transition_fn.data:
                 if used_word:
                     used_word.pop(-1)
             else:
-
-                transitions = self.transition_fn[current_state]
+                transitions = self.transition_fn.data[current_state]
                 for destination, _ in transitions.items():
                     if destination not in explored_states:
                         traversal_history[destination] = current_state
@@ -557,27 +500,9 @@ class NFA(Generic[AutomatonState]):
 
     def remove_nonfinishing_states(self):
         '''BFS on rotated transitions'''
-        rotated_transitions = make_rotate_transition_function(self.transition_fn)
+        reachable_states = self.transition_fn.remove_nonfinishing_states(self.states, self.final_states)
+        self.states = reachable_states
 
-        queue = collections.deque(self.final_states)
-        reachable_states = set()
-
-        while queue:
-            current_state = queue.popleft()
-            reachable_states.add(current_state)
-
-            # We might be processing a state that is terminal
-            if current_state not in rotated_transitions:
-                continue
-
-            for reachable_state in rotated_transitions[current_state]:
-                if reachable_state not in reachable_states:
-                    queue.append(reachable_state)
-
-        unreachable_states = self.states - reachable_states
-        if unreachable_states:
-            self.transition_fn = remove_all_transitions_that_contain_states(self.transition_fn, unreachable_states)
-            self.states = reachable_states
 
     @staticmethod
     def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA:
@@ -625,7 +550,7 @@ class NFA(Generic[AutomatonState]):
 
         a_type = AutomatonType.DFA | AutomatonType.BOOL
 
-        nfa = NFA(alphabet, a_type, initial_states, final_states, states)
+        nfa: NFA = NFA(alphabet, a_type, initial_states, final_states, states)
 
         if var_value is True:
             nfa.update_transition_fn('q0', (1, ), 'qT')  # Var = True --> accepting state
