@@ -94,20 +94,26 @@ class LSBF_Alphabet():
             variable_names=variable_names
         )
 
-    def new_with_variable_removed(self, removed_var: str) -> Optional[LSBF_Alphabet]:
+    def new_with_variable_removed(self,
+                                  removed_var: str) -> Optional[LSBF_Alphabet]:
 
         new_variable_names = tuple(
-            filter(
-                lambda variable_name: removed_var != variable_name, self.variable_names))
+            filter(lambda variable_name: removed_var != variable_name,
+                   self.variable_names))
 
         if len(new_variable_names) == len(self.variable_names):
-            return None  # The variable name to be removed was not present in current variable list
+            return None  # The variable name to be removed was not present in the current variable list
+
+        active_variables = set(self.active_variables)
+        if removed_var in active_variables:
+            active_variables.remove(removed_var)
 
         new_symbols = tuple(
-            map(
-                number_to_bit_tuple, range(2**len(new_variable_names))))
+            map(number_to_bit_tuple, range(2**len(new_variable_names))))
 
-        return LSBF_Alphabet(symbols=new_symbols, variable_names=new_variable_names)
+        return LSBF_Alphabet(symbols=new_symbols,
+                             variable_names=new_variable_names,
+                             active_variables=active_variables)
 
 
 @dataclass
@@ -173,7 +179,7 @@ class NFA(Generic[AutomatonState]):
             resulting_nfa.add_initial_state(initial_state)
 
         bdd_manager = dd.autoref.BDD()
-        
+
         _var_names = []
         for i, _ in enumerate(self_renamed.alphabet.variable_names):
             _var_names .append(chr(ord('A') + i))
@@ -199,7 +205,7 @@ class NFA(Generic[AutomatonState]):
                 resulting_nfa.add_final_state((self_state, others_state))
 
             used_symbols = 0
-            
+
             # optimized_intersection: Set[Tuple[LSBF_AlphabetSymbol, Tuple[int, int]]] = set()
             if self_state in self_tfn and others_state in other_tfn:
                 for self_dest_state in self_tfn[self_state]:
@@ -235,7 +241,7 @@ class NFA(Generic[AutomatonState]):
 
             #         generated_intersection.add((symbol, new_intersect_state))
             #         resulting_nfa.update_transition_fn(current_state, symbol, new_intersect_state)
-            
+
             # logger.info(f'Standard intersection produced: {len(generated_intersection)}')
             # logger.info(f'Optimized intersection produced: {len(optimized_intersection)}')
             # msg: str = 'OK' if len(generated_intersection) == len(optimized_intersection) else 'FAIL'
