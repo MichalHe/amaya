@@ -1,5 +1,5 @@
 from __future__ import annotations
-from enum import IntEnum
+from enum import IntFlag
 from log import logger
 from typing import (
     Set,
@@ -10,7 +10,7 @@ from typing import (
     Generic,
     Optional,
     Callable,
-    Union
+    Union, Any
 )
 
 from utils import (
@@ -63,7 +63,7 @@ TransitionFn = Dict[AutomatonState,
                     ]]
 
 
-class AutomatonType(IntEnum):
+class AutomatonType(IntFlag):
     DFA = 0x01
     NFA = 0x02
     TRIVIAL = 0x04
@@ -120,10 +120,10 @@ class LSBF_Alphabet():
 class NFA(Generic[AutomatonState]):
     alphabet:       LSBF_Alphabet
     automaton_type: AutomatonType = AutomatonType.NFA
-    initial_states: Set[AutomatonState] = field(default_factory=set)
-    final_states:   Set[AutomatonState] = field(default_factory=set)
-    states:         Set[AutomatonState] = field(default_factory=set)
-    transition_fn:  Transitions[AutomatonState] = field(default_factory=dict)
+    initial_states: Set[Any] = field(default_factory=set)
+    final_states:   Set[Any] = field(default_factory=set)
+    states:         Set[Any] = field(default_factory=set)
+    transition_fn:  Transitions[Any] = field(default_factory=dict)
 
     # Debug handle to listen to any state renaming happening during
     # intersecion/union; takes (automaton_id, old_state(int, str),
@@ -137,23 +137,23 @@ class NFA(Generic[AutomatonState]):
                              ):
         insert_into_transition_fn(self.transition_fn, from_state, via_symbol, to_state)
 
-    def add_state(self, state: AutomatonState):
+    def add_state(self, state: Any):
         self.states.add(state)
 
-    def add_final_state(self, state: AutomatonState):
+    def add_final_state(self, state: Any):
         self.final_states.add(state)
 
-    def add_initial_state(self, state: AutomatonState):
+    def add_initial_state(self, state: Any):
         self.initial_states.add(state)
 
-    def has_state_with_value(self, state: AutomatonState) -> bool:
+    def has_state_with_value(self, state: Any) -> bool:
         return state in self.states
 
-    def has_final_state_with_value(self, value: AutomatonState) -> bool:
+    def has_final_state_with_value(self, value: Any) -> bool:
         return value in self.final_states
 
     def get_transition_target(self,
-                              origin: AutomatonState,
+                              origin: Any,
                               via_symbol: LSBF_AlphabetSymbol
                               ) -> Tuple[AutomatonState, ...]:
         return get_transition_target(self.transition_fn, origin, via_symbol)
@@ -285,14 +285,13 @@ class NFA(Generic[AutomatonState]):
         working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self.initial_states)]
         _final_states_raw = self.final_states
 
-        DFA_AutomatonState = Tuple[AutomatonState, ...]  # Alias type
-        determinized_automaton: DFA[DFA_AutomatonState] = DFA(
+        determinized_automaton: DFA[Tuple[AutomatonState, ...]] = DFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.DFA)
         determinized_automaton.add_initial_state(working_queue[0])
 
         while working_queue:
-            unexplored_dfa_state: DFA_AutomatonState = working_queue.pop(0)
+            unexplored_dfa_state: Tuple[AutomatonState, ...] = working_queue.pop(0)
             logger.debug(f'Determinization for {unexplored_dfa_state}, remaining in work queue: {len(working_queue)}')
 
             determinized_automaton.add_state(unexplored_dfa_state)
@@ -309,7 +308,8 @@ class NFA(Generic[AutomatonState]):
                     if out_states:
                         reachable_states += list(out_states)
 
-                dfa_state: DFA_AutomatonState = tuple(set(sorted(reachable_states)))
+                # FIXME: Some form of a restriction to AutomatonState type is needed in order to support SupportsLessThan type
+                dfa_state: Tuple[AutomatonState, ...] = tuple(set(sorted(reachable_states)))  # type: ignore
 
                 if dfa_state and not determinized_automaton.has_state_with_value(dfa_state):
                     if dfa_state not in working_queue:
@@ -580,8 +580,8 @@ class NFA(Generic[AutomatonState]):
             self.states = reachable_states
 
     @staticmethod
-    def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:
-        nfa = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
+    def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA:
+        nfa: NFA[str] = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
 
         final_state = 'FINAL'
         nfa.add_state(final_state)
@@ -595,8 +595,8 @@ class NFA(Generic[AutomatonState]):
         return nfa
 
     @staticmethod
-    def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA[AutomatonState]:
-        nfa = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
+    def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA:
+        nfa: NFA[str] = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
 
         initial_state = 'INITIAL'
         nfa.add_state(initial_state)
@@ -621,7 +621,7 @@ class NFA(Generic[AutomatonState]):
             states = set(['q0', 'qF'])
             final_states = set(['qF'])
         initial_states = set(['q0'])
-        alphabet = LSBF_Alphabet((0, 1), (variable_name, ), set([variable_name]))
+        alphabet = LSBF_Alphabet(((0, ), (1, ),), (variable_name, ), set([variable_name]))
 
         a_type = AutomatonType.DFA | AutomatonType.BOOL
 
