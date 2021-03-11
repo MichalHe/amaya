@@ -41,40 +41,45 @@ def x_nfa_from_ineq() -> NFA[Union[int, str]]:
 
 
 def test_get_indices_of_missing_variables():
-    indices: List[int] = get_indices_of_missing_variables("a b c".split(), "x a y b c z w".split())
+    indices: List[int] = get_indices_of_missing_variables(
+        ('x', 'a', 'y', 'b', 'c', 'z', 'w'), ('a', 'b', 'c'))
     expected_indices = [0, 2, 5, 6]
     assert expected_indices == indices
 
-    indices = get_indices_of_missing_variables("a".split(), "a b c x y z".split())
+    indices = get_indices_of_missing_variables(('a', 'b', 'c', 'x', 'y', 'z'), ('a',))
     expected_indices = [1, 2, 3, 4, 5]
     assert expected_indices == indices
 
-    indices = get_indices_of_missing_variables("a x y z".split(), "b c a x y z u".split())
+    indices = get_indices_of_missing_variables(
+        ('b', 'c', 'a', 'x', 'y', 'z', 'u'), ('a', 'x', 'y', 'z'))
     expected_indices = [0, 1, 6]
     assert expected_indices == indices
 
 
 def test_unite_alphabets():
-    alphabet1 = 'a c d'.split()
-    alphabet2 = 'b x'.split()
+    alphabet1 = tuple('a c d'.split())
+    alphabet2 = tuple('b x'.split())
 
     u = unite_alphabets(alphabet1, alphabet2)
     assert 'a b c d x' == ' '.join(u)
+    # Union: a b c d x
+    # Alph1: a 1 c d 4
+    # Alph2: 0 b 2 3 x
 
-    indices_1 = get_indices_of_missing_variables(alphabet1, u)
+    indices_1 = get_indices_of_missing_variables(u, alphabet1)
     expected_indices = [1, 4]
     assert indices_1 == expected_indices
 
-    indices_2 = get_indices_of_missing_variables(alphabet2, u)
+    indices_2 = get_indices_of_missing_variables(u, alphabet2)
     expected_indices = [0, 2, 3]
     assert indices_2 == expected_indices
 
 
 def test_extend_symbol_on_indices():
-    old_al = 'b x'.split()
-    new_al = 'a b c x z'.split()
+    old_al = tuple('b x'.split())
+    new_al = tuple('a b c x z'.split())
 
-    indices = get_indices_of_missing_variables(old_al, new_al)
+    indices = get_indices_of_missing_variables(new_al, old_al)
     assert indices == [0, 2, 4]
 
     symbol = (1, 0)
@@ -82,8 +87,8 @@ def test_extend_symbol_on_indices():
 
 
 def test_extend_transitions_to_new_alphabet():
-    old_al = 'b x'.split()
-    new_al = 'a b c x z'.split()
+    old_al = tuple('b x'.split())
+    new_al = tuple('a b c x z'.split())
 
     transitions = {
         1: {
@@ -95,7 +100,7 @@ def test_extend_transitions_to_new_alphabet():
         }
     }
 
-    extended_transitions = extend_transitions_to_new_alphabet_symbols(old_al, new_al, transitions)
+    extended_transitions = extend_transitions_to_new_alphabet_symbols(old_al, new_al, transitions)  # type: ignore
 
     assert('*', 0, '*', 1, '*') in extended_transitions[1][2]
     assert('*', 1, '*', 0, '*') in extended_transitions[1][2]
@@ -113,7 +118,7 @@ def test_unite_nfas_with_different_alphabets(xy_nfa_from_ineq, xz_nfa_from_ineq)
     assert len(union.alphabet.variable_names) == 3
 
     cnt = 0
-    for o, s, d in iter_transition_fn(union.transition_fn):
+    for _, s, _ in iter_transition_fn(union.transition_fn):
         assert len(s) == 3
         cnt += 1
 
@@ -135,8 +140,6 @@ def test_intersect_nfas_with_different_alphabets(y_nfa_from_ineq, x_nfa_from_ine
     x_nfa_from_ineq._debug_state_rename = state_renamed
 
     intersection = y_nfa_from_ineq.intersection(x_nfa_from_ineq)
-    print(state_names_x)
-    print(state_names_y)
     assert len(y_nfa_from_ineq.states) == 2
     assert len(x_nfa_from_ineq.states) == 3
     assert intersection
