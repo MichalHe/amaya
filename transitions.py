@@ -374,9 +374,41 @@ def construct_transition_fn_to_bddtfn(t: Transitions[State],
 
 
 StateType = TypeVar('StateType')
-class SparseSimpleTransitionFunction(Generic[StateType]):
+
+class SparseTransitionFunctionBase(Generic[StateType]):
     def __init__(self):
         self.data: Dict[Any, Dict[Any, Set[Symbol]]] = dict()
+
+    def get_symbols_between_states(self, origin, dest) -> Set:
+        if origin not in self.data:
+            return set()
+        if dest not in self.data[origin]:
+            return set()
+        
+        return set(self.data[origin][dest])
+
+    def state_has_post(self, state) -> bool:
+        '''Checks whether there is some state reachable from given state.'''
+        return state in self.data
+
+    def is_in_state_post(self, origin, state) -> bool:
+        '''Checks whether the given state is a direct successor to origin (is in its post set)'''
+        if origin not in self.data:
+            return False
+        return (state in self.data[origin])
+
+    def get_states_with_post_containing(self, state) -> Set:
+        states = set()
+        for origin in self.data:
+            for dest in self.data[origin]:
+                if dest == state:
+                    states.add(origin)
+        return states
+
+
+class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
+    def __init__(self):
+        super().__init__()
 
     def get_transition_target(self, source: StateType, symbol: Symbol) -> List[StateType]:
         if source not in self.data:
@@ -527,35 +559,9 @@ class SparseSimpleTransitionFunction(Generic[StateType]):
                                          traversal_history, current_state,
                                          initial_states)
 
-    def get_symbols_between_states(self, origin, dest) -> Set:
-        if origin not in self.data:
-            return set()
-        if dest not in self.data[origin]:
-            return set()
-        
-        return set(self.data[origin][dest])
-
-    def state_has_post(self, state) -> bool:
-        '''Checks whether there is some state reachable from given state.'''
-        return state in self.data
-
-    def is_in_state_post(self, origin, state) -> bool:
-        '''Checks whether the given state is a direct successor to origin (is in its post set)'''
-        if origin not in self.data:
-            return False
-        return (state in self.data[origin])
-
-    def get_states_with_post_containing(self, state) -> Set:
-        states = set()
-        for origin in self.data:
-            for dest in self.data[origin]:
-                if dest == state:
-                    states.add(origin)
-        return states
 
 
-
-class SparseBDDTransitionFunction(Generic[StateType]):
+class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
     def __init__(self, manager: BDD, alphabet):
         self.data: Dict[Any, Dict[Any, BDD]] = dict()
         self.alphabet = alphabet
@@ -598,6 +604,11 @@ class SparseBDDTransitionFunction(Generic[StateType]):
         new_transition_expr = self.manager.cube(cube)
 
         self.data[source][dest] = self.manager.apply('or', self.data[source][dest], new_transition_expr)
+    
+    def _write_transition_bdd(self, source: StateType, bdd: Any, dest: StateType):
+        if source not in self.data:
+            self.data[source] = {}
+        self.data[source][dest] = bdd
 
     def rename_states(self, mapping: Dict):
         renamed_data: Dict = {}
@@ -645,3 +656,41 @@ class SparseBDDTransitionFunction(Generic[StateType]):
                         union.data[source][dest] = t1.data[source][dest]
 
         return union
+
+    def _iter_compact_models(self, bdd):
+        var_names = self.alphabet.variable_names
+        for model in self.manager.pick_iter(bdd):
+            symbol = []
+            for v_name in var_names:
+                bit = model.get(v_name, '*')
+                bit = int(bit) if type(bit) == bool else bit
+                symbol.append(bit)
+            yield tuple(symbol)
+
+    def iter(self) -> Generator[Tuple[StateType, Symbol, StateType], None, None]:
+        for source in self.data:
+            for dest in self.data[source]:
+                bdd = self.data[source][dest]
+                yield from self._iter_compact_models(bdd)
+
+    def complete_with_trap_state(self, alphabet, states: List, trap_state: Any = 'TRAP') -> bool:
+        trap_state_present: bool = False
+
+        for origin in states:
+            out_bdd = self.manager.add_expr('FALSE')
+            if origin in self.data:
+                for dest in self.data[origin]:
+                    out_bdd = self.manager.apply('or', out_bdd, self.data[origin][dest])
+            
+            out_bdd_complement = self.manager.apply('not', out_bdd)
+            is_complement_empty = self.manager.to_expr(out_bdd_complement) == 'FALSE'
+
+            if not is_complement_empty and not trap_state_present:
+                universal_symbol = self.manager.add_expr('TRUE')
+                self._write_transition_bdd(trap_state, universal_symbol, trap_state)
+                trap_state_present = True
+
+            if not is_complement_empty:
+                # WARN: Mutating dictionary while iterating over it.
+                self._write_transition_bdd(origin, out_bdd_complement, trap_state)
+        return trap_state_present
