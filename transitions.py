@@ -1,6 +1,8 @@
+from __future__ import annotations
 from typing import (
     Set,
     Dict,
+    Any,
     Tuple,
     Union,
     Mapping,
@@ -8,7 +10,8 @@ from typing import (
     List,
     Iterable,
     Generator,
-    TypeVar
+    TypeVar,
+    Generic
 )
 import functools
 import utils
@@ -19,7 +22,7 @@ Symbol = Tuple[Union[str, int], ...]
 State = TypeVar('State')
 T = TypeVar('T')
 Transitions = Dict[State, Dict[State, Set[Symbol]]]
-VariableNames = List[str]
+VariableNames = Tuple[str, ...]
 
 
 def unite_alphabets(alphabet1: VariableNames, alphabet2: VariableNames) -> VariableNames:
@@ -209,7 +212,7 @@ def get_word_from_dfs_results(t: Transitions[State],
     return used_word
 
 
-def iterate_over_active_variables(all_variables: Tuple[str], active_variables: Set[str]):
+def iterate_over_active_variables(all_variables: Tuple[str, ...], active_variables: Set[str]):
     ordered_active_vars = list(sorted(active_variables))
     missing_variables_indices = get_indices_of_missing_variables(all_variables, ordered_active_vars)
 
@@ -367,3 +370,170 @@ def construct_transition_fn_to_bddtfn(t: Transitions[State],
             transition_bdd = constuct_bdd_from_transition_symbols(t[source][dest], var_names, bdd_manager) 
             new_t[source][dest] = transition_bdd
     return new_t
+
+
+StateType = TypeVar('StateType')
+class SparseSimpleTransitionFunction(Generic[StateType]):
+    def __init__(self):
+        self.data: Dict[Any, Dict[Any, Set[Symbol]]] = dict()
+
+    def get_transition_target(self, source: StateType, symbol: Symbol) -> Set[StateType]:
+        if source not in self.data:
+            return set()
+        
+        out_states: Set[StateType] = set()
+        for dest in self.data[source]:
+            for t_symbol in self.data[source][dest]:
+                if symbols_intersect(t_symbol, symbol):
+                    out_states.add(dest)
+                    break  # Stop checking symbols, continue with next dest
+
+        return out_states
+    
+    def insert_transition(self, source: StateType, symbol: Symbol, dest: StateType):
+        if source not in self.data:
+            self.data[source] = {}
+        
+        if dest not in self.data[source]:
+            self.data[source][dest] = set()  # Represent empty relation structure
+        
+        self.data[source][dest].add(symbol)
+
+    def rename_states(self, mapping: Dict):
+        renamed_data: Dict = {}
+
+        for origin in self.data:
+            r_origin = mapping[origin]
+            renamed_data[r_origin] = {}
+
+            for dest in self.data[origin]:
+                r_dest = mapping[dest]
+                renamed_data[r_origin][r_dest] = self.data[origin][dest]
+
+        self.data = renamed_data
+
+    def copy(self) -> SparseSimpleTransitionFunction:
+        copy_data: Dict[StateType, Dict[StateType, Set]] = {}
+
+        for source in self.data:
+            copy_data[source] = {}
+            for dest in self.data[source]:
+                copy_data[source][dest] = set(self.data[source][dest])
+        
+        copy: SparseSimpleTransitionFunction = SparseSimpleTransitionFunction()
+        copy.data = copy_data
+
+        return copy
+
+    @staticmethod
+    def union_of(t0: SparseSimpleTransitionFunction, t1: SparseSimpleTransitionFunction) -> SparseSimpleTransitionFunction:
+        union = t0.copy()
+
+        for source in t1.data:
+            if source not in union.data:
+                # We can copy the rest right away
+                union.data[source] = {}
+                for dest in t1.data[source]:
+                    union.data[source][dest] = t1.data[source][dest]
+            else:
+                # Source is present in union
+                for dest in t1.data[source]:
+                    if dest in union.data[source]:
+                        # We need to unite the BDDs -- we can get from source to dest either via BDD#0 **or** BDD#1
+                        union.data[source][dest] = union.data[source][dest].union(t1.data[source][dest])
+                    else:
+                        union.data[source][dest] = set(t1.data[source][dest])
+
+        return union
+
+
+class SparseBDDTransitionFunction(Generic[StateType]):
+    def __init__(self, manager: BDD, alphabet):
+        self.data: Dict[Any, Dict[Any, BDD]] = dict()
+        self.alphabet = alphabet
+        self.manager = manager
+
+    def get_transition_target(self, source: StateType, symbol: Symbol) -> Set[StateType]:
+        if source not in self.data:
+            return set()
+        
+        out_states: Set[StateType] = set()
+
+        for dest in self.data[source]:
+            bdd_expr = self.data[source][dest]
+            cube = self.get_cube_from_symbol(symbol)
+            subst_expr = self.manager.let(cube, bdd_expr)
+
+            if not self.manager.to_expr(subst_expr) == 'FALSE':
+                out_states.add(dest)
+
+        return out_states
+
+    def get_cube_from_symbol(self, symbol) -> Dict:
+        variable_names = self.alphabet.variable_names
+        cube = dict()
+        for bit, var in zip(symbol, variable_names):
+            if bit == 0:
+                cube[var] = False
+            elif bit == 1:
+                cube[var] = True
+        return cube
+
+    def insert_transition(self, source: StateType, symbol: Symbol, dest: StateType):
+        if source not in self.data:
+            self.data[source] = {}
+        
+        if dest not in self.data[source]:
+            self.data[source][dest] = self.manager.add_expr('FALSE')  # Represent empty relation structure
+        
+        cube = self.get_cube_from_symbol(symbol)
+        new_transition_expr = self.manager.cube(cube)
+
+        self.data[source][dest] = self.manager.apply('or', self.data[source][dest], new_transition_expr)
+
+    def rename_states(self, mapping: Dict):
+        renamed_data: Dict = {}
+
+        for origin in self.data:
+            r_origin = mapping[origin]
+            renamed_data[r_origin] = {}
+
+            for dest in self.data[origin]:
+                r_dest = mapping[dest]
+                renamed_data[r_origin][r_dest] = self.data[origin][dest]
+
+        self.data = renamed_data
+
+    def copy(self) -> SparseBDDTransitionFunction:
+        copy_data: Dict[StateType, Dict[StateType, BDD]] = {}
+
+        for source in self.data:
+            copy_data[source] = {}
+            for dest in self.data[source]:
+                copy_data[source][dest] = self.data[source][dest]
+        
+        copy = SparseBDDTransitionFunction(self.manager, self.alphabet)  # type: SparseBDDTransitionFunction[Any]
+        copy.data = copy_data
+
+        return copy
+
+    @staticmethod
+    def union_of(t0: SparseBDDTransitionFunction, t1: SparseBDDTransitionFunction) -> SparseBDDTransitionFunction:
+        union = t0.copy()
+
+        for source in t1.data:
+            if source not in union.data:
+                # We can copy it right away
+                union.data[source] = {}
+                for dest in t1.data[source]:
+                    union.data[source][dest] = t1.data[source][dest]
+            else:
+                # Source is present in union
+                for dest in t1.data[source]:
+                    if dest in union.data[source]:
+                        # We need to unite the BDDs -- we can get from source to dest either via BDD#0 **or** BDD#1
+                        union.data[source][dest] = union.manager.apply('or', union.data[source][dest], t1.data[source][dest])
+                    else:
+                        union.data[source][dest] = t1.data[source][dest]
+
+        return union
