@@ -41,7 +41,7 @@ def test_build_nfa_from_equality(simple_equation: Relation):
         (-1, (1, 1), 'FINAL'),
     ]
 
-    actual_transitions = list(iter_transition_fn(nfa.transition_fn))
+    actual_transitions = list(iter_transition_fn(nfa.transition_fn.data))
 
     assert len(actual_transitions) == len(expected_transitions)
     for actual_t in actual_transitions:

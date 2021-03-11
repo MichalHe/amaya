@@ -19,4 +19,4 @@ def test_nfa_complement(nfa1: NFA):  # NOQA
     assert non_final_states == compl_nfa.final_states
     assert len(nfa1.initial_states) == len(compl_nfa.initial_states)
 
-    assert len(tuple(iter_transition_fn(nfa1.transition_fn))) == len(tuple(iter_transition_fn(compl_nfa.transition_fn)))  # type: ignore
+    assert len(tuple(iter_transition_fn(nfa1.transition_fn.data))) == len(tuple(iter_transition_fn(compl_nfa.transition_fn.data)))  # type: ignore

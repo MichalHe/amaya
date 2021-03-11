@@ -20,8 +20,8 @@ def test_nfa_projection(nfa1: NFA):  # NOQA
         (1, 1): ('*', 1),
     }
 
-    for o_src in nfa1.transition_fn:
-        for o_dest in nfa1.transition_fn[o_src]:
-            transition_symbols = nfa1.transition_fn[o_src][o_dest]
+    for o_src in nfa1.transition_fn.data:
+        for o_dest in nfa1.transition_fn.data[o_src]:
+            transition_symbols = nfa1.transition_fn.data[o_src][o_dest]
             for original_symbol in transition_symbols:
-                assert expected_symbols_projection[original_symbol] in pnfa.transition_fn[o_src][o_dest]
+                assert expected_symbols_projection[original_symbol] in pnfa.transition_fn.data[o_src][o_dest]

@@ -3,7 +3,8 @@ from transitions import (
     unite_alphabets,
     extend_symbol_with_missing_indices,
     extend_transitions_to_new_alphabet_symbols,
-    iter_transition_fn
+    iter_transition_fn,
+    SparseSimpleTransitionFunction
 )
 from typing import List, Union
 from relations_structures import Relation
@@ -110,19 +111,19 @@ def test_extend_transitions_to_new_alphabet():
 
 
 def test_unite_nfas_with_different_alphabets(xy_nfa_from_ineq, xz_nfa_from_ineq):
-    nfa1 = xy_nfa_from_ineq
-    nfa2 = xz_nfa_from_ineq
+    nfa1 = xy_nfa_from_ineq  # This has var_names = [x y]
+    nfa2 = xz_nfa_from_ineq  # This has var_names = [x z]
 
     union = nfa1.union(nfa2)
     assert union
     assert len(union.alphabet.variable_names) == 3
 
     cnt = 0
-    for _, s, _ in iter_transition_fn(union.transition_fn):
-        assert len(s) == 3
+    for _, s, _ in iter_transition_fn(union.transition_fn.data):
+        assert len(s) == 3  # TMP: Here we crash
         cnt += 1
 
-    assert cnt == len(list(iter_transition_fn(nfa1.transition_fn))) + len(list(iter_transition_fn(nfa2.transition_fn)))
+    assert cnt == len(list(iter_transition_fn(nfa1.transition_fn.data))) + len(list(iter_transition_fn(nfa2.transition_fn.data)))
 
 
 def test_intersect_nfas_with_different_alphabets(y_nfa_from_ineq, x_nfa_from_ineq):

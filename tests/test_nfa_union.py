@@ -64,20 +64,20 @@ def test_automaton_union(nfa1, nfa2):
     for initial_state in united_automaton.initial_states:
         assert initial_state in united_automaton.initial_states
 
-    assert transition_fn_size(united_automaton.transition_fn) == transition_fn_size(nfa1.transition_fn) + transition_fn_size(nfa2.transition_fn)
+    assert transition_fn_size(united_automaton.transition_fn.data) == transition_fn_size(nfa1.transition_fn.data) + transition_fn_size(nfa2.transition_fn.data)
     assert len(nfa1_state_translation) > 0
     assert len(nfa2_state_translation) > 0
 
     # Verify that both transition fns are indeed present in the united
     # automaton
-    for o, s, d in iter_transition_fn(nfa1.transition_fn):
+    for o, s, d in iter_transition_fn(nfa1.transition_fn.data):
         translated_origin = nfa1_state_translation[o]
         translated_dest = nfa1_state_translation[d]
 
-        assert s in united_automaton.transition_fn[translated_origin][translated_dest]
+        assert s in united_automaton.transition_fn.data[translated_origin][translated_dest]
 
-    for o, s, d in iter_transition_fn(nfa2.transition_fn):
+    for o, s, d in iter_transition_fn(nfa2.transition_fn.data):
         translated_origin = nfa2_state_translation[o]
         translated_dest = nfa2_state_translation[d]
 
-        assert s in united_automaton.transition_fn[translated_origin][translated_dest]
+        assert s in united_automaton.transition_fn.data[translated_origin][translated_dest]

@@ -34,7 +34,7 @@ def _test_advanced_intersection(bdd_tfn):
     assert len(targets) == 1
 
     targets = bdd_tfn.get_transition_target('q1', (0, 0, '*'))
-    assert targets == set()
+    assert targets == []
 
     targets = bdd_tfn.get_transition_target('q0', ('*', 0, '*'))
     assert targets is not None

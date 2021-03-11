@@ -13,7 +13,7 @@ def simple_nfa() -> fsms.NFA:
 
     alphabet = fsms.LSBF_Alphabet.from_variable_names(['x'])
 
-    nfa = fsms.NFA(alphabet=alphabet, automaton_type=fsms.AutomatonType.NFA)
+    nfa: fsms.NFA = fsms.NFA(alphabet=alphabet, automaton_type=fsms.AutomatonType.NFA)
     nfa.states = set(states)
     nfa.add_final_state('F')
     nfa.add_initial_state(0)
@@ -136,7 +136,7 @@ def test_multipath_propagation(multipath_nfa: fsms.NFA):
     ]
 
     transition_size = 0
-    for transition in trans.iter_transition_fn(multipath_nfa.transition_fn):
+    for transition in trans.iter_transition_fn(multipath_nfa.transition_fn.data):
         assert transition in expected_trans
         transition_size += 1
 
@@ -144,7 +144,7 @@ def test_multipath_propagation(multipath_nfa: fsms.NFA):
 
 
 def test_advanced_propagation(advanced_nfa: fsms.NFA):
-    transitions_before_padding = list(trans.iter_transition_fn(advanced_nfa.transition_fn))
+    transitions_before_padding = list(trans.iter_transition_fn(advanced_nfa.transition_fn.data))
     advanced_nfa.perform_pad_closure()
 
     sigma_0 = (0, 0)
@@ -164,7 +164,7 @@ def test_advanced_propagation(advanced_nfa: fsms.NFA):
     all_transitions = expected_transitions + transitions_before_padding
 
     tc = 0
-    for t in trans.iter_transition_fn(advanced_nfa.transition_fn):
+    for t in trans.iter_transition_fn(advanced_nfa.transition_fn.data):
         assert t in all_transitions
         tc += 1
     assert tc == len(all_transitions)

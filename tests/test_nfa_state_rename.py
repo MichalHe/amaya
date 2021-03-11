@@ -32,7 +32,7 @@ def test_state_renaming(nfa):
     has_str_state = len(tuple(filter(lambda state: type(state) == str, nfa.states))) > 0
     assert has_str_state
 
-    highest_state, new_nfa = nfa.rename_states()
+    _, new_nfa = nfa.rename_states()
 
     assert new_nfa
     assert nfa.automaton_type == AutomatonType.NFA
@@ -40,10 +40,10 @@ def test_state_renaming(nfa):
 
     for original_origin in nfa.states:
         new_origin = state_names_translat[original_origin]
-        if original_origin not in nfa.transition_fn:
+        if original_origin not in nfa.transition_fn.data:
             continue
 
-        for original_dest in nfa.transition_fn[original_origin]:
+        for original_dest in nfa.transition_fn.data[original_origin]:
             new_dest = state_names_translat[original_dest]
-            assert new_origin in new_nfa.transition_fn
-            assert new_dest in new_nfa.transition_fn[new_origin]
+            assert new_origin in new_nfa.transition_fn.data
+            assert new_dest in new_nfa.transition_fn.data[new_origin]
