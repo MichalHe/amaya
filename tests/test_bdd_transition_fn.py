@@ -37,3 +37,32 @@ def test_complete_with_trap_state(bddtfn: SparseBDDTransitionFunction):
 
     trap_state_added = bddtfn.complete_with_trap_state(alphabet, states)
     assert not trap_state_added
+
+def test_project_bit_away_simple(bddtfn: SparseBDDTransitionFunction):
+    bddtfn.insert_transition('q0', (0, 0, 1), 'q1')
+    bddtfn.project_bit_away(2)  # Remaining variables: x, y
+
+    cube = bddtfn.get_cube_from_symbol((0, 0))
+    assert 'x' in cube and cube['x'] is False
+    assert 'y' in cube and cube['y'] is False
+    assert len(cube) == 2
+
+    targets = bddtfn.get_transition_target('q0', (0, 0))
+    assert ['q1'] == targets
+    assert not bddtfn.get_transition_target('q0', (0, 1)) 
+
+
+def test_project_bit_away_adv(bddtfn: SparseBDDTransitionFunction):
+    bddtfn.insert_transition('q0', (0, 0, 1), 'q1')
+    bddtfn.insert_transition('q0', (0, 1, 1), 'q1')
+    bddtfn.project_bit_away(1)  # Projects y away
+
+    cube = bddtfn.get_cube_from_symbol((0, 1))
+    assert 'x' in cube and 'z' in cube
+    assert 'y' not in cube
+    assert cube['x'] is False and cube['z'] is True
+
+    symbols = list(bddtfn.iter())
+    assert symbols
+    assert len(symbols) == 1
+    assert ('q0', (0, '*',1), 'q1') in symbols

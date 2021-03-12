@@ -2,6 +2,7 @@ from __future__ import annotations
 import collections
 from typing import (
     Set,
+    Callable,
     Dict,
     Any,
     Tuple,
@@ -567,6 +568,15 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
         self.alphabet = alphabet
         self.manager = manager
 
+        # We need those to construct correct cubes
+        self.vars_in_order = list(self.alphabet.variable_names)
+
+        # TODO(BDDs): Functions missing:
+        # - calculate path from dfs traversal history
+        # - remove non finishing states
+        # - project bit away
+        # - extend to new alphabet symbols?
+
     def get_transition_target(self, source: StateType, symbol: Symbol) -> List[StateType]:
         if source not in self.data:
             return list()
@@ -584,7 +594,10 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
         return list(out_states)
 
     def get_cube_from_symbol(self, symbol) -> Dict:
-        variable_names = self.alphabet.variable_names
+        assert len(symbol) == len(self.alphabet.active_variables), 'Symbol bit count does not match the number of active variables'
+        assert len(symbol) == len(self.vars_in_order), 'Symbol bit count does not match the number of vars_in_order'
+
+        variable_names = self.vars_in_order
         cube = dict()
         for bit, var in zip(symbol, variable_names):
             if bit == 0:
@@ -671,7 +684,8 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
         for source in self.data:
             for dest in self.data[source]:
                 bdd = self.data[source][dest]
-                yield from self._iter_compact_models(bdd)
+                for symbol in self._iter_compact_models(bdd):
+                    yield (source, symbol, dest)
 
     def complete_with_trap_state(self, alphabet, states: List, trap_state: Any = 'TRAP') -> bool:
         trap_state_present: bool = False
@@ -694,3 +708,19 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
                 # WARN: Mutating dictionary while iterating over it.
                 self._write_transition_bdd(origin, out_bdd_complement, trap_state)
         return trap_state_present
+    
+    def _apply_on_all_bdds(self, fn: Callable[[int], int]):
+        for s in self.data:
+            for dest in self.data[s]:
+                self.data[s][dest] = fn(self.data[s][dest])
+
+    def project_bit_away(self, bit_pos: int):
+        # TODO(BDDs) - how exactly are the alphabets manipulated -- active_variables??
+        var_name = self.alphabet.variable_names[bit_pos]
+        project_fn = functools.partial(self.manager.exist, [var_name])
+        self._apply_on_all_bdds(project_fn)
+        if var_name in self.alphabet.active_variables:
+            self.alphabet.active_variables.remove(var_name)
+
+            # When constructing a cube, do not include this variable.
+            self.vars_in_order.remove(var_name)
