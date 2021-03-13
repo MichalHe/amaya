@@ -38,7 +38,7 @@ def pad_closure(nfa):
                     # Some transition from potential to final was already made - just update it
 
                     # Mark(BDD): This manipulates internal structure.
-                    nfa.transition_fn.data[potential_state][final_state].update(intersect)  
+                    nfa.transition_fn.data[potential_state][final_state].update(intersect)
                 else:
                     # Mark(BDD): This manipulates internal structure.
                     # There is no transition from potential to final
@@ -47,3 +47,51 @@ def pad_closure(nfa):
                 # We need to check all states that could reach 'potential' -- they can now become finishing
                 if potential_state not in work_queue and potential_state != current_state:
                     work_queue.append(potential_state)
+
+
+from transitions import SparseBDDTransitionFunction
+from typing import Dict
+
+
+def determinize_bdd(initial_states: List, final_states: List,
+                    tfn: SparseBDDTransitionFunction) -> Dict:
+    '''Given a NFA description with transition function based on BDDs, 
+    produces DFA using the set construction.
+    '''
+    initial_state = tuple(initial_states)
+    work_queue: List = [initial_state]
+
+    final_set: Set = set(final_states)
+
+    result_states: Set = set()
+    result_final_states: Set = set()
+    resulting_transition_fn: SparseBDDTransitionFunction = SparseBDDTransitionFunction(tfn.manager, tfn.alphabet)
+
+    while work_queue:
+        cs = work_queue.pop()  # Current State
+        result_states.add(cs)
+
+        for composite_state_part in cs:
+            if composite_state_part in final_set:
+                result_final_states.add(cs)
+
+        minterms = tfn.get_minterm_system_from_states(list(cs))
+
+        for destination, minterm in minterms.items():
+            if tfn.manager.to_expr(minterm) == 'FALSE':
+                continue
+
+            resulting_transition_fn.insert_transition_bdd(cs, minterm, destination)
+
+            # If this is a new state - add to queue
+            if destination not in result_states:
+                if destination not in work_queue:
+                    work_queue.append(destination)
+
+    # TODO: This will be probably changed to return a DFA when the implementation is using BDDs
+    return {
+        'states': result_states,
+        'initial_states': {initial_state, },
+        'transition_fn': resulting_transition_fn,
+        'final_states': result_final_states
+    }
