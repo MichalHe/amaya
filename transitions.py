@@ -1,5 +1,6 @@
 from __future__ import annotations
 import collections
+from itertools import combinations
 from typing import (
     Set,
     Callable,
@@ -617,6 +618,11 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
         new_transition_expr = self.manager.cube(cube)
 
         self.data[source][dest] = self.manager.apply('or', self.data[source][dest], new_transition_expr)
+
+    def insert_transition_bdd(self, source: StateType, bdd: int, dest: StateType):
+        if source not in self.data:
+            self.data[source] = {}
+        self.data[source][dest] = bdd
     
     def _write_transition_bdd(self, source: StateType, bdd: Any, dest: StateType):
         if source not in self.data:
@@ -724,3 +730,31 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
             # When constructing a cube, do not include this variable.
             self.vars_in_order.remove(var_name)
+
+    def get_minterm_system_from_states(self, states: List):
+        # Collect the raw delta sets
+        deltas = []
+        for state in states:
+            if state in self.data:
+                for dest in self.data[state]:
+                    deltas.append((self.data[state][dest], dest))
+
+        state_indices = list(range(len(deltas)))
+        system: Dict = {}
+        for intersection_size in reversed(range(1, len(deltas) + 1)):
+            for state_combination in combinations(state_indices, intersection_size):
+                destination_state: List = []
+                bdd, dest = deltas[state_combination[0]]
+                destination_state.append(dest)
+                for rest_comb_i in range(1, len(state_combination)):
+                    delta_bdd, delta_dest = deltas[state_combination[rest_comb_i]]
+                    bdd = self.manager.apply('and', bdd, delta_bdd)
+                    destination_state.append(delta_dest)
+                destination_state_imm = tuple(destination_state)
+
+                for _bdd in system.values():
+                    bdd = self.manager.apply('and', bdd, self.manager.apply('not', _bdd))
+                
+                system[destination_state_imm] = bdd
+
+        return system
