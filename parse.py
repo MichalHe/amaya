@@ -3,6 +3,8 @@ from ast_relations import extract_relation, expand_relation_on_ite
 from automatons import NFA, AutomatonType
 from log import logger
 from logging import INFO
+from dataclasses import dataclass
+import time
 from typing import (
     List,
     Tuple,
@@ -28,6 +30,7 @@ class ParsingOperation(Enum):
     BUILD_NFA_FROM_INEQ = 'build_nfa_from_ineq'
     BUILD_NFA_FROM_SHARP_INEQ = 'build_nfa_from_sharp_ineq'
     BUILD_NFA_FROM_EQ = 'build_nfa_from_eq'
+    BUILD_NFA_FROM_RELATION = 'build_nfa_from_relation'  # We don't know the relation type, or we do not care.
     NFA_UNION = 'union'
     NFA_PROJECTION = 'projection'
     NFA_COMPLEMENT = 'complement'
@@ -43,6 +46,15 @@ class VariableType(IntEnum):
     Bool = 0x02
 
 
+@dataclass
+class EvaluationStat():
+    operation: ParsingOperation
+    input1_size: int
+    input2_size: Optional[int]
+    output_size: Optional[int]
+    runtime_ns: int
+
+
 class EvaluationContext():
     def __init__(self,
                  domain: SolutionDomain,
@@ -51,6 +63,11 @@ class EvaluationContext():
         self.binding_stack: List[Dict[str, NFA]] = []
         self.domain = domain
         self.introspect_handle = emit_introspect
+
+        # Evaluation stats
+        self.collect_stats = True
+        self.stats: List[EvaluationStat] = []  
+        self.pending_operations_stack: List[Any] = []
 
     def get_binding(self, var_name: str) -> Optional[NFA]:
         for binding_record in reversed(self.binding_stack):
@@ -73,6 +90,28 @@ class EvaluationContext():
 
     def emit_evaluation_introspection_info(self, nfa: NFA, operation: ParsingOperation):
         self.introspect_handle(nfa, operation)
+
+    def stats_operation_starts(self, operation: ParsingOperation, input1: Optional[NFA], input2: Optional[NFA]):
+        '''Notify the context that the parsing operation started.'''
+        startpoint = [
+            operation,
+            len(input1.states) if input1 is not None else None,
+            len(input2.states) if input2 is not None else None,
+            time.time_ns()
+        ]
+
+        self.pending_operations_stack.append(startpoint)
+
+    def stats_operation_ends(self, output: NFA):
+        '''Notify the context that the parsing operation ended and it can create a new stat point.'''
+        op_startpoint = self.pending_operations_stack.pop(-1)  # Operation starting point
+        op, size1, size2, start_ns = op_startpoint
+
+        runtime = time.time_ns() - start_ns
+
+        stat = EvaluationStat(op, size1, size2, len(output.states), runtime)
+        logger.critical(f"Operation finished: {stat}")
+        self.stats.append(stat)
 
 
 IntrospectHandle = Callable[[NFA, ParsingOperation], None]
@@ -309,6 +348,8 @@ def evaluate_binary_conjunction_term(term: Union[str, List],
     assert len(term) >= 3
     lhs_term = term[1]
 
+    op = ParsingOperation.NFA_INTERSECT if reduction_name == 'intersection' else ParsingOperation.NFA_UNION
+
     lhs = get_nfa_for_term(lhs_term, ctx, variable_types, _depth)
 
     for term_i in range(2, len(term)):
@@ -316,7 +357,11 @@ def evaluate_binary_conjunction_term(term: Union[str, List],
         rhs = get_nfa_for_term(rhs_term, ctx, variable_types, _depth)
 
         assert type(rhs) == NFA
+
+        ctx.stats_operation_starts(op, lhs, rhs)
         lhs = reduction_fn(lhs, rhs)
+        ctx.stats_operation_ends(lhs)
+
         _eval_info(f' >> {reduction_name}(lhs, rhs) (result size: {len(lhs.states)})', _depth)
         ctx.emit_evaluation_introspection_info(lhs, ParsingOperation.NFA_INTERSECT)
 
@@ -328,7 +373,7 @@ def evaluate_and_term(term: Union[str, List],
                       variable_types: Dict[str, VariableType],
                       _depth: int) -> NFA:
 
-    return evaluate_binary_conjunction_term(
+    result = evaluate_binary_conjunction_term(
         term,
         ctx,
         lambda nfa1, nfa2: nfa1.intersection(nfa2),
@@ -336,6 +381,8 @@ def evaluate_and_term(term: Union[str, List],
         variable_types,
         _depth
     )
+
+    return result
 
 
 def evaluate_or_term(term: Union[str, List],
@@ -364,7 +411,9 @@ def evaluate_not_term(term: Union[str, List],
     assert type(operand) == NFA
 
     if (operand.automaton_type & AutomatonType.NFA):
+        ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
         operand = operand.determinize()
+        ctx.stats_operation_ends(operand)
         _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
 
     # TODO(psyco): Here we should check, whether the automaton is Complete
@@ -374,9 +423,15 @@ def evaluate_not_term(term: Union[str, List],
         assert len(operand.alphabet.variable_names) == 1
         variable_name = operand.alphabet.variable_names[0]
         logger.debug('Complementing an automaton for a bool variable {variable_name}, returninig direct complement.')
-        return NFA.for_bool_variable(variable_name, False)
+        ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
+        result = NFA.for_bool_variable(variable_name, False)
+        ctx.stats_operation_ends(result)
+        return result
 
+    ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
     operand = operand.complement()
+    ctx.stats_operation_ends(operand)
+
     _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _depth)
 
     ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_COMPLEMENT)
@@ -401,7 +456,10 @@ def evaluate_exists_term(term: Union[str, List],
 
     # TODO: Check whether variables are in fact present in the alphabet
     for var_name in variable_bindings:
+        ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
         nfa = nfa.do_projection(var_name)
+        ctx.stats_operation_ends(nfa)
+
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
 
     _eval_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
@@ -420,8 +478,7 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
         # This means that either we hit a SMT2 term (boolean variable) or
         # the tree is malformed, and therefore we cannot continue.
 
-        # TODO(psyco): This will be moved to get_nfa, replace this with a call
-        # to get_nfa.
+        # TODO(psyco): This will be moved to get_nfa, replace this with a call to get_nfa.
         # Is the term a bool variable?
         is_bool_var = False
         if root in variable_types:
@@ -455,10 +512,14 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
         else:
             # The relation was no expanded
             # (maybe a second evaluation pass, after the first expansion)
-            return build_automaton_from_pressburger_relation_ast(root,
+            
+            ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_RELATION, None, None)
+            result = build_automaton_from_pressburger_relation_ast(root,
                                                                  variable_types,
                                                                  ctx,
                                                                  _debug_recursion_depth)
+            ctx.stats_operation_ends(result)
+            return result
     else:
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
         # Current node is a NFA operation
@@ -505,7 +566,7 @@ def eval_assert_tree(assert_tree,
     return eval_smt_tree(assert_tree[1], ctx, fn_definitions)
 
 
-def extract_constant_fn_symbol_definitions(statements) -> Dict[str, bool]:
+def extract_constant_fn_symbol_definitions(statements) -> Dict[str, VariableType]:
     const_symbols: Dict[str, VariableType] = {}
     logger.debug('Extracting contant symbols from toplevel statments...')
 
