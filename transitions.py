@@ -741,20 +741,32 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
         state_indices = list(range(len(deltas)))
         system: Dict = {}
+
+        already_in_the_system__cache: Any = self.manager.add_expr('TRUE')   # TRUE \land X  = X
+        apply_cnt = 0  # Performance counter
         for intersection_size in reversed(range(1, len(deltas) + 1)):
             for state_combination in combinations(state_indices, intersection_size):
                 destination_state: List = []
                 bdd, dest = deltas[state_combination[0]]
                 destination_state.append(dest)
+                
+                # Calculate the BDD for the intersection
                 for rest_comb_i in range(1, len(state_combination)):
                     delta_bdd, delta_dest = deltas[state_combination[rest_comb_i]]
                     bdd = self.manager.apply('and', bdd, delta_bdd)
+                    apply_cnt += 1
                     destination_state.append(delta_dest)
                 destination_state_imm = tuple(destination_state)
 
-                for _bdd in system.values():
-                    bdd = self.manager.apply('and', bdd, self.manager.apply('not', _bdd))
+                # Subtract the rest
+                bdd = self.manager.apply('and', bdd, already_in_the_system__cache)
+                apply_cnt += 1
+
+                # Add to cache
+                already_in_the_system__cache = self.manager.apply('and', already_in_the_system__cache, self.manager.apply('not', bdd))
+                apply_cnt += 2
                 
                 system[destination_state_imm] = bdd
 
+        print(f'Apply operations for {states} with number of BDDs {len(deltas)}:', apply_cnt)
         return system
