@@ -12,7 +12,6 @@ from automatons import (
     NFA,
     LSBF_Alphabet,
     AutomatonType,
-    AutomatonState
 )
 from relations_structures import Relation
 import math
@@ -150,27 +149,39 @@ def build_nfa_from_inequality(ineq: Relation) -> NFA[NFA_AutomatonStateType]:
     )
     nfa.add_initial_state(ineq.absolute_part)
 
+    f_transitions = []
+
     work_queue: List[int] = [ineq.absolute_part]
 
     while work_queue:
         current_state = work_queue.pop()
+
         nfa.add_state(current_state)
 
         for alphabet_symbol in alphabet.symbols:
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             destination_state = math.floor(0.5 * (current_state - dot))
 
-            if not nfa.has_state_with_value(destination_state):
+            if not nfa.has_state_with_value(destination_state) and destination_state not in work_queue:
                 work_queue.append(destination_state)
 
-            nfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
+            nfa.update_transition_fn(
+                current_state,
+                alphabet_symbol,
+                destination_state)
 
             # Check whether state is final
             if current_state + dot >= 0:
-                final_state = 'FINAL'
-                nfa.add_state(final_state)
-                nfa.add_final_state(final_state)
-                nfa.update_transition_fn(current_state, alphabet_symbol, final_state)
+                f_transitions.append((current_state, alphabet_symbol))
+
+        # Final state is added as the last one in order to be able to obtain
+        # unique number.
+        max_state = max(nfa.states)
+        f_state = max_state + 1
+        nfa.add_state(f_state)
+        nfa.add_final_state(f_state)
+        for origin, symbol in f_transitions:
+            nfa.update_transition_fn(origin, symbol, f_state)
 
     return nfa
 
