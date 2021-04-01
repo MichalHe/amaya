@@ -30,29 +30,15 @@ import automaton_algorithms
 from relations_structures import Relation
 
 from transitions import (
-    Transitions,
-    insert_into_transition_fn,
-    get_transition_target,
-    unite_transitions,
-    translate_transition_fn_states,
-    do_projection,
     calculate_variable_bit_position,
-    make_transitions_copy,
     unite_alphabets,
-    extend_transitions_to_new_alphabet_symbols,
-    get_word_from_dfs_results,
     iterate_over_active_variables,
-    make_rotate_transition_function,
-    remove_all_transitions_that_contain_states,
-    collect_all_outgoing_symbols_from_state,
-    get_symbols_intersection,
     construct_transition_fn_to_bddtfn,
     SparseSimpleTransitionFunction
 )
 
 import functools
-import collections
-import dd # type: ignore
+import dd  # type: ignore
 
 
 AutomatonState = TypeVar('AutomatonState')
@@ -79,10 +65,50 @@ class LSBF_Alphabet():
     symbols: Tuple[LSBF_AlphabetSymbol, ...]
     variable_names: Tuple[str, ...]
     active_variables: Set[str]
+    active_symbols: Optional[Tuple[LSBF_AlphabetSymbol, ...]] = None
 
     @staticmethod
     def from_inequation(ineq: Relation) -> LSBF_Alphabet:
-        return LSBF_Alphabet.from_variable_names(tuple(ineq.variable_names))
+        '''Generates a compressed alphabet from given relation.'''
+        act_symbols, symbols = LSBF_Alphabet.generate_compressed_symbols(ineq.variable_coeficients)
+        for symbol in symbols:
+            print(symbol)
+
+        active_variables = [var for i, var in enumerate(ineq.variable_names) if ineq.variable_coeficients[i] != 0]
+        return LSBF_Alphabet(tuple(symbols), sorted(ineq.variable_names), set(active_variables), active_symbols=act_symbols)
+
+    @staticmethod
+    def generate_compressed_symbols(coefs):
+        nonzero_coefs_pos = [i for i, coef in enumerate(coefs) if coef != 0]
+        nonzero_coefs_cnt = len(nonzero_coefs_pos)
+
+        total_coefs_cnt = len(coefs)
+        if nonzero_coefs_cnt == 0:
+            symbols = [tuple(['*'] * total_coefs_cnt)]
+            return [], symbols  # Active symbols are empty
+
+        act_symbols = []
+        symbols = []
+        for i in range(2**nonzero_coefs_cnt):
+            bits = number_to_bit_tuple(i, tuple_size=nonzero_coefs_cnt)
+
+            ni = 0  # Index to the next nonused nonzero coef index
+            symbol = [None] * total_coefs_cnt
+            for i in range(total_coefs_cnt):
+                if i == nonzero_coefs_pos[ni]:
+                    symbol[i] = bits[ni]
+                    ni += 1
+                    # All nonzero coefs have been used, do the rest.
+                    if ni == nonzero_coefs_cnt:
+                        for j in range(i+1, total_coefs_cnt):
+                            symbol[j] = '*'
+                        break
+                else:
+                    symbol[i] = '*'
+
+            act_symbols.append(bits)
+            symbols.append(tuple(symbol))
+        return act_symbols, symbols
 
     @staticmethod
     def from_variable_names(variable_names: Tuple[str, ...]) -> LSBF_Alphabet:
@@ -129,7 +155,6 @@ class NFA(Generic[AutomatonState]):
     final_states:   Set[Any] = field(default_factory=set)
     states:         Set[Any] = field(default_factory=set)
 
-
     # Debug handle to listen to any state renaming happening during
     # intersecion/union; takes (automaton_id, old_state(int, str),
     # new_state(int))
@@ -149,7 +174,6 @@ class NFA(Generic[AutomatonState]):
         self.states         = get_default_if_none(states, set)
         self.initial_states = get_default_if_none(initial_states, set)
         self.transition_fn  = get_default_if_none(transition_fn, SparseSimpleTransitionFunction)
-
 
     def update_transition_fn(self,
                              from_state: AutomatonState,
@@ -353,7 +377,6 @@ class NFA(Generic[AutomatonState]):
         if added_trap_state:
             self.states.add(trap_state)
 
-
     def _rename_own_states(self):
         debug_fn: Optional[functools.partial[None]]
         if self._debug_state_rename is not None:
@@ -502,7 +525,6 @@ class NFA(Generic[AutomatonState]):
         '''BFS on rotated transitions'''
         reachable_states = self.transition_fn.remove_nonfinishing_states(self.states, self.final_states)
         self.states = reachable_states
-
 
     @staticmethod
     def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA:
