@@ -37,6 +37,8 @@ from transitions import (
     SparseSimpleTransitionFunction
 )
 
+from mtbdd_transitions import MTBDDTransitionFn
+
 import functools
 import dd  # type: ignore
 
@@ -71,8 +73,6 @@ class LSBF_Alphabet():
     def from_inequation(ineq: Relation) -> LSBF_Alphabet:
         '''Generates a compressed alphabet from given relation.'''
         act_symbols, symbols = LSBF_Alphabet.generate_compressed_symbols(ineq.variable_coeficients)
-        for symbol in symbols:
-            print(symbol)
 
         active_variables = [var for i, var in enumerate(ineq.variable_names) if ineq.variable_coeficients[i] != 0]
         return LSBF_Alphabet(tuple(symbols), sorted(ineq.variable_names), set(active_variables), active_symbols=act_symbols)
@@ -170,10 +170,10 @@ class NFA(Generic[AutomatonState]):
 
         self.alphabet = alphabet
         self.automaton_type = automaton_type
-        self.final_states   = get_default_if_none(final_states, set)
-        self.states         = get_default_if_none(states, set)
+        self.final_states = get_default_if_none(final_states, set)
+        self.states = get_default_if_none(states, set)
         self.initial_states = get_default_if_none(initial_states, set)
-        self.transition_fn  = get_default_if_none(transition_fn, SparseSimpleTransitionFunction)
+        self.transition_fn = get_default_if_none(transition_fn, SparseSimpleTransitionFunction)
 
     def update_transition_fn(self,
                              from_state: AutomatonState,
@@ -389,9 +389,9 @@ class NFA(Generic[AutomatonState]):
         def translate(state: AutomatonState) -> int:
             return state_name_translation[state]
 
-        self.states         = set(map(translate, self.states))
+        self.states = set(map(translate, self.states))
         self.initial_states = set(map(translate, self.initial_states))
-        self.final_states   = set(map(translate, self.final_states))
+        self.final_states = set(map(translate, self.final_states))
 
         self.transition_fn.rename_states(state_name_translation)
 
@@ -420,7 +420,7 @@ class NFA(Generic[AutomatonState]):
             if bit_pos is None:
                 raise ValueError(f'Could not find variable_name "{variable_name}" in current alphabet {self.alphabet}')
 
-            new_nfa.transition_fn = self.transition_fn.copy()
+            new_nfa.transition_fn = self.transition_fn
             new_nfa.transition_fn.project_bit_away(bit_pos)
 
             new_nfa.alphabet.active_variables -= set((variable_name, ))
@@ -526,6 +526,11 @@ class NFA(Generic[AutomatonState]):
         reachable_states = self.transition_fn.remove_nonfinishing_states(self.states, self.final_states)
         self.states = reachable_states
 
+    def get_state_post(self, state: int) -> List[int]:
+        assert state in self.states, \
+            f'Cannot retrieve post of non automaton state: {state}'
+        return self.transition_fn.get_state_post(state)
+
     @staticmethod
     def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA:
         nfa: NFA[str] = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
@@ -582,6 +587,85 @@ class NFA(Generic[AutomatonState]):
             nfa.update_transition_fn('qF', ('*', ), 'qF')
 
         return nfa
+
+
+class MTBDD_NFA(NFA):
+    def __init__(self,
+                 alphabet: LSBF_Alphabet,
+                 automaton_type: AutomatonType):
+
+        self.alphabet = alphabet
+        self.automaton_type = automaton_type
+        self.states: Set[int] = set()
+        self.final_states: Set[int] = set()
+        self.initial_states: Set[int] = set()
+        self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_names)
+
+    def add_state(self, state: int):
+        self.states.add(state)
+
+    def add_final_state(self, state: int):
+        self.final_states.add(state)
+
+    def add_initial_state(self, state: int):
+        self.final_states.add(state)
+
+    def update_transition_fn(self,
+                             source: int,
+                             symbol: LSBF_AlphabetSymbol,
+                             dest: int):
+        self.transition_fn.insert_transition(source, symbol, dest)
+
+    def rename_states(self, start_from: int = 0) -> Tuple[int, MTBDD_NFA]:
+        return self.renumber_states(start_from), self
+
+    def renumber_states(self, start_from: int = 0) -> int:
+        rename_map = {}
+
+        new_states = set()
+        new_final_states = set()
+        new_initial_states = set()
+
+        cnt = start_from
+        for old_s in self.states:
+            rename_map[old_s] = cnt
+            new_states.add(cnt)
+
+            if self._debug_state_rename is not None:
+                self._debug_state_rename(id(self), old_s, cnt)
+
+            if old_s in self.final_states:
+                new_final_states.add(cnt)
+
+            if old_s in self.initial_states:
+                new_initial_states.add(cnt)
+
+            cnt += 1
+
+        self.transition_fn.rename_states(rename_map)
+
+        self.states = new_states
+        self.final_states = new_final_states
+        self.initial_states = new_initial_states
+        return cnt
+
+    def get_state_post(self, state: int) -> List[int]:
+        assert state in self.states, 'Cannot retrieve post of a non automaton state'
+        return self.transition_fn.get_state_post(state)
+
+    def union(self, other: MTBDD_NFA) -> MTBDD_NFA:
+        first_unreached_state = self.renumber_states(start_from=0)
+
+        other.renumber_states(start_from=first_unreached_state)
+
+        self.transition_fn = MTBDDTransitionFn.union_of(self.transition_fn,
+                                                        other.transition_fn)
+
+        self.states = self.states.union(other.states)
+        self.final_states.update(other.final_states)
+        self.initial_states.update(other.initial_states)
+
+        return self
 
 
 DFA = NFA

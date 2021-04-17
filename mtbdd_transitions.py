@@ -1,3 +1,4 @@
+from __future__ import annotations
 import ctypes as ct
 from typing import Dict, Any, Tuple, Union, List, Iterable, Set, Optional
 
@@ -11,9 +12,10 @@ mtbdd_wrapper.amaya_mtbdd_get_transition_target.argtypes = (
 )
 mtbdd_wrapper.amaya_mtbdd_get_transition_target.restype = ct.POINTER(ct.c_int)
 mtbdd_wrapper.amaya_mtbdd_rename_states.argtypes = (
-    ct.c_long,
-    ct.POINTER(ct.c_int),
-    ct.c_uint32,
+    ct.POINTER(ct.c_ulong), # MTBDD roots
+    ct.c_uint32,            # root_count
+    ct.POINTER(ct.c_int),   # Mappings [old_name1, new_name1, ...]
+    ct.c_uint32,            # Mapping size
 )
 
 mtbdd_wrapper.amaya_project_variables_away.argtypes = (
@@ -183,16 +185,31 @@ class MTBDDTransitionFn():
             old, new = mapping
             arr[2*i] = ct.c_int(old)
             arr[2*i + 1] = ct.c_int(new)
+            k = 2*i
+            print(f'[{k}] = {arr[k]}')
 
         mapping_ptr = ct.cast(arr, ct.POINTER(ct.c_int))
         mapping_size = ct.c_uint32(len(mappings))
 
-        for mtbdd in self.mtbdds.values():
-            mtbdd_wrapper.amaya_mtbdd_rename_states(
-                mtbdd,
-                mapping_ptr,
-                mapping_size
-            )
+        mtbdd_roots = (ct.c_ulong * len(self.mtbdds))()
+        for i, origin_state in enumerate(self.mtbdds):
+            mtbdd_roots[i] = self.mtbdds[origin_state]
+        root_cnt = ct.c_uint32(len(self.mtbdds))
+
+        print(f'Roots: {list(self.mtbdds.keys())}')
+
+        mtbdd_wrapper.amaya_mtbdd_rename_states(
+            ct.cast(mtbdd_roots, ct.POINTER(ct.c_ulong)),
+            root_cnt,
+            mapping_ptr,
+            mapping_size
+        )
+
+        # We still need to replace the actual origin states within self.mtbdds
+        new_mtbdds = dict()
+        for state, mtbdd in self.mtbdds.items():
+            new_mtbdds[mappings[state]] = mtbdd
+        self.mtbdds = new_mtbdds
 
     def project_variable_away(self, variable: int):
         '''Not sure what happens when trying to project a variable that is not
@@ -423,6 +440,25 @@ class MTBDDTransitionFn():
 
         return intersect_mtbdd
 
+    @staticmethod
+    def union_of(mtfn0: MTBDDTransitionFn, mtfn1: MTBDDTransitionFn) -> MTBDDTransitionFn:
+        '''Creates a new MTBDD transition function that contains transitions
+        from both transition functions.'''
+
+        assert mtfn0.alphabet_variables == mtfn1.alphabet_variables, \
+            'MTBBDs require to have the same set of variables.'
+
+        resulting_mtbdds: Dict[int, MTBDD] = dict()
+        resulting_mtbdds.update(mtfn0.mtbdds)
+        for s1, m1 in mtfn1.mtbdds.items():
+            assert s1 not in resulting_mtbdds, \
+                f'The union should be calculated on states that have been renamed first. {s1} in {resulting_mtbdds}'
+            resulting_mtbdds[s1] = m1
+
+        union_tfn = MTBDDTransitionFn(mtfn0.alphabet_variables)
+        union_tfn.mtbdds = resulting_mtbdds
+        return union_tfn
+
 
 def determinize_mtbdd(tfn: MTBDDTransitionFn, initial_states: Set[int], final_states: Set[int]):
     work_queue = [tuple(initial_states)]
@@ -447,25 +483,6 @@ def determinize_mtbdd(tfn: MTBDDTransitionFn, initial_states: Set[int], final_st
                     work_queue.append(rs)
 
     return states
-
-    @staticmethod
-    def union_of(mtfn0: MTBDDTransitionFn, mtfn1: MTBDDTransitionFn) -> MTBDDTransitionFn:
-        '''Creates a new MTBDD transition function that contains transitions
-        from both transition functions.'''
-
-        assert mtfn0.alphabet_variables == mtfn1.alphabet_variables, \
-            'MTBBDs require to have the same set of variables.'
-
-        resulting_mtbdds: Dict[int, MTBDD] = dict()
-        resulting_mtbdds.updatE(mtfn0.mtbdds)
-        for s1, m1 in mtfn0.mtbdds.items():
-            assert s1 not in resulting_mtbdds, \
-                'The union should be calculated on states that have been renamed first'
-            resulting_mtbdds[s1] = m1
-
-        union_tfn = MTBDDTransitionFn(mtfn0.alphabet_variables)
-        union_tfn.mtbdds = resulting_mtbdds
-        return union_tfn
 
 
 if __name__ == '__main__':
