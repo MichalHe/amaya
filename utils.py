@@ -9,7 +9,7 @@ def vector_dot(vec1, vec2) -> int:
     assert(len(vec1) == len(vec2))
     sum_ = 0
     for a, b in zip(vec1, vec2):
-        sum_ += a*b
+        sum_ += 0 if a == '*' or b == '*' else a*b
     return sum_
 
 
