@@ -351,6 +351,7 @@ def get_symbols_intersection(s0: List[Symbol], s1: List[Symbol],
 
     return symbols
 
+
 def get_bdd_transition_function(t: Transitions[State], var_names: List[str], bdd_manager: BDD) -> Dict[State, Dict[State, BDD]]:
     bdd_t: Dict[State, Dict[State, BDD]] = {}
 
@@ -377,6 +378,7 @@ def construct_transition_fn_to_bddtfn(t: Transitions[State],
 
 StateType = TypeVar('StateType')
 
+
 class SparseTransitionFunctionBase(Generic[StateType]):
     def __init__(self):
         self.data: Dict[Any, Dict[Any, Set[Symbol]]] = dict()
@@ -386,7 +388,7 @@ class SparseTransitionFunctionBase(Generic[StateType]):
             return set()
         if dest not in self.data[origin]:
             return set()
-        
+
         return set(self.data[origin][dest])
 
     def state_has_post(self, state) -> bool:
@@ -406,6 +408,11 @@ class SparseTransitionFunctionBase(Generic[StateType]):
                 if dest == state:
                     states.add(origin)
         return states
+
+    def get_state_post(self, state: int) -> List[int]:
+        if state not in self.data:
+            return []
+        return list(self.data[state].keys())
 
 
 class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
@@ -562,7 +569,6 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                                          initial_states)
 
 
-
 class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
     def __init__(self, manager: BDD, alphabet):
         self.data: Dict[Any, Dict[Any, BDD]] = dict()
@@ -623,7 +629,7 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
         if source not in self.data:
             self.data[source] = {}
         self.data[source][dest] = bdd
-    
+
     def _write_transition_bdd(self, source: StateType, bdd: Any, dest: StateType):
         if source not in self.data:
             self.data[source] = {}
@@ -701,7 +707,7 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
             if origin in self.data:
                 for dest in self.data[origin]:
                     out_bdd = self.manager.apply('or', out_bdd, self.data[origin][dest])
-            
+
             out_bdd_complement = self.manager.apply('not', out_bdd)
             is_complement_empty = self.manager.to_expr(out_bdd_complement) == 'FALSE'
 
@@ -714,7 +720,7 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
                 # WARN: Mutating dictionary while iterating over it.
                 self._write_transition_bdd(origin, out_bdd_complement, trap_state)
         return trap_state_present
-    
+
     def _apply_on_all_bdds(self, fn: Callable[[int], int]):
         for s in self.data:
             for dest in self.data[s]:
@@ -749,7 +755,7 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
                 destination_state: List = []
                 bdd, dest = deltas[state_combination[0]]
                 destination_state.append(dest)
-                
+
                 # Calculate the BDD for the intersection
                 for rest_comb_i in range(1, len(state_combination)):
                     delta_bdd, delta_dest = deltas[state_combination[rest_comb_i]]
@@ -765,7 +771,7 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
                 # Add to cache
                 already_in_the_system__cache = self.manager.apply('and', already_in_the_system__cache, self.manager.apply('not', bdd))
                 apply_cnt += 2
-                
+
                 system[destination_state_imm] = bdd
 
         print(f'Apply operations for {states} with number of BDDs {len(deltas)}:', apply_cnt)
