@@ -3,7 +3,7 @@ from typing import (
     List,
     Tuple,
     Union,
-    Set
+    Set, Callable
 )
 from log import logger
 from utils import vector_dot
@@ -53,8 +53,8 @@ def build_dfa_from_inequality(ineq: Relation) -> DFA:
         if currently_processed_state >= 0:
             dfa.add_final_state(currently_processed_state)
 
+        # @Optimize: iterate over act symbols projection
         for alphabet_symbol in alphabet.symbols:
-            # @Optimize: Precompute dot before graph traversal
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
@@ -141,21 +141,23 @@ def build_dfa_from_sharp_inequality(ineq: Relation) -> DFA:
     return dfa
 
 
-def build_nfa_from_inequality(ineq: Relation) -> NFA[NFA_AutomatonStateType]:
-    alphabet = LSBF_Alphabet.from_inequation(ineq)
-    nfa: NFA[NFA_AutomatonStateType] = NFA(
-        alphabet=alphabet,
-        automaton_type=AutomatonType.NFA,
-    )
+AutomatonConstructor = Callable[[LSBF_Alphabet, AutomatonType], NFA]
+
+
+def build_nfa_from_inequality(ineq: Relation,
+                              alphabet: LSBF_Alphabet,
+                              automaton_constr: AutomatonConstructor) -> NFA[NFA_AutomatonStateType]:
+    nfa = automaton_constr(alphabet, AutomatonType.NFA)
+
     nfa.add_initial_state(ineq.absolute_part)
 
+    # We have to postpone the addition of final state, since it has to have
+    # unique number and that we cannot tell until the end
     f_transitions = []
 
     work_queue: List[int] = [ineq.absolute_part]
-
     while work_queue:
         current_state = work_queue.pop()
-
         nfa.add_state(current_state)
 
         for alphabet_symbol in alphabet.symbols:
@@ -174,14 +176,14 @@ def build_nfa_from_inequality(ineq: Relation) -> NFA[NFA_AutomatonStateType]:
             if current_state + dot >= 0:
                 f_transitions.append((current_state, alphabet_symbol))
 
-        # Final state is added as the last one in order to be able to obtain
-        # unique number.
-        max_state = max(nfa.states)
-        f_state = max_state + 1
-        nfa.add_state(f_state)
-        nfa.add_final_state(f_state)
-        for origin, symbol in f_transitions:
-            nfa.update_transition_fn(origin, symbol, f_state)
+    # All states have been added, now determine the final state value
+    max_state = max(nfa.states)
+    f_state = max_state + 1
+    print(f'Final state: {f_state}')
+    nfa.add_state(f_state)
+    nfa.add_final_state(f_state)
+    for origin, symbol in f_transitions:
+        nfa.update_transition_fn(origin, symbol, f_state)
 
     return nfa
 
