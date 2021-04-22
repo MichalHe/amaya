@@ -4,6 +4,17 @@ from typing import Dict, Any, Tuple, Union, List, Iterable, Set, Optional
 
 mtbdd_wrapper = ct.CDLL('./amaya-mtbdd.so', mode=1)
 mtbdd_wrapper.init_machinery()
+
+mtbdd_wrapper.amaya_mtbdd_build_single_terminal.argtypes = (
+    ct.c_uint32,             # Automaton ID
+    ct.POINTER(ct.c_uint8),  # Transitions symbols [symbol0_bit0, ... symbol0_bitN, symbol1_bit0 ...]
+    ct.c_uint32,             # Symbol count
+    ct.c_uint32,             # Variable count
+    ct.POINTER(ct.c_int),    # Terminal testination set
+    ct.c_uint32              # Destination set size
+)
+mtbdd_wrapper.amaya_mtbdd_build_single_terminal.restype = ct.c_ulong  # MTBDD
+
 mtbdd_wrapper.amaya_mtbdd_get_transition_target.argtypes = (
     ct.c_ulong,
     ct.POINTER(ct.c_uint8),
@@ -12,10 +23,10 @@ mtbdd_wrapper.amaya_mtbdd_get_transition_target.argtypes = (
 )
 mtbdd_wrapper.amaya_mtbdd_get_transition_target.restype = ct.POINTER(ct.c_int)
 mtbdd_wrapper.amaya_mtbdd_rename_states.argtypes = (
-    ct.POINTER(ct.c_ulong), # MTBDD roots
-    ct.c_uint32,            # root_count
-    ct.POINTER(ct.c_int),   # Mappings [old_name1, new_name1, ...]
-    ct.c_uint32,            # Mapping size
+    ct.POINTER(ct.c_ulong),  # MTBDD roots
+    ct.c_uint32,             # root_count
+    ct.POINTER(ct.c_int),    # Mappings [old_name1, new_name1, ...]
+    ct.c_uint32,             # Mapping size
 )
 
 mtbdd_wrapper.amaya_project_variables_away.argtypes = (
@@ -34,6 +45,7 @@ mtbdd_wrapper.amaya_mtbdd_get_leaves.restype = ct.POINTER(ct.c_int)  # Pointer t
 mtbdd_wrapper.amaya_unite_mtbdds.argtypes = (
     ct.c_ulong,  # MTBDD a
     ct.c_ulong,  # MTBDD b
+    ct.c_uint32  # Resulting Automaton ID
 )
 mtbdd_wrapper.amaya_unite_mtbdds.restype = ct.c_ulong
 
@@ -60,6 +72,12 @@ mtbdd_wrapper.amaya_mtbdd_get_transitions.argtypes = (
     ct.POINTER(ct.POINTER(ct.c_uint32)),  # OUT Pointer to array containing sizes of serialized destinations states
 )
 mtbdd_wrapper.amaya_mtbdd_get_transitions.restype = ct.POINTER(ct.c_uint8)
+
+mtbdd_wrapper.amaya_mtbdd_change_automaton_id_for_leaves.argtypes = (
+    ct.POINTER(ct.c_ulong),               # Array of mtbdd roots.
+    ct.c_uint32,                          # Roots cnt.
+    ct.c_uint32                           # New automaton ID.
+)
 
 
 mtbdd_false = ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
@@ -89,11 +107,14 @@ Symbol = Tuple[Union[str, int], ...]
 
 
 class MTBDDTransitionFn():
-    def __init__(self, alphabet_variables: List[int]):
+    def __init__(self, alphabet_variables: List[int], automaton_id: int):
         self.mtbdds: Dict[Any, MTBDD] = {}
         self.post_cache = dict()
         self.is_post_cache_valid = False
         self.alphabet_variables = alphabet_variables
+        self.automaton_id = automaton_id
+
+        self.debug_cnt = 0
 
     def insert_transition(self,
                           source: Any,
@@ -116,14 +137,15 @@ class MTBDDTransitionFn():
 
         # Construct cube from destination state
         mtbdd_new = mtbdd_wrapper.amaya_mtbdd_build_single_terminal(
-            cube,            # Transition symbols, 2d array
-            ct.c_uint32(1),  # Transitions symbols count
-            cube_size,       # Variables count
-            dest_state,      # Set of the terminal states
-            ct.c_uint32(1)   # Destination set size
+            ct.c_uint32(self.automaton_id),
+            ct.cast(cube, ct.POINTER(ct.c_uint8)),      # Transition symbols, 2d array
+            ct.c_uint32(1),                             # Transitions symbols count
+            cube_size,                                  # Variables count
+            ct.cast(dest_state, ct.POINTER(ct.c_int)),  # Set of the terminal states
+            ct.c_uint32(1),                             # Destination set size
         )
 
-        resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(mtbdd_new, current_mtbdd)
+        resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(mtbdd_new, current_mtbdd, self.automaton_id)
         self.mtbdds[source] = resulting_mtbdd
 
     def write_mtbdd_dot_to_file(self, m, filename):
@@ -185,8 +207,6 @@ class MTBDDTransitionFn():
             old, new = mapping
             arr[2*i] = ct.c_int(old)
             arr[2*i + 1] = ct.c_int(new)
-            k = 2*i
-            print(f'[{k}] = {arr[k]}')
 
         mapping_ptr = ct.cast(arr, ct.POINTER(ct.c_int))
         mapping_size = ct.c_uint32(len(mappings))
@@ -195,8 +215,6 @@ class MTBDDTransitionFn():
         for i, origin_state in enumerate(self.mtbdds):
             mtbdd_roots[i] = self.mtbdds[origin_state]
         root_cnt = ct.c_uint32(len(self.mtbdds))
-
-        print(f'Roots: {list(self.mtbdds.keys())}')
 
         mtbdd_wrapper.amaya_mtbdd_rename_states(
             ct.cast(mtbdd_roots, ct.POINTER(ct.c_ulong)),
@@ -441,7 +459,9 @@ class MTBDDTransitionFn():
         return intersect_mtbdd
 
     @staticmethod
-    def union_of(mtfn0: MTBDDTransitionFn, mtfn1: MTBDDTransitionFn) -> MTBDDTransitionFn:
+    def union_of(mtfn0: MTBDDTransitionFn,
+                 mtfn1: MTBDDTransitionFn,
+                 new_automaton_id: int) -> MTBDDTransitionFn:
         '''Creates a new MTBDD transition function that contains transitions
         from both transition functions.'''
 
@@ -455,10 +475,23 @@ class MTBDDTransitionFn():
                 f'The union should be calculated on states that have been renamed first. {s1} in {resulting_mtbdds}'
             resulting_mtbdds[s1] = m1
 
-        union_tfn = MTBDDTransitionFn(mtfn0.alphabet_variables)
+        union_tfn = MTBDDTransitionFn(mtfn0.alphabet_variables, new_automaton_id)
         union_tfn.mtbdds = resulting_mtbdds
+
+        # We need to propagate the new automaton down to mtbdd leaves
+        union_tfn.change_automaton_ids_for_leaves(new_automaton_id)
         return union_tfn
 
+    def change_automaton_ids_for_leaves(self, new_id: int):
+        mtbdd_roots_arr = (ct.c_ulong * len(self.mtbdds))()
+        for i, mtbdd in enumerate(self.mtbdds.values()):
+            mtbdd_roots_arr[i] = mtbdd
+        root_cnt = ct.c_uint32(len(self.mtbdds))
+        mtbdd_wrapper.amaya_mtbdd_change_automaton_id_for_leaves(
+            ct.cast(mtbdd_roots_arr, ct.POINTER(ct.c_ulong)),
+            root_cnt,
+            ct.c_uint32(new_id)
+        )
 
 def determinize_mtbdd(tfn: MTBDDTransitionFn, initial_states: Set[int], final_states: Set[int]):
     work_queue = [tuple(initial_states)]

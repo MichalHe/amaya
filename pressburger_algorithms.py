@@ -179,7 +179,6 @@ def build_nfa_from_inequality(ineq: Relation,
     # All states have been added, now determine the final state value
     max_state = max(nfa.states)
     f_state = max_state + 1
-    print(f'Final state: {f_state}')
     nfa.add_state(f_state)
     nfa.add_final_state(f_state)
     for origin, symbol in f_transitions:

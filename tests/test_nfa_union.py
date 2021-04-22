@@ -67,7 +67,9 @@ def do_test_automaton_union(nfa1, nfa2):
     assert len(united_automaton.initial_states) == nfa1_sizes.initial_states + nfa2_sizes.initial_states
     assert len(united_automaton.final_states) == nfa1_sizes.final_states + nfa2_sizes.final_states
 
-    assert len(list(united_automaton.transition_fn.iter())) == len(nfa1_transitions) + len(nfa2_transitions)
+    union_transitions = list(united_automaton.transition_fn.iter())
+    assert len(union_transitions) == len(nfa1_transitions) + len(nfa2_transitions)
+    return
 
     assert len(nfa1_state_translation) > 0
     assert len(nfa2_state_translation) > 0

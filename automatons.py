@@ -590,6 +590,8 @@ class NFA(Generic[AutomatonState]):
 
 
 class MTBDD_NFA(NFA):
+    automaton_id_counter = 0
+
     def __init__(self,
                  alphabet: LSBF_Alphabet,
                  automaton_type: AutomatonType):
@@ -599,7 +601,8 @@ class MTBDD_NFA(NFA):
         self.states: Set[int] = set()
         self.final_states: Set[int] = set()
         self.initial_states: Set[int] = set()
-        self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_names)
+        self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_names, MTBDD_NFA.automaton_id_counter)
+        MTBDD_NFA.automaton_id_counter += 1
 
     def add_state(self, state: int):
         self.states.add(state)
@@ -659,13 +662,20 @@ class MTBDD_NFA(NFA):
         other.renumber_states(start_from=first_unreached_state)
 
         self.transition_fn = MTBDDTransitionFn.union_of(self.transition_fn,
-                                                        other.transition_fn)
+                                                        other.transition_fn,
+                                                        MTBDD_NFA.get_next_automaton_id())
 
         self.states = self.states.union(other.states)
         self.final_states.update(other.final_states)
         self.initial_states.update(other.initial_states)
 
         return self
+
+    @staticmethod
+    def get_next_automaton_id() -> int:
+        c = MTBDD_NFA.automaton_id_counter
+        MTBDD_NFA.automaton_id_counter += 1
+        return c
 
 
 DFA = NFA
