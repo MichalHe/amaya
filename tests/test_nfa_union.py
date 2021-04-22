@@ -69,24 +69,23 @@ def do_test_automaton_union(nfa1, nfa2):
 
     union_transitions = list(united_automaton.transition_fn.iter())
     assert len(union_transitions) == len(nfa1_transitions) + len(nfa2_transitions)
-    return
 
     assert len(nfa1_state_translation) > 0
     assert len(nfa2_state_translation) > 0
 
     # Verify that both transition fns are indeed present in the united
     # automaton
-    for o, s, d in iter_transition_fn(nfa1.transition_fn.data):
-        translated_origin = nfa1_state_translation[o]
-        translated_dest = nfa1_state_translation[d]
+    for o, s, d in nfa1_transitions:
+        to = nfa1_state_translation[o]
+        td = nfa1_state_translation[d]
 
-        assert s in united_automaton.transition_fn.data[translated_origin][translated_dest]
+        assert (to, s, td) in union_transitions
 
-    for o, s, d in iter_transition_fn(nfa2.transition_fn.data):
-        translated_origin = nfa2_state_translation[o]
-        translated_dest = nfa2_state_translation[d]
+    for o, s, d in nfa2_transitions:
+        to = nfa2_state_translation[o]
+        td = nfa2_state_translation[d]
 
-        assert s in united_automaton.transition_fn.data[translated_origin][translated_dest]
+        assert (to, s, td) in union_transitions
 
 
 def test_sparse_nfa_union(ineq0, ineq1):
