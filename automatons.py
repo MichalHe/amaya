@@ -7,6 +7,7 @@ from typing import (
     Tuple,
     List,
     TypeVar,
+    Iterable,
     Generic,
     Optional,
     Callable,
@@ -611,7 +612,7 @@ class MTBDD_NFA(NFA):
         self.final_states.add(state)
 
     def add_initial_state(self, state: int):
-        self.final_states.add(state)
+        self.initial_states.add(state)
 
     def update_transition_fn(self,
                              source: int,
@@ -670,6 +671,78 @@ class MTBDD_NFA(NFA):
         self.initial_states.update(other.initial_states)
 
         return self
+
+    def intersection(self, other: MTBDD_NFA, metastate_map={}):  # NOQA
+        MTBDDTransitionFn.begin_intersection()
+        hightest_state = self.renumber_states(start_from=0)
+        other.renumber_states(start_from=hightest_state)
+
+        def set_cross(s1: Iterable[int], s2: Iterable[int]):
+            for left_state in s1:
+                for right_state in s2:
+                    yield (left_state, right_state)
+
+        # Origin states
+        intersect_initial_states = list(set_cross(self.initial_states, other.initial_states))
+        work_queue = []
+        for i, init_metastate in enumerate(intersect_initial_states):
+            metastate_map[i] = init_metastate
+            work_queue.append(i)
+
+        MTBDDTransitionFn.update_intersection_state(metastate_map)
+
+        int_nfa = MTBDD_NFA(self.alphabet, AutomatonType.NFA)
+        int_nfa.initial_states = set(intersect_initial_states)
+
+        # The new automaton should have unique ID
+        assert int_nfa.transition_fn.automaton_id not in \
+            [self.transition_fn.automaton_id, other.transition_fn.automaton_id]
+
+        while work_queue:
+            cur_state = work_queue.pop(-1)
+            cur_metastate = metastate_map[cur_state]
+
+            if cur_state in int_nfa.states:
+                continue  # Each state can be processed only once
+
+            int_nfa.add_state(cur_state)
+
+            left_state, right_state = cur_metastate
+            if left_state in self.final_states and right_state in other.final_states:
+                int_nfa.add_final_state(cur_state)
+
+            l_mtbdd = self.transition_fn.mtbdds.get(left_state, None)
+            r_mtbdd = other.transition_fn.mtbdds.get(right_state, None)
+
+            if l_mtbdd is None or r_mtbdd is None:
+                # The current metastate is dead end.
+                continue
+
+            generated_metastates = {}
+            cur_int_mtbdd = self.transition_fn.compute_mtbdd_intersect(
+                l_mtbdd,
+                r_mtbdd,
+                int_nfa.transition_fn.automaton_id,
+                generated_metastates=generated_metastates  # Get generated metastates
+            )
+
+            for gm in generated_metastates.items():
+                gen_state, gen_metastate = gm
+                metastate_map[gen_state] = gen_metastate
+
+                if gen_state not in work_queue:
+                    work_queue.append(gen_state)
+
+            int_nfa.transition_fn.mtbdds[cur_state] = cur_int_mtbdd
+
+        MTBDDTransitionFn.end_intersection()
+        return int_nfa
+
+    def perform_pad_closure(self):
+        pass
+
+    def determinize(self):
+        pass
 
     @staticmethod
     def get_next_automaton_id() -> int:

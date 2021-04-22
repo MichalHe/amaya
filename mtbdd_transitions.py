@@ -38,7 +38,8 @@ mtbdd_wrapper.amaya_project_variables_away.argtypes = (
 mtbdd_wrapper.amaya_mtbdd_get_leaves.argtypes = (
     ct.c_ulong,
     ct.POINTER(ct.POINTER((ct.c_uint32))),  # Leaf sizes
-    ct.POINTER(ct.c_uint32)  # Leaf count
+    ct.POINTER(ct.c_uint32),                # Leaf count
+    ct.POINTER(ct.POINTER(ct.c_voidp))      # Leaf transition destination sets
 )
 mtbdd_wrapper.amaya_mtbdd_get_leaves.restype = ct.POINTER(ct.c_int)  # Pointer to array containing the states
 
@@ -77,6 +78,31 @@ mtbdd_wrapper.amaya_mtbdd_change_automaton_id_for_leaves.argtypes = (
     ct.POINTER(ct.c_ulong),               # Array of mtbdd roots.
     ct.c_uint32,                          # Roots cnt.
     ct.c_uint32                           # New automaton ID.
+)
+
+mtbdd_wrapper.amaya_mtbdd_intersection.argtypes = (
+    ct.c_ulong,     # MTBDD 1
+    ct.c_ulong,     # MTBDD 2
+    ct.c_uint32,    # automaton id
+
+    ct.POINTER(ct.POINTER(ct.c_int)),   # New discoveries made during intersection
+    ct.POINTER(ct.c_uint32),            # New discoveries size.
+)
+mtbdd_wrapper.amaya_mtbdd_intersection.restype = ct.c_ulong
+
+mtbdd_wrapper.amaya_replace_leaf_contents_with.argtypes = (
+    ct.c_voidp,                 # Leaf pointer
+    ct.POINTER(ct.c_int),       # New contents
+    ct.c_uint32                 # Content length
+)
+
+mtbdd_wrapper.amaya_begin_intersection.argtypes = ()
+mtbdd_wrapper.amaya_end_intersection.argtypes = ()
+
+mtbdd_wrapper.amaya_update_intersection_state.argtypes = (
+    ct.POINTER(ct.c_int),     # Metastates [m0_0, m0_1, m1_0, m1_1 ...]
+    ct.POINTER(ct.c_int),     # Metastate names
+    ct.c_uint32,              # automaton id
 )
 
 
@@ -144,11 +170,11 @@ class MTBDDTransitionFn():
             ct.cast(dest_state, ct.POINTER(ct.c_int)),  # Set of the terminal states
             ct.c_uint32(1),                             # Destination set size
         )
-
         resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(mtbdd_new, current_mtbdd, self.automaton_id)
         self.mtbdds[source] = resulting_mtbdd
 
-    def write_mtbdd_dot_to_file(self, m, filename):
+    @staticmethod
+    def write_mtbdd_dot_to_file(m, filename):
         '''Writes the dot representation of given MTBDD m to the file.'''
         output_f = open(filename, 'w')
         fd = output_f.fileno()
@@ -244,14 +270,20 @@ class MTBDDTransitionFn():
             )
             self.mtbdds[state] = new_mtbdd
 
-    def get_mtbdd_leaves(self, mtbdd: MTBDD) -> List[List[int]]:
+    @staticmethod
+    def get_mtbdd_leaves(mtbdd: MTBDD,
+                         fetch_leaf_tds_ptrs_into: List = None) -> List[List[int]]:
         ''' Internal procedure. '''
         leaf_sizes = ct.POINTER(ct.c_uint32)()
         leaf_cnt = ct.c_uint32()
+        leaf_tds_arr = ct.POINTER(ct.c_voidp)()  # NULL pointer
+
+        leaf_tds_arr_ = ct.byref(leaf_tds_arr) if fetch_leaf_tds_ptrs_into is not None else ct.POINTER(ct.POINTER(ct.c_voidp))()
         leaf_contents = mtbdd_wrapper.amaya_mtbdd_get_leaves(
             mtbdd,
             ct.byref(leaf_sizes),
-            ct.byref(leaf_cnt)
+            ct.byref(leaf_cnt),
+            leaf_tds_arr_
         )
 
         state_i = 0
@@ -263,6 +295,11 @@ class MTBDDTransitionFn():
                 state_i += 1
                 leaf.append(state)
             leaves.append(leaf)
+
+        if fetch_leaf_tds_ptrs_into is not None:
+            for i in range(leaf_cnt.value):
+                fetch_leaf_tds_ptrs_into.append(leaf_tds_arr[i])
+            mtbdd_wrapper.amaya_do_free(leaf_tds_arr)
 
         mtbdd_wrapper.amaya_do_free(leaf_sizes)
         mtbdd_wrapper.amaya_do_free(leaf_contents)
@@ -459,6 +496,36 @@ class MTBDDTransitionFn():
         return intersect_mtbdd
 
     @staticmethod
+    def compute_mtbdd_intersect(mtbdd1: MTBDD,
+                                mtbdd2: MTBDD,
+                                result_id: int,
+                                generated_metastates: Optional[Dict[int, Tuple[int, int]]] = None) -> MTBDD:
+        '''Computes the intersection MTBDD for given MTBDDs'''
+
+        discovered_states_arr = ct.POINTER(ct.c_int)()
+        discovered_states_cnt = ct.c_uint32()
+
+        intersect_mtbdd = mtbdd_wrapper.amaya_mtbdd_intersection(
+            mtbdd1,
+            mtbdd2,
+            ct.c_uint32(result_id),
+            ct.byref(discovered_states_arr),
+            ct.byref(discovered_states_cnt)
+        )
+
+        if generated_metastates is not None:
+            for i in range(discovered_states_cnt.value):
+                meta_left = discovered_states_arr[3*i]
+                meta_right = discovered_states_arr[3*i + 1]
+                state = discovered_states_arr[3*i + 2]
+                generated_metastates[state] = (meta_left, meta_right)
+
+        if discovered_states_cnt.value > 0:
+            mtbdd_wrapper.amaya_do_free(discovered_states_arr)
+
+        return intersect_mtbdd
+
+    @staticmethod
     def union_of(mtfn0: MTBDDTransitionFn,
                  mtfn1: MTBDDTransitionFn,
                  new_automaton_id: int) -> MTBDDTransitionFn:
@@ -482,6 +549,47 @@ class MTBDDTransitionFn():
         union_tfn.change_automaton_ids_for_leaves(new_automaton_id)
         return union_tfn
 
+    @staticmethod
+    def replace_leaf_contents_with(leaf_ptr, contents: List[int]):
+        contents_size = ct.c_uint32(len(contents))
+        contents_arr = (ct.c_int * len(contents))()
+        for i, x in enumerate(contents):
+            contents_arr[i] = ct.c_int(x)
+
+        mtbdd_wrapper.amaya_replace_leaf_contents_with(
+            leaf_ptr,
+            ct.cast(contents_arr, ct.POINTER(ct.c_int)),
+            contents_size
+        )
+
+    @staticmethod
+    def begin_intersection():
+        mtbdd_wrapper.amaya_begin_intersection()
+
+    @staticmethod
+    def update_intersection_state(state_update: Dict[int, Tuple[int, int]]):
+        size = len(state_update)
+
+        metastates_arr = (ct.c_int * (2*size))()
+        metastates_names = (ct.c_int * size)()
+        cnt = ct.c_uint32(size)
+
+        for i, mapping in enumerate(state_update.items()):
+            state, metastate = mapping
+            metastates_arr[2*i] = ct.c_int(metastate[0])
+            metastates_arr[2*i + 1] = ct.c_int(metastate[1])
+            metastates_names[i] = ct.c_int(state)
+
+        mtbdd_wrapper.amaya_update_intersection_state(
+            ct.cast(metastates_arr, ct.POINTER(ct.c_int)),
+            ct.cast(metastates_names, ct.POINTER(ct.c_int)),
+            cnt
+        )
+
+    @staticmethod
+    def end_intersection():
+        mtbdd_wrapper.amaya_end_intersection()
+
     def change_automaton_ids_for_leaves(self, new_id: int):
         mtbdd_roots_arr = (ct.c_ulong * len(self.mtbdds))()
         for i, mtbdd in enumerate(self.mtbdds.values()):
@@ -492,6 +600,7 @@ class MTBDDTransitionFn():
             root_cnt,
             ct.c_uint32(new_id)
         )
+
 
 def determinize_mtbdd(tfn: MTBDDTransitionFn, initial_states: Set[int], final_states: Set[int]):
     work_queue = [tuple(initial_states)]
@@ -507,7 +616,7 @@ def determinize_mtbdd(tfn: MTBDDTransitionFn, initial_states: Set[int], final_st
         if set(c_metastate).intersection(final_states):
             dfa_final_states.add(tuple(c_metastate))
 
-        reachable_states = tfn.get_mtbdd_leaves(transition)
+        reachable_states = MTBDDTransitionFn.get_mtbdd_leaves(transition)
         for rs in reachable_states:
             rs = tuple(rs)
             if rs not in states:
@@ -519,12 +628,16 @@ def determinize_mtbdd(tfn: MTBDDTransitionFn, initial_states: Set[int], final_st
 
 
 if __name__ == '__main__':
-    tfn = MTBDDTransitionFn()
+    from automatons import LSBF_Alphabet, MTBDD_NFA, AutomatonType
+    alphabet = LSBF_Alphabet.from_variable_names([1, 2, 3])
+    nfa = MTBDD_NFA(alphabet, AutomatonType.NFA)
+    tfn = MTBDDTransitionFn(alphabet, 1)
+
     zeta0 = (0, 0, 1)
-    zeta1 = (1, 0, 0)
+    # zeta1 = (1, 0, 0)
 
     # TODO: Move this to a test file (pad closure)
-    # tfn.insert_transition(0, zeta0, 1)
+    nfa.update_transition_fn(0, zeta0, 1)
     # tfn.insert_transition(0, zeta1, 1)
 
     # tfn.insert_transition(1, zeta1, 2)
@@ -537,19 +650,12 @@ if __name__ == '__main__':
 
     # Initialstate, final states
     # tfn.do_pad_closure(initial_states, final_states)
-    tfn.insert_transition(0, (0, 0, 1), 1)
-    tfn.insert_transition(0, (0, 0, 1), 2)
+    # tfn.insert_transition(0, (0, 0, 1), 1)
+    # tfn.insert_transition(0, (0, 0, 1), 2)
 
-    mtbdd_a = tfn.mtbdds[0]
-    tfn.write_mtbdd_dot_to_file(mtbdd_a, '/tmp/amaya_before_intersection_a.dot')
+    # tfn.insert_transition(1, (0, 0, 1), 1)
+    # tfn.insert_transition(1, (0, 0, 1), 3)
 
-    tfn.insert_transition(1, (0, 0, 1), 1)
-    tfn.insert_transition(1, (0, 0, 1), 3)
-
-    mtbdd_b = tfn.mtbdds[1]
-    tfn.write_mtbdd_dot_to_file(mtbdd_b, '/tmp/amaya_before_intersection_b.dot')
-
-    result = tfn.get_intersection_for_states([0, 1])
-    tfn.write_mtbdd_dot_to_file(result, '/tmp/amaya_after_intersection.dot')
+    # MTBDDTransitionFn.get_mtbdd_leaves(tfn.mtbdds[0])
 
     # print(list(tfn.iter_transitions(0, [1, 2, 3])))

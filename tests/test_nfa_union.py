@@ -2,8 +2,6 @@ import pytest
 from automatons import NFA, LSBF_Alphabet, MTBDD_NFA
 from relations_structures import Relation
 from pressburger_algorithms import build_nfa_from_inequality
-from utils import transition_fn_size
-from transitions import iter_transition_fn
 from log import logger
 from collections import namedtuple
 from typing import (

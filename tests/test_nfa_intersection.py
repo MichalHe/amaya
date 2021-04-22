@@ -1,29 +1,33 @@
 import pytest
 from relations_structures import Relation
 from pressburger_algorithms import build_nfa_from_inequality
+from automatons import MTBDD_NFA, LSBF_Alphabet
+from mtbdd_transitions import MTBDDTransitionFn
 from typing import Any
+
+alphabet = LSBF_Alphabet.from_variable_names([1, 2])
 
 
 @pytest.fixture
-def nfa1():
+def nfa1() -> MTBDD_NFA:
     ineq = Relation(
         absolute_part=0,
         variable_names=['x', 'y'],
         variable_coeficients=[1, -1],
         operation="<="
     )
-    return build_nfa_from_inequality(ineq)
+    return build_nfa_from_inequality(ineq, alphabet, MTBDD_NFA)
 
 
 @pytest.fixture
-def nfa2():
+def nfa2() -> MTBDD_NFA:
     ineq = Relation(
         absolute_part=1,
         variable_names=['x', 'y'],
         variable_coeficients=[1, -1],
         operation="<="
     )
-    return build_nfa_from_inequality(ineq)
+    return build_nfa_from_inequality(ineq, alphabet, MTBDD_NFA)
 
 
 def are_states_same(state_a, state_b):
@@ -37,7 +41,13 @@ def are_states_same(state_a, state_b):
     return True
 
 
-def test_nfa_intersectoin(nfa1, nfa2):
+def test_nfa_intersection_mtbdd(nfa1: MTBDD_NFA, nfa2: MTBDD_NFA):
+    assert len(nfa1.final_states) == 1
+    assert len(nfa2.final_states) == 1
+
+    nfa1_final_state_bt = next(iter(nfa1.final_states))
+    nfa2_final_state_bt = next(iter(nfa2.final_states))
+
     nfa1_translation = dict()
     nfa2_translation = dict()
 
@@ -50,33 +60,46 @@ def test_nfa_intersectoin(nfa1, nfa2):
     nfa1._debug_state_rename = state_name_translated
     nfa2._debug_state_rename = state_name_translated
 
-    nfa_intersection = nfa1.intersection(nfa2)
+    metastate_map = {}
+    metastate_inv_map = {}
+    nfa_intersection = nfa1.intersection(nfa2, metastate_map=metastate_map)
     assert nfa_intersection
 
-    assert 'FINAL' in nfa1.final_states
-    assert 'FINAL' in nfa2.final_states
-    expected_final_state = (nfa1_translation['FINAL'], nfa2_translation['FINAL'])
-    assert are_states_same(expected_final_state, tuple(nfa_intersection.final_states)[0])
+    for state, metastate in metastate_map.items():
+        metastate_inv_map[metastate] = state
+
+    expected_final_metastate = (nfa1_translation[nfa1_final_state_bt],
+                                nfa2_translation[nfa2_final_state_bt])
+    expected_final_state = metastate_inv_map[expected_final_metastate]
+
+    assert len(nfa_intersection.final_states) == 1
+    assert expected_final_state in nfa_intersection.final_states
 
     assert len(nfa1_translation) > 0 and len(nfa2_translation) > 0
+
+    # Those are manually calculated expected intersection states
+    # States overcome various transformations during intersection eval:
+    # 1. state renumbering
+    # 2. metastate to int translation
+    # We need to apply the process onto the expected states aswell
     expected_states = [
         (0, 1),
         (0, 0),
         (-1, -1),
         (-1, 0),
-        ('FINAL', 'FINAL')
+        (nfa1_final_state_bt, nfa2_final_state_bt)
     ]
 
-    def translate_state_pair(state_pair):
-        a, b = state_pair
-        return (nfa1_translation[a], nfa2_translation[b])
+    translated_expected_states = []
+    for left, right in expected_states:
+        renumbered_metastate = (nfa1_translation[left], nfa2_translation[right])
+        int_state = metastate_inv_map[renumbered_metastate]
+        translated_expected_states.append(int_state)
 
-    expected_states = list(map(translate_state_pair, expected_states))
+    for ts in translated_expected_states:
+        assert ts in nfa_intersection.states
 
-    for e_state in expected_states:
-        assert e_state in nfa_intersection.states
-
-    es = expected_states
+    es = translated_expected_states
     expected_transitions = [
         (es[0], (0, 1), es[0]),
         (es[0], (1, 1), es[1]),
@@ -86,28 +109,33 @@ def test_nfa_intersectoin(nfa1, nfa2):
         (es[1], (0, 0), es[1]),
         (es[1], (1, 1), es[1]),
         (es[2], (0, 1), es[1]),
-
         # Test final state reachableness
         (es[2], (1, 0), expected_final_state),
-
         (es[0], (1, 0), expected_final_state),
         (es[0], (0, 0), expected_final_state),
         (es[0], (1, 1), expected_final_state),
     ]
 
-    for expected_transition in expected_transitions:
-        src, sym, dest = expected_transition
-        assert dest in nfa_intersection.get_transition_target(src, sym)
+    MTBDDTransitionFn.write_mtbdd_dot_to_file(nfa_intersection.transition_fn.mtbdds[1], '/tmp/amaya_mtbdd0.dot')
+
+    transitions = list(nfa_intersection.transition_fn.iter())
+
+    for et in expected_transitions:
+        assert et in transitions
 
     # Test whether states of shape ('final', int) are present
-
     expected_states_deadend = [
-        (0, 'FINAL'),
-        (-1, 'FINAL'),
-        ('FINAL', 0),
-        ('FINAL', -1),
+        (0, nfa2_final_state_bt),
+        (-1, nfa2_final_state_bt),
+        (nfa1_final_state_bt, 0),
+        (nfa1_final_state_bt, -1),
     ]
 
-    expected_states_deadend = list(map(translate_state_pair, expected_states_deadend))
-    for e_state in expected_states_deadend:
+    esdt = []
+    for left, right in expected_states_deadend:
+        renumbered_metastate = (nfa1_translation[left], nfa2_translation[right])
+        int_state = metastate_inv_map[renumbered_metastate]
+        esdt.append(int_state)
+
+    for e_state in esdt:
         assert e_state in nfa_intersection.states
