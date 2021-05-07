@@ -57,7 +57,9 @@ mtbdd_wrapper.amaya_mtbdd_get_state_post.argtypes = (
 mtbdd_wrapper.amaya_mtbdd_get_state_post.restype = ct.POINTER(ct.c_int)
 
 mtbdd_wrapper.amaya_mtbdd_do_pad_closure.argtypes = (
+    ct.c_int,    # Left state
     ct.c_ulong,  # MTBDD left
+    ct.c_int,    # Right state
     ct.c_ulong,  # MTBDD right
     ct.POINTER(ct.c_int),  # Array with final states.
     ct.c_uint32  # Number of final states
@@ -105,6 +107,7 @@ mtbdd_wrapper.amaya_update_intersection_state.argtypes = (
     ct.c_uint32,              # automaton id
 )
 
+mtbdd_wrapper.amaya_set_debugging.argtypes = (ct.c_bool, )
 
 mtbdd_false = ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
 MTBDD = ct.c_ulong
@@ -376,6 +379,7 @@ class MTBDDTransitionFn():
             for pre_state in state_pre_list:
                 print(f'Applying PC on: {pre_state} ---> {state}')
                 had_pc_effect = self._do_pad_closure_single(pre_state, state, final_states)
+
                 if had_pc_effect:
                     if pre_state not in work_queue:
                         work_queue.append(pre_state)
@@ -385,6 +389,9 @@ class MTBDDTransitionFn():
         left_mtbdd = self.mtbdds.get(left_state, None)
         right_mtbdd = self.mtbdds.get(right_state, None)
 
+        c_left_state = ct.c_int(left_state)
+        c_right_state = ct.c_int(right_state)
+
         if left_mtbdd is None or right_mtbdd is None:
             return  # We need a pair of mtbdds to perform padding closure.
 
@@ -393,7 +400,9 @@ class MTBDDTransitionFn():
         final_states_cnt = ct.c_uint32(len(final_states))
 
         was_modified = mtbdd_wrapper.amaya_mtbdd_do_pad_closure(
+            c_left_state,
             left_mtbdd,
+            c_right_state,
             right_mtbdd,
             final_states_arr,
             final_states_cnt

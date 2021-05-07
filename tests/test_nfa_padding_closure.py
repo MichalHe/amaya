@@ -3,26 +3,30 @@ import automatons as fsms
 import transitions as trans
 import relations_structures as rs
 import pressburger_algorithms as p_algos
+from typing import Callable
 
 
-@pytest.fixture()
-def simple_nfa() -> fsms.NFA:
+AutomatonFactory = Callable[[fsms.LSBF_Alphabet, fsms.AutomatonType], fsms.NFA]
+
+
+def mk_simple_nfa(factory: AutomatonFactory) -> fsms.NFA:
+    final_state = 3
     states = [
-        0, 1, 2, 'F'
+        0, 1, 2, final_state
     ]
 
-    alphabet = fsms.LSBF_Alphabet.from_variable_names(['x'])
+    alphabet = fsms.LSBF_Alphabet.from_variable_names([1])
 
-    nfa: fsms.NFA = fsms.NFA(alphabet=alphabet, automaton_type=fsms.AutomatonType.NFA)
+    nfa: fsms.NFA = factory(alphabet, fsms.AutomatonType.NFA)
     nfa.states = set(states)
-    nfa.add_final_state('F')
+    nfa.add_final_state(final_state)
     nfa.add_initial_state(0)
 
     sigma = (0,)
     transitions = [
         (0, sigma, 1),
         (1, sigma, 2),
-        (2, sigma, 'F'),
+        (2, sigma, final_state),
     ]
 
     for t in transitions:
@@ -31,15 +35,15 @@ def simple_nfa() -> fsms.NFA:
     return nfa
 
 
-@pytest.fixture()
-def multipath_nfa() -> fsms.NFA:
-    states = [0, 1, 2, 3, 'F']
-    alphabet = fsms.LSBF_Alphabet.from_variable_names(['x', 'y'])
-    multipath_nfa = fsms.NFA(alphabet=alphabet, automaton_type=fsms.AutomatonType.NFA)
+def mk_multipath_nfa(factory: AutomatonFactory) -> fsms.NFA:
+    final_state = 4
+    states = [0, 1, 2, 3, final_state]
+    alphabet = fsms.LSBF_Alphabet.from_variable_names([1, 2])
+    multipath_nfa = factory(alphabet, fsms.AutomatonType.NFA)
 
     multipath_nfa.states = set(states)
     multipath_nfa.add_initial_state(0)
-    multipath_nfa.add_final_state('F')
+    multipath_nfa.add_final_state(final_state)
 
     sigma_1 = (0, 0)
     sigma_2 = (1, 1)
@@ -48,10 +52,10 @@ def multipath_nfa() -> fsms.NFA:
         (0, sigma_1, 1),
 
         (1, sigma_1, 2),
-        (2, sigma_1, 'F'),
+        (2, sigma_1, final_state),
 
         (1, sigma_2, 3),
-        (3, sigma_2, 'F')
+        (3, sigma_2, final_state)
     ]
 
     for t in transitions:
@@ -60,15 +64,16 @@ def multipath_nfa() -> fsms.NFA:
     return multipath_nfa
 
 
-@pytest.fixture()
-def advanced_nfa() -> fsms.NFA:
-    states = [-1, 0, 1, 2, 3, 4, 5]
+def mk_advanced_nfa(factory: AutomatonFactory) -> fsms.NFA:
+    states = [-1, 0, 1, 2, 3, 4, 5, 6]
     alphabet = fsms.LSBF_Alphabet.from_variable_names(['x', 'y'])
     advanced_nfa = fsms.NFA(alphabet=alphabet, automaton_type=fsms.AutomatonType.NFA)
 
+    final_state = 6
+
     advanced_nfa.states = set(states)
     advanced_nfa.add_initial_state(-1)
-    advanced_nfa.add_final_state('F')
+    advanced_nfa.add_final_state(final_state)
 
     sigma_0 = (0, 0)
     sigma_1 = (0, 1)
@@ -80,13 +85,13 @@ def advanced_nfa() -> fsms.NFA:
         (1, sigma_0, 2),
         (2, sigma_0, 3),
         (2, sigma_1, 4),
-        (3, sigma_0, 'F'),
+        (3, sigma_0, final_state),
 
         (0, sigma_1, 4),
-        (4, sigma_1, 'F'),
+        (4, sigma_1, final_state),
 
         (0, sigma_2, 5),
-        (5, sigma_2, 'F'),
+        (5, sigma_2, final_state),
     ]
 
     for t in T:
@@ -101,76 +106,115 @@ def real_nfa() -> fsms.NFA:
     return p_algos.build_nfa_from_equality(equality)
 
 
-def test_simple_finality_propagation(simple_nfa: fsms.NFA):
-    # Expect finallity propagation via sigma to every state
-    simple_nfa.perform_pad_closure()
+def do_simple_padding_closure_tests(nfa: fsms.NFA):
+    nfa.perform_pad_closure()
 
     sigma = (0,)
+    final_state = 3
     expected_transitions = [
-        (0, sigma, 'F'),
-        (1, sigma, 'F'),
-        (2, sigma, 'F'),
+        (0, sigma, final_state),
+        (1, sigma, final_state),
+        (2, sigma, final_state),
     ]
 
     for expected_transition in expected_transitions:
         origin, symbol, _ = expected_transition
-        assert 'F' in simple_nfa.get_transition_target(origin, symbol)
+        assert final_state in nfa.get_transition_target(origin, symbol)
 
 
-def test_multipath_propagation(multipath_nfa: fsms.NFA):
+def test_mdbdd_simple_finality_propagation():
+    simple_nfa = mk_simple_nfa(fsms.MTBDD_NFA)
+    # Expect finallity propagation via sigma to every state
+
+    do_simple_padding_closure_tests(simple_nfa)
+
+
+def test_simple_finality_propagation():
+    simple_nfa = mk_simple_nfa(fsms.NFA)
+    do_simple_padding_closure_tests(simple_nfa)
+
+
+def do_multipath_propagation_tests(multipath_nfa: fsms.NFA):
     multipath_nfa.perform_pad_closure()
 
+    final_state = 4
     sigma_1 = (0, 0)
     sigma_2 = (1, 1)
     expected_trans = [
-        (1, sigma_1, 'F'),
-        (1, sigma_2, 'F'),
-        (0, sigma_1, 'F'),
+        (1, sigma_1, final_state),
+        (1, sigma_2, final_state),
+        (0, sigma_1, final_state),
 
         # Original transitions
         (0, sigma_1, 1),
         (1, sigma_1, 2),
-        (2, sigma_1, 'F'),
+        (2, sigma_1, final_state),
         (1, sigma_2, 3),
-        (3, sigma_2, 'F')
+        (3, sigma_2, final_state)
     ]
 
     transition_size = 0
-    for transition in trans.iter_transition_fn(multipath_nfa.transition_fn.data):
+    present_transitions = []
+    for transition in multipath_nfa.transition_fn.iter():
         assert transition in expected_trans
         transition_size += 1
+        present_transitions.append(transition)
 
+    print(present_transitions)
+    print(expected_trans)
     assert transition_size == len(expected_trans)
 
 
-def test_advanced_propagation(advanced_nfa: fsms.NFA):
-    transitions_before_padding = list(trans.iter_transition_fn(advanced_nfa.transition_fn.data))
-    advanced_nfa.perform_pad_closure()
+def test_multipath_propagation_tests():
+    nfa = mk_multipath_nfa(fsms.NFA)
+    do_multipath_propagation_tests(nfa)
+
+
+def test_mtbdd_multipath_propagation_tests():
+    nfa = mk_multipath_nfa(fsms.MTBDD_NFA)
+    do_multipath_propagation_tests(nfa)
+
+
+def do_advanced_propagation_tests(nfa: fsms.NFA):
+    transitions_before_padding = list(nfa.transition_fn.iter())
+    nfa.perform_pad_closure()
 
     sigma_0 = (0, 0)
     sigma_1 = (0, 1)
     sigma_2 = (1, 0)
     # Expected_transitions
+    final_state = 6
     expected_transitions = [
-        (2, sigma_0, 'F'),
-        (2, sigma_1, 'F'),
-        (1, sigma_0, 'F'),
-        (0, sigma_0, 'F'),
-        (-1, sigma_0, 'F'),
-        (0, sigma_1, 'F'),
-        (0, sigma_2, 'F'),
+        (2, sigma_0, final_state),
+        (2, sigma_1, final_state),
+        (1, sigma_0, final_state),
+        (0, sigma_0, final_state),
+        (-1, sigma_0, final_state),
+        (0, sigma_1, final_state),
+        (0, sigma_2, final_state),
     ]
 
     all_transitions = expected_transitions + transitions_before_padding
 
     tc = 0
-    for t in trans.iter_transition_fn(advanced_nfa.transition_fn.data):
+    for t in nfa.transition_fn.iter():
         assert t in all_transitions
         tc += 1
     assert tc == len(all_transitions)
 
 
-def test_real_pressburger_automaton_after_projection(real_nfa: fsms.NFA):
+def test_advanced_propagation():
+    nfa = mk_advanced_nfa(fsms.NFA)
+    do_advanced_propagation_tests(nfa)
+
+
+def test_mtbdd_advanced_propagation():
+    nfa = mk_advanced_nfa(fsms.MTBDD_NFA)
+    do_advanced_propagation_tests(nfa)
+
+
+def x_test_real_pressburger_automaton_after_projection(real_nfa: fsms.NFA):
+    '''*Not performed currently* - the MTBDD NFAs do not fully support variable projection.'''
     final_state = list(real_nfa.final_states)[0]
     sigma_0 = (0, '*')  # NOQA
     sigma_1 = (1, '*')  # NOQA

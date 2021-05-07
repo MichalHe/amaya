@@ -739,7 +739,7 @@ class MTBDD_NFA(NFA):
         return int_nfa
 
     def perform_pad_closure(self):
-        pass
+        self.transition_fn.do_pad_closure(self.initial_states, self.final_states)
 
     def determinize(self):
         pass
