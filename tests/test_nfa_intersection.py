@@ -2,14 +2,13 @@ import pytest
 from relations_structures import Relation
 from pressburger_algorithms import build_nfa_from_inequality
 from automatons import MTBDD_NFA, LSBF_Alphabet
-from mtbdd_transitions import MTBDDTransitionFn
 from typing import Any
 
 alphabet = LSBF_Alphabet.from_variable_names([1, 2])
 
 
 @pytest.fixture
-def nfa1() -> MTBDD_NFA:
+def mtbdd_nfa1() -> MTBDD_NFA:
     ineq = Relation(
         absolute_part=0,
         variable_names=['x', 'y'],
@@ -41,28 +40,28 @@ def are_states_same(state_a, state_b):
     return True
 
 
-def test_nfa_intersection_mtbdd(nfa1: MTBDD_NFA, nfa2: MTBDD_NFA):
-    assert len(nfa1.final_states) == 1
+def test_nfa_intersection_mtbdd(mtbdd_nfa1: MTBDD_NFA, nfa2: MTBDD_NFA):
+    assert len(mtbdd_nfa1.final_states) == 1
     assert len(nfa2.final_states) == 1
 
-    nfa1_final_state_bt = next(iter(nfa1.final_states))
+    nfa1_final_state_bt = next(iter(mtbdd_nfa1.final_states))
     nfa2_final_state_bt = next(iter(nfa2.final_states))
 
     nfa1_translation = dict()
     nfa2_translation = dict()
 
     def state_name_translated(automaton_id: int, old_name: Any, new_name: int):
-        if automaton_id == id(nfa1):
+        if automaton_id == id(mtbdd_nfa1):
             nfa1_translation[old_name] = new_name
         else:
             nfa2_translation[old_name] = new_name
 
-    nfa1._debug_state_rename = state_name_translated
+    mtbdd_nfa1._debug_state_rename = state_name_translated
     nfa2._debug_state_rename = state_name_translated
 
     metastate_map = {}
     metastate_inv_map = {}
-    nfa_intersection = nfa1.intersection(nfa2, metastate_map=metastate_map)
+    nfa_intersection = mtbdd_nfa1.intersection(nfa2, metastate_map=metastate_map)
     assert nfa_intersection
 
     for state, metastate in metastate_map.items():
@@ -115,8 +114,6 @@ def test_nfa_intersection_mtbdd(nfa1: MTBDD_NFA, nfa2: MTBDD_NFA):
         (es[0], (0, 0), expected_final_state),
         (es[0], (1, 1), expected_final_state),
     ]
-
-    MTBDDTransitionFn.write_mtbdd_dot_to_file(nfa_intersection.transition_fn.mtbdds[1], '/tmp/amaya_mtbdd0.dot')
 
     transitions = list(nfa_intersection.transition_fn.iter())
 

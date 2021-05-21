@@ -1,15 +1,19 @@
 import pytest
 from relations_structures import Relation
 from pressburger_algorithms import build_nfa_from_inequality
+from pressburger_algorithms import AutomatonConstructor
 from typing import Union, Dict
 from automatons import (
     AutomatonType,
-    NFA
+    LSBF_Alphabet,
+    NFA,
+    MTBDD_NFA,
 )
 
+alphabet = LSBF_Alphabet.from_variable_names([1, 2])
 
-@pytest.fixture
-def simple_nfa() -> NFA:
+
+def mk_simple_presburger(constr: AutomatonConstructor) -> NFA:
     ineq = Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
@@ -17,7 +21,17 @@ def simple_nfa() -> NFA:
         operation='<='
     )
 
-    return build_nfa_from_inequality(ineq)
+    return build_nfa_from_inequality(ineq, alphabet, constr)
+
+
+@pytest.fixture
+def simple_nfa() -> NFA:
+    return mk_simple_presburger(NFA)
+
+
+@pytest.fixture
+def simple_mtbdd_nfa() -> NFA:
+    return mk_simple_presburger(MTBDD_NFA)
 
 
 def translate_transitions(transitions, translate):  # translate is function
@@ -31,8 +45,30 @@ def translate_transitions(transitions, translate):  # translate is function
     return translated
 
 
-def test_simple_nfa_determinization(simple_nfa: NFA[Union[int, str]]):
+class ResolutionState:
+    def __init__(self):
+        self.automaton_state = None
+
+    def bind(self, real_automaton_state):
+        if self.automaton_state is not None:
+            if self.automaton_state != real_automaton_state:
+                raise ValueError('Attempting to rebind automaton state value!')
+        else:
+            self.automaton_state = real_automaton_state
+
+    def is_bound(self):
+        return self.automaton_state is not None
+
+    def get(self):
+        if self.automaton_state is None:
+            raise ValueError('Attempting to read from resolvent state without assigning the value first.')
+        return self.automaton_state
+
+
+def do_simple_nfa_determinization_tests(simple_nfa: NFA[Union[int, str]]):
     assert simple_nfa.automaton_type == AutomatonType.NFA
+    assert len(simple_nfa.final_states) == 1, \
+        'The simple NFA resulting from the presburger formula should contain 1 final state.'
 
     trans_map: Dict[Union[int, str], int] = {}
 
@@ -41,65 +77,55 @@ def test_simple_nfa_determinization(simple_nfa: NFA[Union[int, str]]):
 
     simple_nfa._debug_state_rename = state_rename_occured
 
-    print('Translation map: ', trans_map)
-
     dfa = simple_nfa.determinize()
     assert dfa
-    for state in dfa.states:
-        print(state)
     assert len(dfa.states) == 8
     assert len(dfa.final_states) == 4
     assert len(dfa.initial_states) == 1
     assert dfa.automaton_type == AutomatonType.DFA
 
-    def translate(state: Union[str, int]) -> int:
-        return trans_map[state]
+    # We must perform the testing in a state-name agnostic fashion
+    initial_state = ResolutionState()
+    state_1 = ResolutionState()
+    state_2 = ResolutionState()
+    state_3 = ResolutionState()
+    state_4 = ResolutionState()
+    state_5 = ResolutionState()
+    state_6 = ResolutionState()
+    state_7 = ResolutionState()
 
-    expected_states_before_remap = [
-        (2, ), (0, ), (-1, ), (-2, ),
-        (1, 'FINAL'), (0, 'FINAL'), (-1, 'FINAL'), (-2, 'FINAL')
-    ]
-
-    expected_states = []
-    for state in expected_states_before_remap:
-        expected_states.append(tuple(map(translate, state)))
+    assert len(dfa.initial_states) == 1, 'The deterministic automaton can have only one initial state.'
+    initial_state.bind(next(iter(dfa.initial_states)))
 
     # Test whether there are transitions present
     e_transitions = [
-        ((2, ), (0, 0), (1, 'FINAL')),
-        ((-2, ), (1, 0), (-2, 'FINAL')),
-
-        ((0, 'FINAL'), (1, 0), (-1, 'FINAL')),
-        ((0, 'FINAL'), (1, 1), (-1, 'FINAL')),
-
-        ((0, 'FINAL'), (0, 0), (0, 'FINAL')),  # Test loop
-
-        ((-2, ), (0, 0), (-1, )),
-        ((-2, ), (0, 1), (-1, )),
-        ((-2, ), (1, 0), (-2, 'FINAL')),
-        ((-2, ), (1, 1), (-2, )),
+        (initial_state, (0, 0), state_1),
+        (initial_state, (0, 1), state_1),
+        (state_1, (0, 0), state_2),
+        (state_1, (1, 1), state_2),
+        (state_1, (0, 0), state_2),
+        (state_1, (0, 0), state_3),
+        (state_3, (0, 0), state_6),
+        (state_3, (1, 0), state_4),
+        (state_6, (0, 1), state_5),
+        (state_4, (1, 1), state_7),
+        (state_7, (1, 1), state_7),
     ]
 
-    ne_transitions = [
-        ((-2, ), (1, 1), (-1, 'FINAL')),
-        ((-1, ), (1, 0), (0, )),  # Test existing transition with different symbol
-    ]
+    for origin, symbol, dest in e_transitions:
+        dest_set = dfa.get_transition_target(origin.get(), symbol)
+        assert len(dest_set) == 1, 'A DFA can have only 1 destination state for every alphabet symbol.'
+        dest.bind(dest_set[0])
 
-    e_transitions_translated = translate_transitions(e_transitions, translate)
-    #  ne_transitions_translated = translate_transitions(ne_transitions, translate)
+    for s in [state_1, state_2, state_3, state_4, state_5, state_6, state_7]:
+        assert s.is_bound()
 
-    for transition in e_transitions_translated:
-        origin, symbol, dest = transition
-        # perform state name correction
-        assert dest in dfa.get_transition_target(origin, symbol)
+    assert len(dfa.final_states) == 4
 
-    for transition in ne_transitions:
-        origin, symbol, dest = transition
-        assert dfa.get_transition_target(origin, symbol) is None or dest not in dfa.get_transition_target(origin, symbol)
 
-    # Test whether the automaton has some target state for every symbol in
-    # alphabet
+def test_simple_nfa_determinization(simple_nfa: NFA):
+    do_simple_nfa_determinization_tests(simple_nfa)
 
-    for state in dfa.states:
-        for symbol in dfa.alphabet.symbols:
-            assert len(dfa.get_transition_target(state, symbol)) == 1
+
+def test_simple_mtbdd_nfa_determinization(simple_mtbdd_nfa: NFA):
+    do_simple_nfa_determinization_tests(simple_mtbdd_nfa)

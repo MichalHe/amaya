@@ -160,8 +160,6 @@ def do_multipath_propagation_tests(multipath_nfa: fsms.NFA):
         transition_size += 1
         present_transitions.append(transition)
 
-    print(present_transitions)
-    print(expected_trans)
     assert transition_size == len(expected_trans)
 
 
