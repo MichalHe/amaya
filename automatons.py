@@ -596,7 +596,6 @@ class MTBDD_NFA(NFA):
     def __init__(self,
                  alphabet: LSBF_Alphabet,
                  automaton_type: AutomatonType):
-
         self.alphabet = alphabet
         self.automaton_type = automaton_type
         self.states: Set[int] = set()
@@ -742,13 +741,97 @@ class MTBDD_NFA(NFA):
         self.transition_fn.do_pad_closure(self.initial_states, self.final_states)
 
     def determinize(self):
-        pass
+        MTBDDTransitionFn.write_mtbdd_dot_to_file(self.transition_fn.mtbdds[0], '/tmp/amaya_0.dot')
+        work_queue = [tuple(self.initial_states)]
+        dfa = MTBDD_NFA(self.alphabet, AutomatonType.DFA)
+
+        states = set()
+        initial_states = set(work_queue)
+        final_states = set()
+
+        # Stores the actual structure of the automaton.
+        mtbdds = {}
+
+        while work_queue:
+            c_metastate = work_queue.pop(-1)
+
+            # @Optimize: This is true only for the initial states
+            #            Other states are reachable from other and are remapped
+            #            when the transition is added.
+            states.add(c_metastate)
+            if set(c_metastate).intersection(self.final_states):
+                final_states.add(c_metastate)
+
+            c_metastate_union_mtbdd = self.transition_fn.get_union_mtbdd_for_states(c_metastate, self.transition_fn.automaton_id)
+            MTBDDTransitionFn.write_mtbdd_dot_to_file(c_metastate_union_mtbdd, '/tmp/amaya.dot')
+
+            if c_metastate_union_mtbdd is None:
+                continue
+            mtbdds[c_metastate] = c_metastate_union_mtbdd
+
+            reachable_metastates = MTBDDTransitionFn.get_mtbdd_leaves(c_metastate_union_mtbdd)
+            for r_metastate in reachable_metastates:
+                r_metastate = tuple(r_metastate)
+
+                # @Optimize: this is a linear search on work_queue.
+                if not (r_metastate in states or r_metastate in work_queue):
+                    work_queue.append(r_metastate)
+
+        # We have explored the entire structure - time to mangle the generated
+        # metastates into integers, so that the automaton has the correct form.
+        automaton_id = dfa.transition_fn.automaton_id
+        metastate2int_map = MTBDDTransitionFn.rename_metastates_after_determinization(mtbdds.values(), automaton_id)
+        max_state = max(metastate2int_map.values())
+
+        for state in states:
+            # Initial states might never get discovered - we need to remap them
+            # manually, because they will not be present in any of the mtbdd
+            # leaves
+            if state in metastate2int_map:
+                dfa.add_state(metastate2int_map[state])
+            else:
+                max_state += 1
+                metastate2int_map[state] = max_state
+                dfa.add_state(max_state)
+        for f_state in final_states:
+            dfa.add_final_state(metastate2int_map[f_state])
+        for i_state in initial_states:
+            dfa.add_initial_state(metastate2int_map[i_state])
+
+        for metastate, mtbdd in mtbdds.items():
+            state = metastate2int_map[metastate]
+            dfa.transition_fn.mtbdds[state] = mtbdd
+
+        return dfa
 
     @staticmethod
     def get_next_automaton_id() -> int:
         c = MTBDD_NFA.automaton_id_counter
         MTBDD_NFA.automaton_id_counter += 1
         return c
+
+    def do_projection(self, var: int):
+        # TODO: Check whether the variable is in fact in the active set.
+        self.transition_fn.project_variable_away(var)
+        self.transition_fn.do_pad_closure(self.initial_states,
+                                          list(self.final_states))
+        return self
+
+
+@dataclass
+class AutomatonSnapshot:
+    states:         Set[int]
+    final_states:   Set[int]
+    initial_states: Set[int]
+    transitions:    List[Tuple[Any, Any, Any]]
+
+    @staticmethod
+    def create_snapshot(nfa: NFA) -> AutomatonSnapshot:
+        initial_states = set(nfa.initial_states)
+        final_states = set(nfa.final_states)
+        states = set(nfa.states)
+        transitions = list(nfa.transition_fn.iter())
+        return AutomatonSnapshot(states, final_states, initial_states, transitions)
 
 
 DFA = NFA

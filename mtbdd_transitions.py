@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes as ct
-from typing import Dict, Any, Tuple, Union, List, Iterable, Set, Optional
+from typing import Dict, Any, Tuple, Union, List, Iterable, Optional
 
 mtbdd_wrapper = ct.CDLL('./amaya-mtbdd.so', mode=1)
 mtbdd_wrapper.init_machinery()
@@ -39,7 +39,7 @@ mtbdd_wrapper.amaya_mtbdd_get_leaves.argtypes = (
     ct.c_ulong,
     ct.POINTER(ct.POINTER((ct.c_uint32))),  # Leaf sizes
     ct.POINTER(ct.c_uint32),                # Leaf count
-    ct.POINTER(ct.POINTER(ct.c_voidp))      # Leaf transition destination sets
+    ct.POINTER(ct.POINTER(ct.c_voidp))      # Leaf transition destination sets, void***
 )
 mtbdd_wrapper.amaya_mtbdd_get_leaves.restype = ct.POINTER(ct.c_int)  # Pointer to array containing the states
 
@@ -108,6 +108,25 @@ mtbdd_wrapper.amaya_update_intersection_state.argtypes = (
 )
 
 mtbdd_wrapper.amaya_set_debugging.argtypes = (ct.c_bool, )
+
+mtbdd_wrapper.amaya_rename_metastates_to_int.argtypes = (
+    ct.POINTER(ct.c_ulong),   # The mtbdd roots that were located during determinization
+    ct.c_uint32,              # The number of mtbdd roots
+    ct.c_int,                 # The number from which the numbering will start
+    ct.c_uint32,              # The ID of the resulting automaton
+    ct.POINTER(ct.POINTER(ct.c_uint32)),  # OUT Metastates sizes
+    ct.POINTER(ct.c_uint32)   # OUT Metastates count
+)
+mtbdd_wrapper.amaya_rename_metastates_to_int.restype = ct.POINTER(ct.c_int)
+
+mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.argtypes = (
+    ct.c_ulong,   # The MTBDD
+    ct.c_uint32,  # Automaton ID
+    ct.c_int      # The trapstate ID
+)
+
+mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.restype = ct.c_long
+
 
 mtbdd_false = ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
 MTBDD = ct.c_ulong
@@ -259,7 +278,10 @@ class MTBDDTransitionFn():
         self.mtbdds = new_mtbdds
 
     def project_variable_away(self, variable: int):
-        '''Not sure what happens when trying to project a variable that is not
+        '''Projects away the variable with given number from every MTBDD stored
+        within this transition function.
+
+        Not sure what happens when trying to project a variable that is not
         present.'''
         assert variable > 0, 'MTBDD variables are numbered via ints from 1 up'
 
@@ -309,7 +331,7 @@ class MTBDDTransitionFn():
 
         return leaves
 
-    def get_union_mtbdd_for_states(self, states: List[int]) -> MTBDD:
+    def get_union_mtbdd_for_states(self, states: List[int], resulting_automaton_id: int) -> MTBDD:
         '''Does what name suggests.'''
         resulting_mtbdd = mtbdd_false
         for state in states:
@@ -318,7 +340,10 @@ class MTBDDTransitionFn():
             mtbdd = self.mtbdds[state]
             resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(
                 mtbdd,
-                resulting_mtbdd)
+                resulting_mtbdd,
+                resulting_automaton_id)
+        if resulting_mtbdd == mtbdd_false:
+            return None
         return resulting_mtbdd
 
     def get_state_post(self, state: int) -> List[int]:
@@ -377,7 +402,7 @@ class MTBDDTransitionFn():
             state = work_queue.pop()
             state_pre_list = self.get_state_pre(state, initial_states=initial_states)
             for pre_state in state_pre_list:
-                print(f'Applying PC on: {pre_state} ---> {state}')
+                # print(f'Applying PC on: {pre_state} ---> {state}')
                 had_pc_effect = self._do_pad_closure_single(pre_state, state, final_states)
 
                 if had_pc_effect:
@@ -457,6 +482,8 @@ class MTBDDTransitionFn():
 
     def iter(self, variables: Optional[List[int]] = None):
         for origin in self.mtbdds:
+            if origin == 3:
+                MTBDDTransitionFn.write_mtbdd_dot_to_file(self.mtbdds[origin], '/tmp/amaya.dot')
             yield from self.iter_single_state(origin)
 
     @staticmethod
@@ -599,6 +626,54 @@ class MTBDDTransitionFn():
     def end_intersection():
         mtbdd_wrapper.amaya_end_intersection()
 
+    @staticmethod
+    def rename_metastates_after_determinization(mtbdds: Iterable[MTBDD],
+                                                resulting_automaton_id: int,
+                                                start_numbering_from: int = 0) -> Dict[Tuple[int, ...], int]:
+        in_mtbdds = (ct.c_ulong * len(mtbdds))()
+        for i, mtbdd in enumerate(mtbdds):
+            in_mtbdds[i] = mtbdd
+        in_mtbdd_cnt = ct.c_uint32(len(mtbdds))
+        in_res_automaton_id = ct.c_uint32(resulting_automaton_id)
+        in_start_numbering_from = ct.c_int(start_numbering_from)
+
+        out_metastates_sizes = ct.POINTER(ct.c_uint32)()
+        out_metastates_cnt = ct.c_uint32()
+
+        out_metastates_serialized = mtbdd_wrapper.amaya_rename_metastates_to_int(
+            ct.cast(in_mtbdds, ct.POINTER(ct.c_ulong)),
+            in_mtbdd_cnt,
+            in_start_numbering_from,
+            in_res_automaton_id,
+            ct.byref(out_metastates_sizes),
+            ct.byref(out_metastates_cnt),
+        )
+        mapping = {}
+        metastates_cnt = out_metastates_cnt.value
+        metastates_serialized_i = 0
+        _start_from = start_numbering_from
+        for i in range(metastates_cnt):
+            metastate = []
+            metastate_size = out_metastates_sizes[i]
+            for j in range(metastate_size):
+                metastate.append(out_metastates_serialized[metastates_serialized_i])
+                metastates_serialized_i += 1
+
+            mapping[tuple(metastate)] = _start_from
+            _start_from += 1
+
+        mtbdd_wrapper.amaya_do_free(out_metastates_serialized)
+        mtbdd_wrapper.amaya_do_free(out_metastates_sizes)
+
+        return mapping
+
+    @staticmethod
+    def complete_mtbdd_with_trapstate(mtbdd: ct.c_long, automaton_id: int, trapstate_id: int) -> ct.c_long:
+        _aid = ct.c_uint32(automaton_id)
+        _trapstate = ct.c_int(trapstate_id)
+
+        return mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate(mtbdd, _aid, _trapstate)
+
     def change_automaton_ids_for_leaves(self, new_id: int):
         mtbdd_roots_arr = (ct.c_ulong * len(self.mtbdds))()
         for i, mtbdd in enumerate(self.mtbdds.values()):
@@ -610,30 +685,14 @@ class MTBDDTransitionFn():
             ct.c_uint32(new_id)
         )
 
-
-def determinize_mtbdd(tfn: MTBDDTransitionFn, initial_states: Set[int], final_states: Set[int]):
-    work_queue = [tuple(initial_states)]
-    states = set()
-    dfa_final_states = set()
-    initial_states = set(initial_states)
-    while work_queue:
-        c_metastate = work_queue.pop(-1)
-        states.add(c_metastate)
-
-        transition = tfn.get_union_mtbdd_for_states(c_metastate)
-
-        if set(c_metastate).intersection(final_states):
-            dfa_final_states.add(tuple(c_metastate))
-
-        reachable_states = MTBDDTransitionFn.get_mtbdd_leaves(transition)
-        for rs in reachable_states:
-            rs = tuple(rs)
-            if rs not in states:
-                # @Optimize: this is a linear search.
-                if rs not in work_queue:
-                    work_queue.append(rs)
-
-    return states
+    def complete_transitions_with_trapstate(self, trapstate: int):
+        '''Complete every stored transition mtbdd with the given trapstate, so that the
+        transitions have a destination for every origin state.'''
+        completed_mtbdds = {}
+        for origin, mtbdd in self.mtbdds.items():
+            completed_mtbdd = self.complete_mtbdd_with_trapstate(mtbdd, self.automaton_id, trapstate)
+            completed_mtbdds[origin] = completed_mtbdd
+        self.mtbdds = completed_mtbdds
 
 
 if __name__ == '__main__':
