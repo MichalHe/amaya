@@ -120,9 +120,10 @@ mtbdd_wrapper.amaya_rename_metastates_to_int.argtypes = (
 mtbdd_wrapper.amaya_rename_metastates_to_int.restype = ct.POINTER(ct.c_int)
 
 mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.argtypes = (
-    ct.c_ulong,   # The MTBDD
-    ct.c_uint32,  # Automaton ID
-    ct.c_int      # The trapstate ID
+    ct.c_ulong,                 # The MTBDD
+    ct.c_uint32,                # Automaton ID
+    ct.c_int,                   # The trapstate ID
+    ct.POINTER(ct.c_bool)       # OUT - Information about whether the operator did add a transition to a trapstate somewhere
 )
 
 mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.restype = ct.c_long
@@ -668,11 +669,22 @@ class MTBDDTransitionFn():
         return mapping
 
     @staticmethod
-    def complete_mtbdd_with_trapstate(mtbdd: ct.c_long, automaton_id: int, trapstate_id: int) -> ct.c_long:
+    def complete_mtbdd_with_trapstate(mtbdd: ct.c_long, automaton_id: int, trapstate_id: int) -> Tuple[ct.c_long, bool]:
+        '''Wrapper call.
+
+        Add a transition to the given trapstate for every alphabet symbol
+        for which the given mtbdd does not have any (valid) transition.
+
+        Returns the mtbdd resulting from the completion (might be unchanged if the
+        mtbdd already was complete) and the information about whether the operation
+        did indeed modify the mtbdd somehow.
+        '''
         _aid = ct.c_uint32(automaton_id)
         _trapstate = ct.c_int(trapstate_id)
+        _had_effect = ct.c_bool()
 
-        return mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate(mtbdd, _aid, _trapstate)
+        mtbdd = mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate(mtbdd, _aid, _trapstate, ct.byref(_had_effect))
+        return (mtbdd, _had_effect)
 
     def change_automaton_ids_for_leaves(self, new_id: int):
         mtbdd_roots_arr = (ct.c_ulong * len(self.mtbdds))()
@@ -685,14 +697,18 @@ class MTBDDTransitionFn():
             ct.c_uint32(new_id)
         )
 
-    def complete_transitions_with_trapstate(self, trapstate: int):
+    def complete_transitions_with_trapstate(self, trapstate: int) -> bool:
         '''Complete every stored transition mtbdd with the given trapstate, so that the
-        transitions have a destination for every origin state.'''
+        transitions have a destination for every origin state (and any alphabet symbol).'''
         completed_mtbdds = {}
+        # Cummulative information about whether a trapstate was somewhere added
+        was_trapstate_added = False
         for origin, mtbdd in self.mtbdds.items():
-            completed_mtbdd = self.complete_mtbdd_with_trapstate(mtbdd, self.automaton_id, trapstate)
+            completed_mtbdd, had_effect = self.complete_mtbdd_with_trapstate(mtbdd, self.automaton_id, trapstate)
+            was_trapstate_added = was_trapstate_added or had_effect
             completed_mtbdds[origin] = completed_mtbdd
         self.mtbdds = completed_mtbdds
+        return was_trapstate_added
 
 
 if __name__ == '__main__':

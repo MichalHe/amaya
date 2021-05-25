@@ -38,7 +38,7 @@ from transitions import (
     SparseSimpleTransitionFunction
 )
 
-from mtbdd_transitions import MTBDDTransitionFn
+from mtbdd_transitions import MTBDDTransitionFn, mtbdd_false
 
 import functools
 import dd  # type: ignore
@@ -602,6 +602,7 @@ class MTBDD_NFA(NFA):
         self.final_states: Set[int] = set()
         self.initial_states: Set[int] = set()
         self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_names, MTBDD_NFA.automaton_id_counter)
+        self.trapstate = None
         MTBDD_NFA.automaton_id_counter += 1
 
     def add_state(self, state: int):
@@ -741,6 +742,14 @@ class MTBDD_NFA(NFA):
         self.transition_fn.do_pad_closure(self.initial_states, self.final_states)
 
     def determinize(self):
+        '''Performs in-place determinization of the automaton. No
+        determinization is performed if the automaton is already marked as a
+        DFA.
+
+        The determinized automaton has a transition for every alphabet symbol
+        in every state - after determinization a completion with a trapstate is
+        performed.  '''
+
         MTBDDTransitionFn.write_mtbdd_dot_to_file(self.transition_fn.mtbdds[0], '/tmp/amaya_0.dot')
         work_queue = [tuple(self.initial_states)]
         dfa = MTBDD_NFA(self.alphabet, AutomatonType.DFA)
@@ -802,7 +811,53 @@ class MTBDD_NFA(NFA):
             state = metastate2int_map[metastate]
             dfa.transition_fn.mtbdds[state] = mtbdd
 
+        dfa.add_trap_state()
         return dfa
+
+    def complement(self) -> MTBDD_NFA:
+        '''Creates the automaton complement. Determinization (and
+        completion with a trapstate) is performed only if the current automaton
+        is not DFA (.automaton_type).
+
+        Note that the complement is peformed to \\sigma^* - \\eps, as the empty
+        word cannot never be contained in a language encoding presburger
+        formula over \\mathcal{Z}.  '''
+
+        dfa = self.determinize()
+
+        new_final_states = dfa.states - dfa.final_states
+
+        # The initial states can never become final - the language cannot
+        # contain empty word.
+        new_final_states -= dfa.initial_states
+        dfa.final_states = new_final_states
+        return dfa
+
+    def add_trap_state(self):
+        '''Creates a new state - the trapstate and for every state that
+        does not have an outgoing transition for some alphabet symbol A creates
+        a new transition from the this state via A to this trapstate.'''
+
+        # Some states might not be present in the transition fn - have no
+        # outgoing entries - fix it, so the they will have the transition to
+        # trapstate afterwards
+        for state in self.states:
+            if state not in self.transition_fn.mtbdds:
+                self.transition_fn.mtbdds[state] = mtbdd_false
+
+        trapstate = max(self.states) + 1
+        was_trapstate_added = self.transition_fn.complete_transitions_with_trapstate(trapstate)
+
+        if was_trapstate_added:
+            self.trapstate = trapstate
+            self.states.add(self.trapstate)
+
+            all_symbols = tuple(['*'] * len(self.alphabet.active_variables))
+
+            self.transition_fn.insert_transition(self.trapstate,
+                                                 all_symbols,
+                                                 self.trapstate
+                                                 )
 
     @staticmethod
     def get_next_automaton_id() -> int:
