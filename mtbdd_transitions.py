@@ -437,6 +437,10 @@ class MTBDDTransitionFn():
         return bool(was_modified)
 
     def iter_single_state(self, state: int, variables: Optional[List[int]] = None):
+        '''Iterates over all transitions that originate in the given `state`.
+        The transitions are yielded in their compressed form - the don't care bits
+        carry the value `*`.
+        '''
         if variables is None:
             variables = self.alphabet_variables
 
@@ -461,7 +465,8 @@ class MTBDDTransitionFn():
 
         s_length = len(variables)
         i = 0
-        # ti = transition index
+
+        # ti stands for the current transition index
         for ti in range(transition_count.value):
             symbol = []
             for s in range(s_length):
@@ -474,33 +479,49 @@ class MTBDDTransitionFn():
                 i += 1
 
             for dest_state in dest:
-                for unpacked_sym in MTBDDTransitionFn._iter_unpack_symbol(tuple(symbol)):
-                    yield (state, unpacked_sym, dest_state)
+                yield (state, tuple(symbol), dest_state)
 
         mtbdd_wrapper.amaya_do_free(transition_dest_states)
         mtbdd_wrapper.amaya_do_free(transition_dest_states_sizes)
         mtbdd_wrapper.amaya_do_free(symbols)
 
-    def iter(self, variables: Optional[List[int]] = None):
+    def iter_compressed(self, variables: Optional[List[int]] = None):
         for origin in self.mtbdds:
-            if origin == 3:
-                MTBDDTransitionFn.write_mtbdd_dot_to_file(self.mtbdds[origin], '/tmp/amaya.dot')
             yield from self.iter_single_state(origin)
 
+    def iter(self, variables: Optional[List[int]] = None):
+        '''Iterates over all transitions stored within this transition function.
+        The transitions are yielded in form of (Origin, Symbol, Destination), where:
+            - Origin is the origin for the transitions,
+            - Symbol is **uncompressed** transition symbol e.g. (1, 0, 0) for alphabet of 3 vars,
+            - Destination is a **single** destination state.
+        '''
+        for origin in self.mtbdds:
+            for compact_symbol in self.iter_single_state(origin):
+                yield from MTBDDTransitionFn._iter_unpack_transition(compact_symbol)
+
     @staticmethod
-    def _iter_unpack_symbol(symbol):
+    def _iter_unpack_transition(transition):
+        '''Expands the compact represenation of some transitions symbols.
+
+        Example:
+            (S, (2, 0, 1), D) --- expands into --->>> (S, (0, 0, 1), D), (S, (1, 0, 1), D)
+        Note:
+            The bit value 2 represents don't care bit.
+        '''
         stack = [tuple()]
+        origin_state, compressed_symbol, destination_state = transition
         while stack:
             cs = stack.pop(-1)
             i = len(cs)
-            while i != len(symbol):
-                if symbol[i] == 2:
+            while i != len(compressed_symbol):
+                if compressed_symbol[i] == 2:
                     stack.append(cs + (1,))  # Do the high branch later
                     cs = cs + (0,)
                 else:
-                    cs += (symbol[i],)
+                    cs += (compressed_symbol[i],)
                 i += 1
-            yield cs
+            yield (origin_state, cs, destination_state)
 
     def get_intersection_for_states(self, states: Iterable[int]):
         '''Calculates a MTBDD that contains only transitions present

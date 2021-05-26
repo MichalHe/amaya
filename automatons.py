@@ -1,6 +1,7 @@
 from __future__ import annotations
 from enum import IntFlag
 from log import logger
+from collections import defaultdict
 from typing import (
     Set,
     Dict,
@@ -38,6 +39,8 @@ from transitions import (
     SparseSimpleTransitionFunction
 )
 
+from visualization import AutomatonVisRepresentation
+
 from mtbdd_transitions import MTBDDTransitionFn, mtbdd_false
 
 import functools
@@ -67,6 +70,7 @@ class AutomatonType(IntFlag):
 class LSBF_Alphabet():
     symbols: Tuple[LSBF_AlphabetSymbol, ...]
     variable_names: Tuple[str, ...]
+    variable_numbers: Tuple[int, ...]
     active_variables: Set[str]
     active_symbols: Optional[Tuple[LSBF_AlphabetSymbol, ...]] = None
 
@@ -119,10 +123,15 @@ class LSBF_Alphabet():
             range(2**letter_size)
         ))
 
+        variable_numbers = tuple(map(
+            lambda index: index + 1,
+            range(len(variable_names))))
+
         return LSBF_Alphabet(
             active_variables=set(variable_names),
             symbols=symbols,
-            variable_names=variable_names
+            variable_names=variable_names,
+            variable_numbers=variable_numbers
         )
 
     def new_with_variable_removed(self,
@@ -601,7 +610,7 @@ class MTBDD_NFA(NFA):
         self.states: Set[int] = set()
         self.final_states: Set[int] = set()
         self.initial_states: Set[int] = set()
-        self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_names, MTBDD_NFA.automaton_id_counter)
+        self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_numbers, MTBDD_NFA.automaton_id_counter)
         self.trapstate = None
         MTBDD_NFA.automaton_id_counter += 1
 
@@ -871,6 +880,35 @@ class MTBDD_NFA(NFA):
         self.transition_fn.do_pad_closure(self.initial_states,
                                           list(self.final_states))
         return self
+
+    def get_visualization_representation(self) -> AutomatonVisRepresentation:
+        '''Returns a structure carrying all necessary information to visualize this automaton.'''
+        # Most of the information is already present, the only thing remaining
+        # is to collect the transition function stored within the mtbdds.
+        def replace_dont_care_bits_with_star(symbol):
+            new_symbol = list(symbol)
+            for i, bit in enumerate(symbol):
+                if bit == 2:
+                    new_symbol[i] = '*'
+            return tuple(new_symbol)
+
+        transitions: Dict[Tuple[int, int], List] = defaultdict(list)
+        for compressed_transition in self.transition_fn.iter_compressed():
+            origin, compressed_symbol, dest = compressed_transition
+            compressed_vis_symbol = replace_dont_care_bits_with_star(compressed_symbol)
+            transitions[(origin, dest)].append(compressed_vis_symbol)
+
+        vis_transitions = []
+        for state_pair, transition_symbols in transitions.items():
+            vis_transitions.append((state_pair[0], transition_symbols, state_pair[1]))
+
+        return AutomatonVisRepresentation(
+            initial_states=set(self.initial_states),
+            final_states=set(self.final_states),
+            states=set(self.states),
+            transitions=vis_transitions,
+            variable_names=self.alphabet.variable_names
+        )
 
 
 @dataclass
