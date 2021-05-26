@@ -598,9 +598,32 @@ class NFA(Generic[AutomatonState]):
 
         return nfa
 
+    def get_visualization_representation(self) -> AutomatonVisRepresentation:
+        '''Retrieves the information necessary to visualize this automaton.'''
+
+        # The transition information needed is already stored in the correct form
+        # inside the transition function, however it might change in the future
+        # - so we use iter() and reconstruct the information.
+        _transitions = defaultdict(list)
+        for origin_state, symbol, destination_state in self.transition_fn.iter():
+            _transitions[(origin_state, destination_state)].append(symbol)
+
+        transitions = []
+        for state_pair, symbols in _transitions:
+            transitions.append(state_pair[0], symbols, state_pair[1])
+
+        return AutomatonVisRepresentation(
+            states=set(self.states),
+            final_states=set(self.final_states),
+            initial_states=set(self.initial_states),
+            variable_names=list(self.alphabet.variable_names),
+            transitions=transitions
+        )
+
 
 class MTBDD_NFA(NFA):
     automaton_id_counter = 0
+    # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
 
     def __init__(self,
                  alphabet: LSBF_Alphabet,
