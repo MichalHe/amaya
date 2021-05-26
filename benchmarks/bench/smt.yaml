@@ -1,0 +1,5 @@
+z3:
+  cmd: ../bin/z3-wrap.sh $1
+
+cvc4:
+  cmd: ../bin/cvc4-wrap.sh $1
