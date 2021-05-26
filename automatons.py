@@ -721,10 +721,12 @@ class MTBDD_NFA(NFA):
             metastate_map[i] = init_metastate
             work_queue.append(i)
 
+        print('Updating metastate map...', metastate_map)
         MTBDDTransitionFn.update_intersection_state(metastate_map)
 
         int_nfa = MTBDD_NFA(self.alphabet, AutomatonType.NFA)
-        int_nfa.initial_states = set(intersect_initial_states)
+        # Make sure that we use the single-integer state numbers not pairs
+        int_nfa.initial_states = set(metastate_map.keys())
 
         # The new automaton should have unique ID
         assert int_nfa.transition_fn.automaton_id not in \
@@ -782,7 +784,6 @@ class MTBDD_NFA(NFA):
         in every state - after determinization a completion with a trapstate is
         performed.  '''
 
-        MTBDDTransitionFn.write_mtbdd_dot_to_file(self.transition_fn.mtbdds[0], '/tmp/amaya_0.dot')
         work_queue = [tuple(self.initial_states)]
         dfa = MTBDD_NFA(self.alphabet, AutomatonType.DFA)
 
@@ -821,6 +822,7 @@ class MTBDD_NFA(NFA):
         # We have explored the entire structure - time to mangle the generated
         # metastates into integers, so that the automaton has the correct form.
         automaton_id = dfa.transition_fn.automaton_id
+        print(mtbdds)
         metastate2int_map = MTBDDTransitionFn.rename_metastates_after_determinization(mtbdds.values(), automaton_id)
         max_state = max(metastate2int_map.values())
 
