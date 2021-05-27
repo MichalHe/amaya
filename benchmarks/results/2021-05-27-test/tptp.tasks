@@ -1,0 +1,184 @@
+execute;z3;../formulae/tptp/ARI004_1.smt2
+execute;cvc4;../formulae/tptp/ARI004_1.smt2
+execute;z3;../formulae/tptp/ARI005_1.smt2
+execute;cvc4;../formulae/tptp/ARI005_1.smt2
+execute;z3;../formulae/tptp/ARI011_1.smt2
+execute;cvc4;../formulae/tptp/ARI011_1.smt2
+execute;z3;../formulae/tptp/ARI012_1.smt2
+execute;cvc4;../formulae/tptp/ARI012_1.smt2
+execute;z3;../formulae/tptp/ARI013_1.smt2
+execute;cvc4;../formulae/tptp/ARI013_1.smt2
+execute;z3;../formulae/tptp/ARI017_1.smt2
+execute;cvc4;../formulae/tptp/ARI017_1.smt2
+execute;z3;../formulae/tptp/ARI018_1.smt2
+execute;cvc4;../formulae/tptp/ARI018_1.smt2
+execute;z3;../formulae/tptp/ARI025_1.smt2
+execute;cvc4;../formulae/tptp/ARI025_1.smt2
+execute;z3;../formulae/tptp/ARI026_1.smt2
+execute;cvc4;../formulae/tptp/ARI026_1.smt2
+execute;z3;../formulae/tptp/ARI027_1.smt2
+execute;cvc4;../formulae/tptp/ARI027_1.smt2
+execute;z3;../formulae/tptp/ARI031_1.smt2
+execute;cvc4;../formulae/tptp/ARI031_1.smt2
+execute;z3;../formulae/tptp/ARI032_1.smt2
+execute;cvc4;../formulae/tptp/ARI032_1.smt2
+execute;z3;../formulae/tptp/ARI038_1.smt2
+execute;cvc4;../formulae/tptp/ARI038_1.smt2
+execute;z3;../formulae/tptp/ARI039_1.smt2
+execute;cvc4;../formulae/tptp/ARI039_1.smt2
+execute;z3;../formulae/tptp/ARI040_1.smt2
+execute;cvc4;../formulae/tptp/ARI040_1.smt2
+execute;z3;../formulae/tptp/ARI044_1.smt2
+execute;cvc4;../formulae/tptp/ARI044_1.smt2
+execute;z3;../formulae/tptp/ARI045_1.smt2
+execute;cvc4;../formulae/tptp/ARI045_1.smt2
+execute;z3;../formulae/tptp/ARI052_1.smt2
+execute;cvc4;../formulae/tptp/ARI052_1.smt2
+execute;z3;../formulae/tptp/ARI053_1.smt2
+execute;cvc4;../formulae/tptp/ARI053_1.smt2
+execute;z3;../formulae/tptp/ARI054_1.smt2
+execute;cvc4;../formulae/tptp/ARI054_1.smt2
+execute;z3;../formulae/tptp/ARI056_1.smt2
+execute;cvc4;../formulae/tptp/ARI056_1.smt2
+execute;z3;../formulae/tptp/ARI079_1.smt2
+execute;cvc4;../formulae/tptp/ARI079_1.smt2
+execute;z3;../formulae/tptp/ARI083_1.smt2
+execute;cvc4;../formulae/tptp/ARI083_1.smt2
+execute;z3;../formulae/tptp/ARI572_1.smt2
+execute;cvc4;../formulae/tptp/ARI572_1.smt2
+execute;z3;../formulae/tptp/ARI590_1.smt2
+execute;cvc4;../formulae/tptp/ARI590_1.smt2
+execute;z3;../formulae/tptp/ARI591_1.smt2
+execute;cvc4;../formulae/tptp/ARI591_1.smt2
+execute;z3;../formulae/tptp/ARI592_1.smt2
+execute;cvc4;../formulae/tptp/ARI592_1.smt2
+execute;z3;../formulae/tptp/NUM864_1.smt2
+execute;cvc4;../formulae/tptp/NUM864_1.smt2
+execute;z3;../formulae/tptp/NUM865_1.smt2
+execute;cvc4;../formulae/tptp/NUM865_1.smt2
+execute;z3;../formulae/tptp/NUM868_1.smt2
+execute;cvc4;../formulae/tptp/NUM868_1.smt2
+execute;z3;../formulae/tptp/NUM869_1.smt2
+execute;cvc4;../formulae/tptp/NUM869_1.smt2
+execute;z3;../formulae/tptp/NUM870_1.smt2
+execute;cvc4;../formulae/tptp/NUM870_1.smt2
+execute;z3;../formulae/tptp/NUM871_1.smt2
+execute;cvc4;../formulae/tptp/NUM871_1.smt2
+execute;z3;../formulae/tptp/NUM874_1.smt2
+execute;cvc4;../formulae/tptp/NUM874_1.smt2
+execute;z3;../formulae/tptp/NUM875_1.smt2
+execute;cvc4;../formulae/tptp/NUM875_1.smt2
+execute;z3;../formulae/tptp/NUM889_1.smt2
+execute;cvc4;../formulae/tptp/NUM889_1.smt2
+execute;z3;../formulae/tptp/NUM893_1.smt2
+execute;cvc4;../formulae/tptp/NUM893_1.smt2
+execute;z3;../formulae/tptp/NUM895_1.smt2
+execute;cvc4;../formulae/tptp/NUM895_1.smt2
+execute;z3;../formulae/tptp/NUM896_1.smt2
+execute;cvc4;../formulae/tptp/NUM896_1.smt2
+execute;z3;../formulae/tptp/NUM897_1.smt2
+execute;cvc4;../formulae/tptp/NUM897_1.smt2
+execute;z3;../formulae/tptp/NUM898_1.smt2
+execute;cvc4;../formulae/tptp/NUM898_1.smt2
+execute;z3;../formulae/tptp/NUM899_1.smt2
+execute;cvc4;../formulae/tptp/NUM899_1.smt2
+execute;z3;../formulae/tptp/NUM915_1.smt2
+execute;cvc4;../formulae/tptp/NUM915_1.smt2
+execute;z3;../formulae/tptp/NUM916_1.smt2
+execute;cvc4;../formulae/tptp/NUM916_1.smt2
+execute;z3;../formulae/tptp/NUM917_1.smt2
+execute;cvc4;../formulae/tptp/NUM917_1.smt2
+execute;z3;../formulae/tptp/NUM918_1.smt2
+execute;cvc4;../formulae/tptp/NUM918_1.smt2
+finished;z3;../formulae/tptp/ARI004_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI004_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI005_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI005_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI011_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI011_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI012_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI012_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI013_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI013_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI017_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI017_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI018_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI018_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI025_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI025_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI026_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI026_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI027_1.smt2;0;result: unsat;;0.01
+finished;cvc4;../formulae/tptp/ARI027_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI031_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI031_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI032_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI032_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI038_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI038_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI039_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI039_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI040_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI040_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI044_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI044_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI045_1.smt2;0;result: unsat;;0.01
+finished;cvc4;../formulae/tptp/ARI045_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI052_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI052_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI053_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI053_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI054_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI054_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI056_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI056_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI079_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI079_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI083_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI083_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI572_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI572_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI590_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI590_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI591_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI591_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/ARI592_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/ARI592_1.smt2;0;result: unsat;;0.01
+finished;z3;../formulae/tptp/NUM864_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM864_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/NUM865_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM865_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/NUM868_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM868_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM869_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM869_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM870_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM870_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM871_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM871_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM874_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM874_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM875_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM875_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM889_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM889_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/NUM893_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM893_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/NUM895_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM895_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/NUM896_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM896_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM897_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM897_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM898_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM898_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM899_1.smt2;0;result: sat;;0.0
+finished;cvc4;../formulae/tptp/NUM899_1.smt2;0;result: sat;;0.0
+finished;z3;../formulae/tptp/NUM915_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM915_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/NUM916_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM916_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/NUM917_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM917_1.smt2;0;result: unsat;;0.0
+finished;z3;../formulae/tptp/NUM918_1.smt2;0;result: unsat;;0.0
+finished;cvc4;../formulae/tptp/NUM918_1.smt2;0;result: unsat;;0.0
