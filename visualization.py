@@ -141,14 +141,12 @@ class AutomatonVisRepresentation:
                         symbol_literals.append(f'{self.variable_names[i]}')
                 if symbol_literals:
                     clause = ' & '.join(symbol_literals)
-                    print(clause)
                     bdd |= manager.add_expr(clause)
 
             manager.collect_garbage()
             # All symbols leading from A to B are in the BDD, convert it back
             compressed_symbols = []
             for model in manager.pick_iter(bdd, []):
-                print(model)
                 symbol = []
 
                 # Model is a dictionary of the support variables of our bdd to
