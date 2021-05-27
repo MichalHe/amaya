@@ -623,6 +623,7 @@ class NFA(Generic[AutomatonState]):
 
 class MTBDD_NFA(NFA):
     automaton_id_counter = 0
+    fast_prunining_enabled = False
     # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
 
     def __init__(self,
@@ -717,8 +718,9 @@ class MTBDD_NFA(NFA):
         other.renumber_states(start_from=hightest_state)
 
         prune_configuration = (False, [])
-        if self.is_safe_to_quick_prune_intersection_states() and other.is_safe_to_quick_prune_intersection_states():
-            prune_configuration = (True, list(self.final_states.union(other.final_states)))
+        if MTBDD_NFA.fast_prunining_enabled:
+            if self.is_safe_to_quick_prune_intersection_states() and other.is_safe_to_quick_prune_intersection_states():
+                prune_configuration = (True, list(self.final_states.union(other.final_states)))
 
         MTBDDTransitionFn.begin_intersection(prune_configuration)
 
