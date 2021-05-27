@@ -623,8 +623,8 @@ class NFA(Generic[AutomatonState]):
 
 class MTBDD_NFA(NFA):
     automaton_id_counter = 0
-    fast_prunining_enabled = False
     # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
+    fast_prunining_enabled = True
 
     def __init__(self,
                  alphabet: LSBF_Alphabet,
@@ -838,7 +838,6 @@ class MTBDD_NFA(NFA):
         # We have explored the entire structure - time to mangle the generated
         # metastates into integers, so that the automaton has the correct form.
         automaton_id = dfa.transition_fn.automaton_id
-        print(mtbdds)
         metastate2int_map = MTBDDTransitionFn.rename_metastates_after_determinization(mtbdds.values(), automaton_id)
         max_state = max(metastate2int_map.values())
 
@@ -926,8 +925,46 @@ class MTBDD_NFA(NFA):
         self.transition_fn.do_pad_closure(self.initial_states,
                                           list(self.final_states))
 
+        removed_var = self.alphabet.variable_names[var - 1]
+        self.alphabet.active_variables.remove(removed_var)
+
+        if not self.alphabet.active_variables:
+            print("The automaton can be reduced!")
+
         self.applied_operations_info.append('projection')
         return self
+
+    def find_some_model(self) -> Optional[Tuple[List[LSBF_AlphabetSymbol], List[int]]]:
+        '''Runs DFS on this automaton searching for a model.
+
+        @TODO: Finish documenting this.
+        '''
+        stack: List[Tuple[int, List[Tuple[Union[int, str]]]]] = list(map(lambda state: (state, []), self.initial_states))
+        states_already_visited: Set[int] = set()
+        state_predecesors: Dict[int, int] = {}
+        while stack:
+            current_state, path = stack.pop(-1)
+            if current_state in self.final_states:
+                # We have found the a model, reconstruct the visited states
+                states_remaining = len(path)
+                visited_states_along_path = [current_state]
+                rev_traversal_state = current_state
+                for _ in range(states_remaining):
+                    predecesor = state_predecesors[rev_traversal_state]
+                    visited_states_along_path.append(predecesor)
+                    rev_traversal_state = predecesor
+                return (path, list(reversed(visited_states_along_path)))
+
+            states_already_visited.add(current_state)
+            reachable_state_symbol_pairs = self.transition_fn.get_state_post_with_some_symbol(current_state)
+            for reachable_state, transition_symbol in reachable_state_symbol_pairs:
+                if reachable_state in states_already_visited:
+                    continue  # Skip the state we did already visit
+
+                new_path = path + [transition_symbol]
+                stack.append((reachable_state, new_path))
+                state_predecesors[reachable_state] = current_state
+        return None
 
     def get_visualization_representation(self) -> AutomatonVisRepresentation:
         '''Returns a structure carrying all necessary information to visualize this automaton.'''

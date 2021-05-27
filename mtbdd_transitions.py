@@ -132,6 +132,15 @@ mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.argtypes = (
 
 mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.restype = ct.c_long
 
+mtbdd_wrapper.amaya_get_state_post_with_some_transition.argtypes = (
+    ct.c_ulong,                 # The mtbdd
+    ct.POINTER(ct.c_uint32),    # An array with variables
+    ct.c_uint32,                # The number of used variables.
+    ct.POINTER(ct.POINTER(ct.c_uint8)),  # OUT Symbols for the reachable states
+    ct.POINTER(ct.c_uint32)              # OUT The number of located states
+)
+mtbdd_wrapper.amaya_get_state_post_with_some_transition.restype = ct.POINTER(ct.c_int)
+
 
 mtbdd_false = ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
 MTBDD = ct.c_ulong
@@ -736,6 +745,44 @@ class MTBDDTransitionFn():
         '''Enables debug output of the C side.'''
         _debug_on = ct.c_bool(debug_on)
         mtbdd_wrapper.amaya_set_debugging(_debug_on)
+
+    def get_state_post_with_some_symbol(self, state: int) -> List[Tuple[int, Tuple[Union[int, str], ...]]]:
+        if state not in self.mtbdds:
+            return []
+        mtbdd = self.mtbdds[state]
+        return self.get_state_post_with_some_symbol_from_its_mtbdd(mtbdd, self.alphabet_variables)
+
+    @staticmethod
+    def get_state_post_with_some_symbol_from_its_mtbdd(mtbdd: ct.c_ulong,
+                                                       variables: List[int]) -> List[Tuple[int, Tuple[Union[int, str], ...]]]:
+        '''Retrieves the state post set including an examplatory symbol from its mtbdd.'''
+        _variables = (ct.c_uint32 * len(variables))(*variables)
+        _variable_cnt = ct.c_uint32(len(variables))
+
+        _out_transition_symbols = ct.POINTER(ct.c_uint8)()
+        _out_state_cnt = ct.c_uint32()
+
+        _out_states = mtbdd_wrapper.amaya_get_state_post_with_some_transition(
+            mtbdd,
+            _variables,
+            _variable_cnt,
+            ct.byref(_out_transition_symbols),
+            ct.byref(_out_state_cnt),
+        )
+
+        state_transition_symbol_pairs = []
+        next_transition_symbol_bit_i = 0
+        for i in range(_out_state_cnt.value):
+            state = _out_states[i]
+
+            transition_symbol = []
+            for bit_i in range(len(variables)):
+                transition_symbol.append(_out_transition_symbols[next_transition_symbol_bit_i])
+                next_transition_symbol_bit_i += 1
+            state_transition_symbol_pairs.append((state, tuple(transition_symbol)))
+
+        mtbdd_wrapper.amaya_do_free(_out_states)
+        return state_transition_symbol_pairs
 
     def change_automaton_ids_for_leaves(self, new_id: int):
         mtbdd_roots_arr = (ct.c_ulong * len(self.mtbdds))()
