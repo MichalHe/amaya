@@ -707,6 +707,12 @@ class MTBDDTransitionFn():
         mtbdd = mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate(mtbdd, _aid, _trapstate, ct.byref(_had_effect))
         return (mtbdd, _had_effect)
 
+    @staticmethod
+    def set_debugging(debug_on: bool):
+        '''Enables debug output of the C side.'''
+        _debug_on = ct.c_bool(debug_on)
+        mtbdd_wrapper.amaya_set_debugging(_debug_on)
+
     def change_automaton_ids_for_leaves(self, new_id: int):
         mtbdd_roots_arr = (ct.c_ulong * len(self.mtbdds))()
         for i, mtbdd in enumerate(self.mtbdds.values()):
