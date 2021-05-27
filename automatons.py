@@ -635,6 +635,7 @@ class MTBDD_NFA(NFA):
         self.initial_states: Set[int] = set()
         self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_numbers, MTBDD_NFA.automaton_id_counter)
         self.trapstate = None
+        self.applied_operations_info = []
         MTBDD_NFA.automaton_id_counter += 1
 
     def add_state(self, state: int):
@@ -702,12 +703,24 @@ class MTBDD_NFA(NFA):
         self.final_states.update(other.final_states)
         self.initial_states.update(other.initial_states)
 
+        self.applied_operations_info += ['union']
+
         return self
 
+    def is_safe_to_quick_prune_intersection_states(self) -> bool:
+        no_determinization = 'determinization' not in self.applied_operations_info
+        return no_determinization
+
     def intersection(self, other: MTBDD_NFA, metastate_map={}):  # NOQA
-        MTBDDTransitionFn.begin_intersection()
+
         hightest_state = self.renumber_states(start_from=0)
         other.renumber_states(start_from=hightest_state)
+
+        prune_configuration = (False, [])
+        if self.is_safe_to_quick_prune_intersection_states() and other.is_safe_to_quick_prune_intersection_states():
+            prune_configuration = (True, list(self.final_states.union(other.final_states)))
+
+        MTBDDTransitionFn.begin_intersection(prune_configuration)
 
         def set_cross(s1: Iterable[int], s2: Iterable[int]):
             for left_state in s1:
@@ -721,7 +734,6 @@ class MTBDD_NFA(NFA):
             metastate_map[i] = init_metastate
             work_queue.append(i)
 
-        print('Updating metastate map...', metastate_map)
         MTBDDTransitionFn.update_intersection_state(metastate_map)
 
         int_nfa = MTBDD_NFA(self.alphabet, AutomatonType.NFA)
@@ -770,6 +782,8 @@ class MTBDD_NFA(NFA):
             int_nfa.transition_fn.mtbdds[cur_state] = cur_int_mtbdd
 
         MTBDDTransitionFn.end_intersection()
+        int_nfa.applied_operations_info = self.applied_operations_info + ['intersection']
+
         return int_nfa
 
     def perform_pad_closure(self):
@@ -846,6 +860,8 @@ class MTBDD_NFA(NFA):
             dfa.transition_fn.mtbdds[state] = mtbdd
 
         dfa.add_trap_state()
+
+        dfa.applied_operations_info = self.applied_operations_info + ['determinization']
         return dfa
 
     def complement(self) -> MTBDD_NFA:
@@ -865,6 +881,9 @@ class MTBDD_NFA(NFA):
         # contain empty word.
         new_final_states -= dfa.initial_states
         dfa.final_states = new_final_states
+
+        dfa.applied_operations_info += ['complement']
+
         return dfa
 
     def add_trap_state(self):
@@ -904,6 +923,8 @@ class MTBDD_NFA(NFA):
         self.transition_fn.project_variable_away(var)
         self.transition_fn.do_pad_closure(self.initial_states,
                                           list(self.final_states))
+
+        self.applied_operations_info.append('projection')
         return self
 
     def get_visualization_representation(self) -> AutomatonVisRepresentation:

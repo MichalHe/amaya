@@ -98,7 +98,11 @@ mtbdd_wrapper.amaya_replace_leaf_contents_with.argtypes = (
     ct.c_uint32                 # Content length
 )
 
-mtbdd_wrapper.amaya_begin_intersection.argtypes = ()
+mtbdd_wrapper.amaya_begin_intersection.argtypes = (
+    ct.c_bool,
+    ct.POINTER(ct.c_int),
+    ct.c_uint32
+)
 mtbdd_wrapper.amaya_end_intersection.argtypes = ()
 
 mtbdd_wrapper.amaya_update_intersection_state.argtypes = (
@@ -621,8 +625,28 @@ class MTBDDTransitionFn():
         )
 
     @staticmethod
-    def begin_intersection():
-        mtbdd_wrapper.amaya_begin_intersection()
+    def begin_intersection(prune: Tuple[bool, Iterable[int]] = (False, [])):
+        '''Informs the C side that global state for the intersection should be prepared.
+        Params:
+            prune - The pruning configuration - tuple of two items:
+                0th - (bool) - is pruninig on?
+                1th - (List[int]) - List of final states that when detected will not be generated.
+
+                This pruning should be used with great care - only when no determinization
+                was performed (or other procedure that manipulates which states are final),
+                as it relies on the property that the final state in presburger NFA (over \\Z)
+                has no states in its Post set.
+        Returns:
+            None
+        '''
+        should_prune, states = prune
+        _should_prune = ct.c_bool(should_prune)
+        _states = (ct.c_int * len(states))(*states)
+        _states_cnt = ct.c_uint32(len(states))
+        mtbdd_wrapper.amaya_begin_intersection(
+            _should_prune,
+            ct.cast(_states, ct.POINTER(ct.c_int)),
+            _states_cnt)
 
     @staticmethod
     def update_intersection_state(state_update: Dict[int, Tuple[int, int]]):
