@@ -929,15 +929,55 @@ class MTBDD_NFA(NFA):
         self.alphabet.active_variables.remove(removed_var)
 
         if not self.alphabet.active_variables:
-            print("The automaton can be reduced!")
+            model = self.find_some_model()
+
+            if model is None:
+                return MTBDD_NFA.new_trivial_rejecting(self.alphabet)
+            else:
+                return MTBDD_NFA.new_trivial_accepting(self.alphabet)
 
         self.applied_operations_info.append('projection')
         return self
 
+    @staticmethod
+    def new_trivial_rejecting(alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+        '''Creates a new NFA backed by MTBDDs that contains only one state (that is initial
+        and not final) and has loop to self over all alphabet symbols.
+
+        Params:
+            alphabet - The lsbf alphabet for the created automaton.
+        Returns:
+            The created (trivial) mtbdd automaton.
+        @TODO: Can we somehow get merge the trivial automatons of plain NFA with ours?
+        '''
+        nfa = MTBDD_NFA(alphabet, AutomatonType.DFA)
+        nfa.add_state(0)
+        nfa.add_initial_state(0)
+        universal_symbol = tuple(['*'] * len(alphabet.variable_names))
+        nfa.update_transition_fn(0, universal_symbol, 0)
+        return nfa
+
+    @staticmethod
+    def new_trivial_accepting(alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+        '''Creates a new NFA backed by MTBDDs that contains only one state (that is initial
+        and and **final**) and has loop to self over all alphabet symbols.
+
+        Params:
+            alphabet - The lsbf alphabet for the created automaton.
+        Returns:
+            The created (trivial) mtbdd automaton.
+        '''
+        nfa = MTBDD_NFA.new_trivial_rejecting(alphabet)
+        nfa.add_final_state(0)  # Just toggle the finality of the rejecting state
+        return nfa
+
     def find_some_model(self) -> Optional[Tuple[List[LSBF_AlphabetSymbol], List[int]]]:
         '''Runs DFS on this automaton searching for a model.
 
-        @TODO: Finish documenting this.
+        Returns:
+             //- A tuple containing the model (word over alphabet) and a list of states that would be traversed or
+            -
+             \\- None, if the automaton has no model (DFS search failed).
         '''
         stack: List[Tuple[int, List[Tuple[Union[int, str]]]]] = list(map(lambda state: (state, []), self.initial_states))
         states_already_visited: Set[int] = set()
