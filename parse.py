@@ -1,6 +1,6 @@
 import pressburger_algorithms as pa
 from ast_relations import extract_relation, expand_relation_on_ite
-from automatons import NFA, AutomatonType
+from automatons import NFA, AutomatonType, MTBDD_NFA, LSBF_Alphabet
 from log import logger
 from logging import INFO
 from dataclasses import dataclass
@@ -26,6 +26,11 @@ class SolutionDomain(IntEnum):
     INTEGERS = 1
 
 
+class BackendType(IntEnum):
+    NAIVE = 1
+    MTBDD = 2
+
+
 class ParsingOperation(Enum):
     BUILD_NFA_FROM_INEQ = 'build_nfa_from_ineq'
     BUILD_NFA_FROM_SHARP_INEQ = 'build_nfa_from_sharp_ineq'
@@ -42,8 +47,8 @@ class ParsingOperation(Enum):
 
 
 class VariableType(IntEnum):
-    Int = 0x01
-    Bool = 0x02
+    Int = 0
+    Bool = 1
 
 
 @dataclass
@@ -55,15 +60,25 @@ class EvaluationStat():
     runtime_ns: int
 
 
+IntrospectHandle = Callable[[NFA, ParsingOperation], None]
+
+
 @dataclass
 class VariableInfo:
     id: int
     type: str
 
 
+@dataclass
+class ExecutionConfig:
+    solution_domain: SolutionDomain
+    backend_type: BackendType
+
+
 class EvaluationContext():
     def __init__(self,
                  domain: SolutionDomain,
+                 backend=BackendType.NAIVE,
                  emit_introspect=lambda nfa, operation: None,
                  ):
         self.binding_stack: List[Dict[str, NFA]] = []
@@ -78,6 +93,9 @@ class EvaluationContext():
         # Variables (not the `let` ones)
         self.next_available_variable_id = 1  # Number them from 1, MTBDDs require
         self.variables_info: Dict[str, VariableInfo] = {}
+
+        # Execution settings
+        self.execution_config = ExecutionConfig(domain, backend)
 
     def get_let_binding_value(self, var_name: str) -> Optional[NFA]:
         '''Retrieves the (possible) value of a lexical binding introduced via the
@@ -164,9 +182,6 @@ class EvaluationContext():
         assigned_ids = []
         for variable_name in variable_names:
             assigned_ids.append(self.notify_variable_encountered(variable_name))
-
-
-IntrospectHandle = Callable[[NFA, ParsingOperation], None]
 
 
 def _eval_info(msg, depth):
@@ -299,35 +314,57 @@ def build_automaton_from_pressburger_relation_ast(relation_root,
                                                   variable_types: Dict[str, VariableType],
                                                   ctx: EvaluationContext,
                                                   depth: int) -> NFA:
+    # This is broken - the building algorithms take more params.
     building_handlers = {
         SolutionDomain.INTEGERS: {
-            '<':  (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, pa.build_nfa_from_sharp_inequality),
-            '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ, pa.build_nfa_from_inequality),
-            '=':  (ParsingOperation.BUILD_NFA_FROM_EQ, pa.build_nfa_from_equality)
+            '<':  (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ,
+                   pa.build_nfa_from_sharp_inequality),
+            '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ,
+                   pa.build_nfa_from_inequality),
+            '=':  (ParsingOperation.BUILD_NFA_FROM_EQ,
+                   pa.build_nfa_from_equality)
         },
         SolutionDomain.NATURALS: {
-            '<':  (ParsingOperation.BUILD_DFA_FROM_SHARP_INEQ, pa.build_dfa_from_sharp_inequality),
-            '<=': (ParsingOperation.BUILD_DFA_FROM_INEQ, pa.build_dfa_from_inequality),
-            '=':  (ParsingOperation.BUILD_DFA_FROM_EQ, pa.build_dfa_from_sharp_inequality)
+            '<':  (ParsingOperation.BUILD_DFA_FROM_SHARP_INEQ,
+                   pa.build_dfa_from_sharp_inequality),
+            '<=': (ParsingOperation.BUILD_DFA_FROM_INEQ,
+                   pa.build_dfa_from_inequality),
+            '=':  (ParsingOperation.BUILD_DFA_FROM_EQ,
+                   pa.build_dfa_from_sharp_inequality)
         }
     }
 
+    automaton_constr = NFA
+    if ctx.execution_config.backend_type == BackendType.MTBDD:
+        automaton_constr = MTBDD_NFA
+
     relation = extract_relation(relation_root)
-    operation, handle = building_handlers[ctx.domain][relation.operation]
+    operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain][relation.operation]
+
+    # We need to construct the alphabet for the automaton beforehand.
+    # Use the variable ids for the alphabet
+    alphabet = LSBF_Alphabet.from_variable_names_with_ids(relation.variable_names)
+    automaton_building_function_args = (relation, alphabet, automaton_constr)
 
     if relation.operation == '<':
         # We are going to evaluate this as '<' = ('<=' and (not '='))
         # First we build an automaton from the equality
-        eq = pa.build_nfa_from_equality(relation)
-        ctx.emit_evaluation_introspection_info(eq, ParsingOperation.BUILD_NFA_FROM_EQ)
+        equality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['=']
+        inequality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['<=']
 
-        neq = eq.determinize().complement()
-        ineq = pa.build_nfa_from_inequality(relation)
-        ctx.emit_evaluation_introspection_info(ineq, ParsingOperation.BUILD_DFA_FROM_INEQ)
-        automaton = neq.intersection(ineq)
+        equality_automaton = equality_automaton_building_function(*automaton_building_function_args)
+
+        ctx.emit_evaluation_introspection_info(equality_automaton,
+                                               ParsingOperation.BUILD_NFA_FROM_EQ)
+        negated_equality_automaton = equality_automaton.determinize().complement()
+
+        inquality_automaton = inequality_automaton_building_function(*automaton_building_function_args)
+        ctx.emit_evaluation_introspection_info(inquality_automaton,
+                                               ParsingOperation.BUILD_DFA_FROM_INEQ)
+        automaton = negated_equality_automaton.intersection(inquality_automaton)
         ctx.emit_evaluation_introspection_info(automaton, ParsingOperation.NFA_INTERSECT)
     else:
-        automaton = handle(relation)
+        automaton = automaton_building_function(*automaton_building_function_args)
         ctx.emit_evaluation_introspection_info(automaton, operation)
     _eval_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)})', depth)
 
