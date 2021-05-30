@@ -55,6 +55,12 @@ class EvaluationStat():
     runtime_ns: int
 
 
+@dataclass
+class VariableInfo:
+    id: int
+    type: str
+
+
 class EvaluationContext():
     def __init__(self,
                  domain: SolutionDomain,
@@ -66,24 +72,36 @@ class EvaluationContext():
 
         # Evaluation stats
         self.collect_stats = True
-        self.stats: List[EvaluationStat] = []  
+        self.stats: List[EvaluationStat] = []
         self.pending_operations_stack: List[Any] = []
 
-    def get_binding(self, var_name: str) -> Optional[NFA]:
+        # Variables (not the `let` ones)
+        self.next_available_variable_id = 1  # Number them from 1, MTBDDs require
+        self.variables_info: Dict[str, VariableInfo] = {}
+
+    def get_let_binding_value(self, var_name: str) -> Optional[NFA]:
+        '''Retrieves the (possible) value of a lexical binding introduced via the
+        SMTlib `let` construct. Currently we suppose the bindings bind names to the
+        automatons.'''
         for binding_record in reversed(self.binding_stack):
             if var_name in binding_record:
                 return binding_record[var_name]
         return None
 
-    def new_binding_context(self):
+    def new_let_binding_context(self):
+        '''Creates a new binding frame/context.'''
         self.binding_stack.append(dict())
 
-    def insert_binding(self, var_name: str, nfa: NFA):
+    def insert_let_binding(self, var_name: str, nfa: NFA):
+        '''Insters a new `let` binding of the given var_name to the given nfa.'''
         self.binding_stack[-1][var_name] = nfa
 
-    def populate_current_binding_context_with(self, binding: Dict[str, NFA]):
-        for var_name, nfa in binding.items():
-            self.binding_stack[-1][var_name] = nfa
+    def insert_all_bindings_into_current_context(self, bindings: Dict[str, NFA]):
+        '''A bulk transaction operation that inserts all the bindings represented
+        in the given binding into the current let binding context.
+        '''
+        for var_name, nfa in bindings.items():
+            self.insert_let_binding(var_name, nfa)
 
     def pop_binding_context(self):
         self.binding_stack.pop(-1)
@@ -112,6 +130,40 @@ class EvaluationContext():
         stat = EvaluationStat(op, size1, size2, len(output.states), runtime)
         logger.critical(f"Operation finished: {stat}")
         self.stats.append(stat)
+
+    def get_all_currently_available_variables() -> List[Tuple[str, str]]:
+        '''Retrieves all variables (and their types) in the order they have been
+        located by the smt parser.
+
+        Returns:
+            A list of all variables that have been encountered until the current
+            point of execution, in the same order they have been encountered.
+        '''
+
+    def get_variable_id(self, variable_name: str, variable_type='int') -> int:
+        '''Notifies the execution context that a possibly new variable was
+        encountered. The exec. ctx needs to know this in order to be able to
+        assign a unique number to the variables and this number must remain
+        consistent during the whole execution.
+        '''
+        if variable_name not in self.variable_ids:
+            # Assign a new id
+            variable_id = self.next_available_variable_id
+            self.variable_ids[variable_name] = VariableInfo(id=variable_id,
+                                                            type=variable_type)
+            self.next_available_variable_id += 1
+            return variable_id
+        else:
+            return self.variable_ids[variable_name].id
+
+    def get_variable_info(self, variable_name: str) -> VariableInfo:
+        return self.variables_info[variable_name]
+
+    def get_multiple_variable_ids(self, variable_names: List[str]) -> List[int]:
+        '''The bulk version of notify notify_variable_encountered.'''
+        assigned_ids = []
+        for variable_name in variable_names:
+            assigned_ids.append(self.notify_variable_encountered(variable_name))
 
 
 IntrospectHandle = Callable[[NFA, ParsingOperation], None]
@@ -264,6 +316,8 @@ def build_automaton_from_pressburger_relation_ast(relation_root,
     operation, handle = building_handlers[ctx.domain][relation.operation]
 
     if relation.operation == '<':
+        # We are going to evaluate this as '<' = ('<=' and (not '='))
+        # First we build an automaton from the equality
         eq = pa.build_nfa_from_equality(relation)
         ctx.emit_evaluation_introspection_info(eq, ParsingOperation.BUILD_NFA_FROM_EQ)
 
@@ -512,12 +566,12 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
         else:
             # The relation was no expanded
             # (maybe a second evaluation pass, after the first expansion)
-            
+
             ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_RELATION, None, None)
             result = build_automaton_from_pressburger_relation_ast(root,
-                                                                 variable_types,
-                                                                 ctx,
-                                                                 _debug_recursion_depth)
+                                                                   variable_types,
+                                                                   ctx,
+                                                                   _debug_recursion_depth)
             ctx.stats_operation_ends(result)
             return result
     else:
@@ -542,7 +596,8 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
             # The variables in bindings can be evaluated to their automatons.
             bindings = evaluate_bindings(binding_list, ctx, variable_types)  # TODO(psyco): Lookup variables when evaluating bindings.
             logger.debug(f'Extracted bindings {bindings.keys()}')
-            ctx.populate_current_binding_context_with(bindings)
+
+            ctx.insert_all_bindings_into_current_context(bindings)
 
             # The we evaluate the term, in fact represents the value of the
             # whole `let` block
