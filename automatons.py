@@ -134,6 +134,28 @@ class LSBF_Alphabet():
             variable_numbers=variable_numbers
         )
 
+    @staticmethod
+    def from_variable_names_with_ids(self, variables: List[Tuple[str, id]]) -> LSBF_AlphabetSymbol:
+        variable_names = []
+        variable_ids = []
+        for var, id in variables:
+            variable_names.append(var)
+            variable_ids.append(id)
+
+        # Do we really need to generate this?
+        letter_size = len(variable_names)
+        symbols = tuple(map(
+            lambda i: number_to_bit_tuple(i, tuple_size=letter_size, pad=0),
+            range(2**letter_size)
+        ))
+
+        return LSBF_Alphabet(
+            active_variables=set(variable_names),
+            symbols=symbols,
+            variable_names=variable_names,
+            variable_numbers=variable_ids
+        )
+
     def new_with_variable_removed(self,
                                   removed_var: str) -> Optional[LSBF_Alphabet]:
 
