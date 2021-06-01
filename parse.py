@@ -365,7 +365,6 @@ def check_result_matches(source_text: str,
 
 
 def build_automaton_from_pressburger_relation_ast(relation_root,
-                                                  variable_types: Dict[str, VariableType],
                                                   ctx: EvaluationContext,
                                                   depth: int) -> NFA:
     # This is broken - the building algorithms take more params.
@@ -457,7 +456,7 @@ def build_automaton_for_boolean_variable(var_name: str, var_value: bool) -> NFA:
     return NFA.for_bool_variable(var_name, var_value)
 
 
-def evaluate_bindings(binding_list, ctx: EvaluationContext, variable_types: Dict[str, VariableType]) -> Dict[str, NFA]:
+def evaluate_let_bindings(binding_list, ctx: EvaluationContext, variable_types: Dict[str, VariableType]) -> Dict[str, NFA]:
     logger.debug(f'Evaluating binding list of size: {len(binding_list)}')
     binding: Dict[str, NFA] = {}
     for var_name, expr in binding_list:
@@ -505,7 +504,6 @@ def get_nfa_for_term(term: Union[str, List],
         # The node must be evaluated first
         nfa = eval_smt_tree(term,
                             ctx,
-                            variable_types,
                             _debug_recursion_depth=_depth+1)
         return nfa
 
@@ -514,7 +512,6 @@ def evaluate_binary_conjunction_term(term: Union[str, List],
                                      ctx: EvaluationContext,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
                                      reduction_name: str,
-                                     variable_types: Dict[str, VariableType],
                                      _depth: int) -> NFA:
     ''' Evaluates AND, OR terms'''
     assert len(term) >= 3
@@ -522,11 +519,11 @@ def evaluate_binary_conjunction_term(term: Union[str, List],
 
     op = ParsingOperation.NFA_INTERSECT if reduction_name == 'intersection' else ParsingOperation.NFA_UNION
 
-    lhs = get_nfa_for_term(lhs_term, ctx, variable_types, _depth)
+    lhs = get_nfa_for_term(lhs_term, ctx, _depth)
 
     for term_i in range(2, len(term)):
         rhs_term = term[term_i]
-        rhs = get_nfa_for_term(rhs_term, ctx, variable_types, _depth)
+        rhs = get_nfa_for_term(rhs_term, ctx, _depth)
 
         assert type(rhs) == NFA
 
@@ -542,7 +539,6 @@ def evaluate_binary_conjunction_term(term: Union[str, List],
 
 def evaluate_and_term(term: Union[str, List],
                       ctx: EvaluationContext,
-                      variable_types: Dict[str, VariableType],
                       _depth: int) -> NFA:
 
     result = evaluate_binary_conjunction_term(
@@ -550,7 +546,6 @@ def evaluate_and_term(term: Union[str, List],
         ctx,
         lambda nfa1, nfa2: nfa1.intersection(nfa2),
         'intersection',
-        variable_types,
         _depth
     )
 
@@ -559,7 +554,6 @@ def evaluate_and_term(term: Union[str, List],
 
 def evaluate_or_term(term: Union[str, List],
                      ctx: EvaluationContext,
-                     variable_types: Dict[str, VariableType],
                      _depth: int) -> NFA:
 
     return evaluate_binary_conjunction_term(
@@ -567,18 +561,16 @@ def evaluate_or_term(term: Union[str, List],
         ctx,
         lambda nfa1, nfa2: nfa1.union(nfa2),
         'union',
-        variable_types,
         _depth
     )
 
 
 def evaluate_not_term(term: Union[str, List],
                       ctx: EvaluationContext,
-                      variable_types: Dict[str, VariableType],
                       _depth: int) -> NFA:
 
     assert len(term) == 2
-    operand = get_nfa_for_term(term[1], ctx, variable_types, _depth)
+    operand = get_nfa_for_term(term[1], ctx, _depth)
 
     assert type(operand) == NFA
 
@@ -612,7 +604,6 @@ def evaluate_not_term(term: Union[str, List],
 
 def evaluate_exists_term(term: Union[str, List],
                          ctx: EvaluationContext,
-                         variable_types: Dict[str, VariableType],
                          _depth: int) -> NFA:
     assert len(term) == 3
 
@@ -639,9 +630,8 @@ def evaluate_exists_term(term: Union[str, List],
     return nfa
 
 
-def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
+def eval_smt_tree(root,  # NOQA
                   ctx: EvaluationContext,
-                  variable_types: Dict[str, VariableType],
                   _debug_recursion_depth=0,
                   ) -> NFA:
 
@@ -651,6 +641,8 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
 
         # TODO(psyco): This will be moved to get_nfa, replace this with a call to get_nfa.
         # Is the term a bool variable?
+        # TODO: Remove me
+        variable_types = {}
         is_bool_var = False
         if root in variable_types:
             if variable_types[root] == VariableType.Bool:
@@ -679,14 +671,13 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
 
         # If the relation was indeed expanded, the root will be 'or'
         if expanded_tree[0] == 'or':
-            return eval_smt_tree(expanded_tree, ctx, variable_types, _debug_recursion_depth)
+            return eval_smt_tree(expanded_tree, ctx, _debug_recursion_depth)
         else:
             # The relation was no expanded
             # (maybe a second evaluation pass, after the first expansion)
 
             ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_RELATION, None, None)
             result = build_automaton_from_pressburger_relation_ast(root,
-                                                                   variable_types,
                                                                    ctx,
                                                                    _debug_recursion_depth)
             ctx.stats_operation_ends(result)
@@ -695,13 +686,13 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
         _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
         # Current node is a NFA operation
         if node_name == 'and':
-            return evaluate_and_term(root, ctx, variable_types, _debug_recursion_depth)
+            return evaluate_and_term(root, ctx, _debug_recursion_depth)
         elif node_name == 'or':
-            return evaluate_or_term(root, ctx, variable_types, _debug_recursion_depth)
+            return evaluate_or_term(root, ctx, _debug_recursion_depth)
         elif node_name == 'not':
-            return evaluate_not_term(root, ctx, variable_types, _debug_recursion_depth)
+            return evaluate_not_term(root, ctx, _debug_recursion_depth)
         elif node_name == 'exists':
-            return evaluate_exists_term(root, ctx, variable_types, _debug_recursion_depth)
+            return evaluate_exists_term(root, ctx, _debug_recursion_depth)
         elif node_name == 'let':
             # `let` has this structure [`let`, `<binding_list>`, <term>]
             assert len(root) == 3
@@ -711,14 +702,15 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
             ctx.new_binding_context()
 
             # The variables in bindings can be evaluated to their automatons.
-            bindings = evaluate_bindings(binding_list, ctx, variable_types)  # TODO(psyco): Lookup variables when evaluating bindings.
+            # TODO: @Codeboy what??? is this
+            bindings = evaluate_let_bindings(binding_list, ctx, variable_types)  # TODO(psyco): Lookup variables when evaluating bindings.
             logger.debug(f'Extracted bindings {bindings.keys()}')
 
             ctx.insert_all_bindings_into_current_context(bindings)
 
             # The we evaluate the term, in fact represents the value of the
             # whole `let` block
-            term_nfa = eval_smt_tree(term, ctx, variable_types, _debug_recursion_depth)
+            term_nfa = eval_smt_tree(term, ctx, _debug_recursion_depth)
 
             ctx.pop_binding_context()  # We are leaving the `let` block
             return term_nfa
