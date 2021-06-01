@@ -1,3 +1,8 @@
+'''Runs the TPTP test suite located at smt-files/tptp and reports the results.
+Only critical (and more severe) output is present by default, can be changed
+with --verbose.
+'''
+
 from parse import (
     check_result_matches
 )
@@ -12,8 +17,7 @@ import csv
 
 logger.setLevel(logging.CRITICAL)
 
-
-arg_parser = ap.ArgumentParser()
+arg_parser = ap.ArgumentParser(description=__doc__)
 arg_parser.add_argument(
     '-t',
     '--time-it',
@@ -29,7 +33,6 @@ arg_parser.add_argument(
     default=False,
     action='store_true'
 )
-
 args = arg_parser.parse_args()
 
 if args.verbose:
