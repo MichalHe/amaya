@@ -164,15 +164,15 @@ class EvaluationContext():
         assign a unique number to the variables and this number must remain
         consistent during the whole execution.
         '''
-        if variable_name not in self.variable_ids:
+        if variable_name not in self.variables_info:
             # Assign a new id
             variable_id = self.next_available_variable_id
-            self.variable_ids[variable_name] = VariableInfo(id=variable_id,
-                                                            type=variable_type)
+            self.variables_info[variable_name] = VariableInfo(id=variable_id,
+                                                              type=variable_type)
             self.next_available_variable_id += 1
             return variable_id
         else:
-            return self.variable_ids[variable_name].id
+            return self.variables_info[variable_name].id
 
     def get_variable_info(self, variable_name: str) -> VariableInfo:
         return self.variables_info[variable_name]
@@ -181,7 +181,9 @@ class EvaluationContext():
         '''The bulk version of notify notify_variable_encountered.'''
         assigned_ids = []
         for variable_name in variable_names:
-            assigned_ids.append(self.notify_variable_encountered(variable_name))
+            assigned_ids.append((variable_name,
+                                 self.get_variable_id(variable_name)))
+        return assigned_ids
 
 
 def _eval_info(msg, depth):
@@ -301,9 +303,9 @@ def check_result_matches(source_text: str,
 
     if sat_matches:
         if is_sat:
-            logger.debug(f'The automaton\'s SAT is as expected: {is_sat}, example: {example_word}')
+            logger.debug(f'The result\'s SAT is OK (as expected) (SAT={is_sat}, example: {example_word})')
         else:
-            logger.debug(f'The automaton\'s SAT is as expected: {is_sat}')
+            logger.debug(f'The result\'s SAT is OK (as expected) (SAT={is_sat}')
     else:
         logger.warn(f'The automaton\'s SAT didn\'t match expected: actual={is_sat}, given word: {example_word}, expected={should_be_sat}')
 
@@ -338,29 +340,56 @@ def build_automaton_from_pressburger_relation_ast(relation_root,
     if ctx.execution_config.backend_type == BackendType.MTBDD:
         automaton_constr = MTBDD_NFA
 
+    logger.debug(f'Building an automaton for: {relation_root}')
     relation = extract_relation(relation_root)
     operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain][relation.operation]
 
+    # The relation might have som yet-not-seen variables, add them if need be
+    variables_with_ids = ctx.get_multiple_variable_ids(relation.variable_names)
+
+    # The extracted relation contains the list of variables and their
+    # coeficients in an arbitrary order - we need to make sure that the order
+    # of variables will be by ascending IDs (MTBDD requirement)
+    variables_with_ids_correct_order = sorted(variables_with_ids,
+                                              key=lambda var_with_id: var_with_id[1])
+
+    # Shuffle the variables in the extracted relation so that it matches the
+    # alphabet
+    variables_with_coeficients_dict = {}
+    variables_with_coeficients_dict.update(zip(relation.variable_names, relation.variable_coeficients))
+    variables_ordered = []
+    coeficients_ordered = []
+    for variable_name, _ in variables_with_ids_correct_order:
+        variables_ordered.append(variable_name)
+        coeficients_ordered.append(variables_with_coeficients_dict.get(variable_name))
+    logger.debug(f'Reshufling the variables found in relation from: {0} to {1}'.format(
+        list(zip(relation.variable_names, relation.variable_coeficients)),
+        list(zip(variables_ordered, coeficients_ordered))
+    ))
+    relation.variable_names = variables_ordered
+    relation.variable_coeficients = coeficients_ordered
+
+    logger.debug(f'Variables with IDs used: {variables_with_ids_correct_order}')
     # We need to construct the alphabet for the automaton beforehand.
     # Use the variable ids for the alphabet
-    alphabet = LSBF_Alphabet.from_variable_names_with_ids(relation.variable_names)
+    alphabet = LSBF_Alphabet.from_variable_names_with_ids(variables_with_ids_correct_order)
     automaton_building_function_args = (relation, alphabet, automaton_constr)
 
     if relation.operation == '<':
         # We are going to evaluate this as '<' = ('<=' and (not '='))
         # First we build an automaton from the equality
-        equality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['=']
-        inequality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['<=']
+        eq_op, equality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['=']
+        ineq_op, inequality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['<=']
 
         equality_automaton = equality_automaton_building_function(*automaton_building_function_args)
 
         ctx.emit_evaluation_introspection_info(equality_automaton,
-                                               ParsingOperation.BUILD_NFA_FROM_EQ)
+                                               eq_op)
         negated_equality_automaton = equality_automaton.determinize().complement()
 
         inquality_automaton = inequality_automaton_building_function(*automaton_building_function_args)
         ctx.emit_evaluation_introspection_info(inquality_automaton,
-                                               ParsingOperation.BUILD_DFA_FROM_INEQ)
+                                               ineq_op)
         automaton = negated_equality_automaton.intersection(inquality_automaton)
         ctx.emit_evaluation_introspection_info(automaton, ParsingOperation.NFA_INTERSECT)
     else:
@@ -562,8 +591,6 @@ def eval_smt_tree(root,  # NOQA -- function is too complex -- its a parser, so?
                   variable_types: Dict[str, VariableType],
                   _debug_recursion_depth=0,
                   ) -> NFA:
-
-    logger.critical(f'Variable types: {variable_types}')
 
     if not type(root) == list:
         # This means that either we hit a SMT2 term (boolean variable) or
