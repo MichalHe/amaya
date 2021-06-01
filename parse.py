@@ -621,11 +621,7 @@ def evaluate_exists_term(term: Union[str, List],
     ctx.push_new_variable_info_frame()
     variable_bindings: Dict[str, VariableType] = get_variable_binding_info(term[1])
     logger.debug(f'Exists - Extracted variable type bindings for {variable_bindings.keys()}')
-
-    # Maybe some variable information was already passed down to us -
-    # in that case we want to merge the two dictionaries together
-    if len(variable_types) > 0:
-        variable_bindings.update(variable_types)
+    ctx.add_multiple_variables_to_current_frame(variable_bindings)
 
     nfa = get_nfa_for_term(term[2], ctx, variable_bindings, _depth)
 
@@ -638,6 +634,8 @@ def evaluate_exists_term(term: Union[str, List],
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
 
     _eval_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
+
+    ctx.pop_variable_frame()
     return nfa
 
 
