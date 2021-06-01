@@ -47,8 +47,9 @@ class ParsingOperation(Enum):
 
 
 class VariableType(IntEnum):
-    Int = 0
-    Bool = 1
+    INT = 1
+    BOOL = 2
+    UNSET = 3
 
 
 @dataclass
@@ -67,7 +68,7 @@ IntrospectHandle = Callable[[NFA, ParsingOperation], None]
 class VariableInfo:
     id: int
     name: str
-    type: str = 'unset'  # variable was found in a Presburger expr, but was not bound via exists
+    type: VariableType = VariableType.UNSET  # variable was found in a Presburger expr, but was not bound via exists
 
 
 @dataclass
@@ -173,7 +174,7 @@ class EvaluationContext():
 
     def add_variable_to_current_frame(self,
                                       variable_name: str,
-                                      variable_type='unset'):
+                                      variable_type: VariableType = VariableType.UNSET):
         '''Creates and associates a new variable info entry in the current frame.
         If a variable of the given name already exists in the current frame an
         exception is raised (cannot have duplicit exists?).
@@ -188,14 +189,21 @@ class EvaluationContext():
             raise ValueError(
                 f'DUPLICIT EXISTS: Attempting to add a variable "{variable_name}" to the current frame, but it is already defined.')
 
-    def get_variable_id(self, variable_name: str, variable_type='unset') -> int:
+    def add_multiple_variables_to_current_frame(self,
+                                                variables: Dict[str, VariableType]):
+        '''Bulk version of add_variable_to_current_frame.'''
+        for variable_name, variable_type in variables.items():
+            self.add_variable_to_current_frame(variable_name, variable_type=variable_type)
+
+    def get_variable_id(self, variable_name: str, variable_type: VariableType = VariableType.UNSET) -> int:
         '''Retrives the variable ID associated with the given variable name.
         If the variable name was not previously bound in any way a new global
         variable will be associated with the name and its ID will be returned.
         '''
         return self.get_variable_info(variable_name, variable_type).id
 
-    def get_variable_info(self, variable_name: str, variable_type='unset') -> VariableInfo:
+    def get_variable_info(self, variable_name: str,
+                          variable_type: VariableType = VariableType.UNSET) -> VariableInfo:
         '''Attempts to search for variable information associated with the given
         variable name in the internal structures in the following order: local
         variables, enclosing variables (etc.), global variables.
@@ -608,6 +616,9 @@ def evaluate_exists_term(term: Union[str, List],
                          _depth: int) -> NFA:
     assert len(term) == 3
 
+    # We are entering a new variable frame (only exists can bind variables to
+    # types / manipulate FREE/BOUND sets)
+    ctx.push_new_variable_info_frame()
     variable_bindings: Dict[str, VariableType] = get_variable_binding_info(term[1])
     logger.debug(f'Exists - Extracted variable type bindings for {variable_bindings.keys()}')
 
