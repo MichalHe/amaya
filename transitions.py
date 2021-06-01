@@ -76,7 +76,9 @@ def extend_symbol_with_missing_indices(symbol: Tuple[int, ...], missing_indices:
     return patched_symbol
 
 
-def extend_transitions_to_new_alphabet_symbols(old_variables: VariableNames, new_variables: VariableNames, t: Transitions) -> Transitions:
+def extend_transitions_to_new_alphabet_symbols(old_variables: VariableNames,
+                                               new_variables: VariableNames,
+                                               t: Transitions) -> Transitions:
     missing_indices = get_indices_of_missing_variables(new_variables, old_variables)
     extended_transitions = make_transitions_copy(t)
 
@@ -367,6 +369,8 @@ BDD_TransitionFn = Dict[State, Dict[State, BDD]]
 def construct_transition_fn_to_bddtfn(t: Transitions[State],
                                       var_names: List[str],
                                       bdd_manager: BDD) -> BDD_TransitionFn:
+    '''Constructs a sparse BDD based transition function for the given ordinary
+    (naive) transition function.'''
     new_t: BDD_TransitionFn = {}
     for source in t:
         new_t[source] = {}
