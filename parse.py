@@ -69,6 +69,7 @@ class VariableInfo:
     id: int
     name: str
     type: VariableType = VariableType.UNSET  # variable was found in a Presburger expr, but was not bound via exists
+    ussage_count: int = 0
 
 
 @dataclass
@@ -199,6 +200,13 @@ class EvaluationContext():
         else:
             return maybe_variable.type
 
+    def was_variable_encountered(self, variable_name: str) -> bool:
+        maybe_var = self.lookup_variable(variable_name)
+        return maybe_var is not None
+
+    def get_variables_info_for_current_frame(self) -> Dict[str, VariableInfo]:
+        return self.variables_info_stack[-1]
+
     def add_multiple_variables_to_current_frame(self,
                                                 variables: Dict[str, VariableType]):
         '''Bulk version of add_variable_to_current_frame.'''
@@ -226,6 +234,7 @@ class EvaluationContext():
         if maybe_variable is not None:
             return maybe_variable.id
 
+        logger.debug(f'Querying information for variable (variable_name="{variable_name}") which is unbound, creating global variable entry.')
         variable_id = self._generate_new_variable_id()
         new_variable_info = VariableInfo(id=variable_id,
                                          name=variable_name,
@@ -633,8 +642,15 @@ def evaluate_exists_term(term: Union[str, List],
 
     nfa = get_nfa_for_term(term[2], ctx, variable_bindings, _depth)
 
-    # TODO: Check whether variables are in fact present in the alphabet
+    vars_info = ctx.get_variables_info_for_current_frame()
     for var_name in variable_bindings:
+        if vars_info[var_name].ussage_count == 0:
+            # We are attemtping to project away a variable that is nowhere not
+            # used in the tree nderneath - since an optimalization that removes
+            # those kinds of variables from the alphabet is performed the
+            # projection woul fail.
+            logger.info(f'Skipping projection for a variable "{var_name}" - the variable is not used anywhere in the tree underneath.')
+            continue
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
         nfa = nfa.do_projection(var_name)
         ctx.stats_operation_ends(nfa)
