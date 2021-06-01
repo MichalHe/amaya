@@ -66,7 +66,8 @@ IntrospectHandle = Callable[[NFA, ParsingOperation], None]
 @dataclass
 class VariableInfo:
     id: int
-    type: str
+    name: str
+    type: str = 'unset'  # variable was found in a Presburger expr, but was not bound via exists
 
 
 @dataclass
@@ -92,7 +93,8 @@ class EvaluationContext():
 
         # Variables (not the `let` ones)
         self.next_available_variable_id = 1  # Number them from 1, MTBDDs require
-        self.variables_info: Dict[str, VariableInfo] = {}
+        self.variables_info_stack: List[Dict[str, VariableInfo]] = []
+        self.global_variables: Dict[str, VariableInfo] = {}
 
         # Execution settings
         self.execution_config = ExecutionConfig(domain, backend)
@@ -158,27 +160,69 @@ class EvaluationContext():
             point of execution, in the same order they have been encountered.
         '''
 
-    def get_variable_id(self, variable_name: str, variable_type='int') -> int:
-        '''Notifies the execution context that a possibly new variable was
-        encountered. The exec. ctx needs to know this in order to be able to
-        assign a unique number to the variables and this number must remain
-        consistent during the whole execution.
-        '''
-        if variable_name not in self.variables_info:
-            # Assign a new id
-            variable_id = self.next_available_variable_id
-            self.variables_info[variable_name] = VariableInfo(id=variable_id,
-                                                              type=variable_type)
-            self.next_available_variable_id += 1
-            return variable_id
-        else:
-            return self.variables_info[variable_name].id
+    def _generate_new_variable_id(self) -> int:
+        variable_id = self.next_available_variable_id
+        self.next_available_variable_id += 1
+        return variable_id
 
-    def get_variable_info(self, variable_name: str) -> VariableInfo:
-        return self.variables_info[variable_name]
+    def push_new_variable_info_frame(self):
+        self.variables_info_stack.append({})
+
+    def pop_variable_frame(self):
+        self.variables_info_stack.pop(-1)
+
+    def add_variable_to_current_frame(self,
+                                      variable_name: str,
+                                      variable_type='unset'):
+        '''Creates and associates a new variable info entry in the current frame.
+        If a variable of the given name already exists in the current frame an
+        exception is raised (cannot have duplicit exists?).
+        .'''
+        current_frame = self.variables_info_stack[-1]
+        if variable_name not in current_frame:
+            var_id = self._generate_new_variable_id()
+            current_frame[variable_name] = VariableInfo(id=var_id,
+                                                        name=variable_name,
+                                                        type=variable_type)
+        else:
+            raise ValueError(
+                f'DUPLICIT EXISTS: Attempting to add a variable "{variable_name}" to the current frame, but it is already defined.')
+
+    def get_variable_id(self, variable_name: str, variable_type='unset') -> int:
+        '''Retrives the variable ID associated with the given variable name.
+        If the variable name was not previously bound in any way a new global
+        variable will be associated with the name and its ID will be returned.
+        '''
+        return self.get_variable_info(variable_name, variable_type).id
+
+    def get_variable_info(self, variable_name: str, variable_type='unset') -> VariableInfo:
+        '''Attempts to search for variable information associated with the given
+        variable name in the internal structures in the following order: local
+        variables, enclosing variables (etc.), global variables.
+
+        If no variable information is located creates a new global variable info
+        entry (with new id and unset type) and returns that.
+        '''
+        for variable_info_frame in reversed(self.variables_info_stack):
+            if variable_name in variable_info_frame:
+                return variable_info_frame[variable_name]
+
+        # If we got here, we did not locate any frame where the pres. variable
+        # is bound to a type -- maybe it is an unbound (global) variable that
+        # was already encounted
+        if variable_name in self.global_variables:
+            return self.global_variables[variable_name]
+
+        variable_id = self._generate_new_variable_id()
+        new_variable_info = VariableInfo(id=variable_id,
+                                         name=variable_name,
+                                         type=variable_type)
+
+        self.global_variables[variable_name] = new_variable_info
+        return new_variable_info
 
     def get_multiple_variable_ids(self, variable_names: List[str]) -> List[int]:
-        '''The bulk version of notify notify_variable_encountered.'''
+        '''The bulk version of notify get_variable_id.'''
         assigned_ids = []
         for variable_name in variable_names:
             assigned_ids.append((variable_name,
@@ -565,7 +609,7 @@ def evaluate_exists_term(term: Union[str, List],
     assert len(term) == 3
 
     variable_bindings: Dict[str, VariableType] = get_variable_binding_info(term[1])
-    logger.debug(f'FORALL - Extracted variable bindings for {variable_bindings.keys()}')
+    logger.debug(f'Exists - Extracted variable type bindings for {variable_bindings.keys()}')
 
     # Maybe some variable information was already passed down to us -
     # in that case we want to merge the two dictionaries together
