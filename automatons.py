@@ -4,6 +4,7 @@ from log import logger
 from collections import defaultdict
 from typing import (
     Set,
+    Generator,
     Dict,
     Tuple,
     List,
@@ -80,7 +81,60 @@ class LSBF_Alphabet():
         act_symbols, symbols = LSBF_Alphabet.generate_compressed_symbols(ineq.variable_coeficients)
 
         active_variables = [var for i, var in enumerate(ineq.variable_names) if ineq.variable_coeficients[i] != 0]
-        return LSBF_Alphabet(tuple(symbols), sorted(ineq.variable_names), set(active_variables), active_symbols=act_symbols)
+        variable_names = sorted(ineq.variable_names)
+        variable_ids = list(range(1, len(active_variables) + 1))
+        return LSBF_Alphabet(tuple(symbols),
+                             variable_names=variable_names,
+                             variable_numbers=variable_ids,
+                             active_variables=set(active_variables),
+                             active_symbols=act_symbols)
+
+    def gen_projection_symbols_onto_variables(self, variables_subset: List[str]) -> Generator[Tuple[int, ...], Any, Any]:
+        '''Generates all symbols that would be contained in an alphabet that
+        would result from projecting onto the given subset of alphabet
+        variables.'''
+        # We actually do not care about the subset passed in, we just generate
+        # bit vectors of given length
+        symbol_size = len(variables_subset)
+        for i in range(2**len(variables_subset)):
+            bit_vector = number_to_bit_tuple(i, tuple_size=symbol_size)
+            yield bit_vector
+
+    def cylindify_symbol_of_projected_alphabet(self,
+                                               variables: List[str],
+                                               symbol: Tuple[int, ...]) -> Tuple[Union[str, int], ...]:
+        '''Performs cylindrification on the given symbol that belongs to
+        some smaller alphabet that resulted from projecting some variables from
+        this one away.'''
+        alphabet_size = len(self.variable_names)
+
+        # Create a list of indices where we should put the values from the
+        # provided symbol (rest will be '*')
+        vi = 0  # Index of the next variable name in provided variables to be checked
+        used_variables_cooficients = []
+        for i, var_name in enumerate(self.variable_names):
+            if var_name == variables[vi]:
+                used_variables_cooficients.append(i)
+                vi += 1
+
+            if vi == len(variables):
+                break
+
+        ni = 0  # Index to the next bit in the given symbol that should be used.
+        cylindified_symbol = [None] * alphabet_size
+        for i in range(alphabet_size):
+            if i == used_variables_cooficients[ni]:
+                cylindified_symbol[i] = symbol[ni]
+                ni += 1
+                # All bits from the given symbol have been used, fill the rest
+                # with *.
+                if ni == len(symbol):
+                    for j in range(i+1, alphabet_size):
+                        cylindified_symbol[j] = '*'
+                    break
+            else:
+                cylindified_symbol[i] = '*'
+        return cylindified_symbol
 
     @staticmethod
     def generate_compressed_symbols(coefs):
@@ -135,7 +189,10 @@ class LSBF_Alphabet():
         )
 
     @staticmethod
-    def from_variable_names_with_ids(self, variables: List[Tuple[str, id]]) -> LSBF_AlphabetSymbol:
+    def from_variable_names_with_ids(variables: List[Tuple[str, id]]) -> LSBF_AlphabetSymbol:
+        '''Creates a new alphabet from the given variable_name, id pairs.
+        The variables list should be sorted by the ID.
+        '''
         variable_names = []
         variable_ids = []
         for var, id in variables:
@@ -265,6 +322,8 @@ class NFA(Generic[AutomatonState]):
         bdd_manager.declare(*_var_names)
 
         logger.info('Converting transition FNs to BDDs.')
+        logger.info(f'Transition functions before conversion to BDD ones: {_var_names}')
+        logger.info(f'Transition functions before conversion to BDD ones: {other_renamed.transition_fn.data}')
         self_tfn = construct_transition_fn_to_bddtfn(self_renamed.transition_fn.data, _var_names, bdd_manager)
         other_tfn = construct_transition_fn_to_bddtfn(other_renamed.transition_fn.data, _var_names, bdd_manager)
         logger.info('Done.')
