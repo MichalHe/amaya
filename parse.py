@@ -189,6 +189,16 @@ class EvaluationContext():
             raise ValueError(
                 f'DUPLICIT EXISTS: Attempting to add a variable "{variable_name}" to the current frame, but it is already defined.')
 
+    def get_variable_type_if_defined(self, variable_name: str) -> Optional[VariableType]:
+        '''Performs variable lookup in the variable frames (local -> enclosing -> global).
+        If a binding for the given variable name is present returns the variable type,
+        otherwise returns None. '''
+        maybe_variable = self.lookup_variable(variable_name)
+        if maybe_variable is None:
+            return None
+        else:
+            return maybe_variable.type
+
     def add_multiple_variables_to_current_frame(self,
                                                 variables: Dict[str, VariableType]):
         '''Bulk version of add_variable_to_current_frame.'''
@@ -211,6 +221,20 @@ class EvaluationContext():
         If no variable information is located creates a new global variable info
         entry (with new id and unset type) and returns that.
         '''
+
+        maybe_variable = self.lookup_variable(variable_name)
+        if maybe_variable is not None:
+            return maybe_variable.id
+
+        variable_id = self._generate_new_variable_id()
+        new_variable_info = VariableInfo(id=variable_id,
+                                         name=variable_name,
+                                         type=variable_type)
+
+        self.global_variables[variable_name] = new_variable_info
+        return new_variable_info
+
+    def lookup_variable(self, variable_name: str) -> Optional[VariableInfo]:
         for variable_info_frame in reversed(self.variables_info_stack):
             if variable_name in variable_info_frame:
                 return variable_info_frame[variable_name]
@@ -220,14 +244,7 @@ class EvaluationContext():
         # was already encounted
         if variable_name in self.global_variables:
             return self.global_variables[variable_name]
-
-        variable_id = self._generate_new_variable_id()
-        new_variable_info = VariableInfo(id=variable_id,
-                                         name=variable_name,
-                                         type=variable_type)
-
-        self.global_variables[variable_name] = new_variable_info
-        return new_variable_info
+        return None
 
     def get_multiple_variable_ids(self, variable_names: List[str]) -> List[int]:
         '''The bulk version of notify get_variable_id.'''
@@ -456,12 +473,12 @@ def build_automaton_for_boolean_variable(var_name: str, var_value: bool) -> NFA:
     return NFA.for_bool_variable(var_name, var_value)
 
 
-def evaluate_let_bindings(binding_list, ctx: EvaluationContext, variable_types: Dict[str, VariableType]) -> Dict[str, NFA]:
+def evaluate_let_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA]:
     logger.debug(f'Evaluating binding list of size: {len(binding_list)}')
     binding: Dict[str, NFA] = {}
     for var_name, expr in binding_list:
         logger.debug(f'Building automaton for var {var_name} with expr: {expr}')
-        nfa = eval_smt_tree(expr, ctx, variable_types)  # Indirect recursion, here we go
+        nfa = eval_smt_tree(expr, ctx)  # Indirect recursion, here we go
         binding[var_name] = nfa
 
     return binding
@@ -641,12 +658,10 @@ def eval_smt_tree(root,  # NOQA
 
         # TODO(psyco): This will be moved to get_nfa, replace this with a call to get_nfa.
         # Is the term a bool variable?
-        # TODO: Remove me
-        variable_types = {}
         is_bool_var = False
-        if root in variable_types:
-            if variable_types[root] == VariableType.Bool:
-                is_bool_var = True
+        maybe_variable_type = ctx.get_variable_type_if_defined(root)
+        if maybe_variable_type is not None and maybe_variable_type == VariableType.BOOL:
+            is_bool_var = True
 
         if is_bool_var:
             logger.debug('Reached a SMT2 term {0}, which was queried as a boolean variable.'.format(root))
@@ -702,8 +717,7 @@ def eval_smt_tree(root,  # NOQA
             ctx.new_binding_context()
 
             # The variables in bindings can be evaluated to their automatons.
-            # TODO: @Codeboy what??? is this
-            bindings = evaluate_let_bindings(binding_list, ctx, variable_types)  # TODO(psyco): Lookup variables when evaluating bindings.
+            bindings = evaluate_let_bindings(binding_list, ctx)  # TODO(psyco): Lookup variables when evaluating bindings.
             logger.debug(f'Extracted bindings {bindings.keys()}')
 
             ctx.insert_all_bindings_into_current_context(bindings)
