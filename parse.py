@@ -1,3 +1,4 @@
+from __future__ import annotations
 import pressburger_algorithms as pa
 from ast_relations import (
     extract_relation,
@@ -57,6 +58,14 @@ class VariableType(IntEnum):
     BOOL = 2
     UNSET = 3
 
+    @staticmethod
+    def from_smt_type_string(type_str: str) -> VariableType:
+        m = {
+            'Bool': VariableType.BOOL,
+            'Int': VariableType.INT,
+        }
+        return m[type_str]
+
 
 @dataclass
 class EvaluationStat():
@@ -65,6 +74,14 @@ class EvaluationStat():
     input2_size: Optional[int]
     output_size: Optional[int]
     runtime_ns: int
+
+
+@dataclass
+class FunctionSymbol:
+    name: str
+    arity: int
+    args: List[Tuple[str, VariableType]]
+    return_type: VariableType
 
 
 IntrospectHandle = Callable[[NFA, ParsingOperation], None]
@@ -269,6 +286,10 @@ class EvaluationContext():
                                  self.get_variable_id(variable_name)))
         return assigned_ids
 
+    def add_global_variable(self, var_name: str, var_type: VariableType = VariableType.UNSET):
+        var_id = self._generate_new_variable_id()
+        self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
+
 
 def _eval_info(msg, depth):
     logger.info('  ' * depth + msg)
@@ -456,6 +477,25 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
         raise ValueError(f'Unhandled branch when exploring the SMT tree. {tree}')
 
 
+def get_declared_function_symbols(top_level_smt_statements: List) -> List[FunctionSymbol]:
+    '''Retrieves the top-level declared function symbols from the internal smt representation.'''
+    declared_function_symbols: List[FunctionSymbol] = []
+    for statement in top_level_smt_statements:
+        if statement[0] == 'declare-fun':
+            symbol_name: str = statement[1]
+            symbol_arg_list: List = statement[2]
+            symbol_ret_type: VariableType = VariableType.from_smt_type_string(statement[3])
+            symbol_args = []
+            for arg_name, arg_type in symbol_arg_list:
+                symbol_args.append((arg_name, VariableType.from_smt_type_string(arg_type)))
+
+            declared_function_symbols.append(FunctionSymbol(symbol_name,
+                                                            len(symbol_args),
+                                                            symbol_args,
+                                                            symbol_ret_type))
+    return declared_function_symbols
+
+
 def lex(source: str) -> List[str]:
     source = strip_comments(source)
     source = source.replace('(', ' ( ').replace(')', ' ) ')
@@ -500,10 +540,14 @@ def check_result_matches(source_text: str,
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Extracted {len(asserts)} from source text.')
 
-    const_symbols = extract_constant_fn_symbol_definitions(ast)
-
     eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, emit_introspect)
-    nfa = eval_assert_tree(asserts[0], eval_ctx, const_symbols)
+
+    function_symbols = get_declared_function_symbols(ast)
+    constant_symbols = filter(lambda function_symbol: function_symbol.arity == 0, function_symbols)
+    for constant_symbol in constant_symbols:
+        eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
+
+    nfa = eval_assert_tree(asserts[0], eval_ctx)
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
     if ':status' in smt_info:
@@ -892,25 +936,6 @@ def eval_assert_tree(assert_tree,
     implications_cnt = expand_implications(assert_tree)
     logger.info(f'Performed {implications_cnt} implications expansions in the AST.')
     return eval_smt_tree(assert_tree[1], ctx, fn_definitions)
-
-
-def extract_constant_fn_symbol_definitions(statements) -> Dict[str, VariableType]:
-    const_symbols: Dict[str, VariableType] = {}
-    logger.debug('Extracting contant symbols from toplevel statments...')
-
-    for top_level_statement in statements:
-        statement_kw = top_level_statement[0]
-        if statement_kw == 'declare-fun':
-            kw, sym_name, args, return_value = top_level_statement
-            if len(args) > 0:
-                raise NotImplementedError('Non constant symbols are not supported now.')
-            if return_value == 'Bool':
-                const_symbols[sym_name] = VariableType.Bool
-            else:
-                raise ValueError('Unknown top level symbol type.')
-
-    logger.info(f'Extracted constant symbols: {const_symbols.keys()}')
-    return const_symbols
 
 
 def expand_multivariable_bindings(assertion_tree):
