@@ -1,5 +1,5 @@
 from __future__ import annotations
-import pressburger_algorithms as pa
+import presburger_algorithms as pa
 from ast_relations import (
     extract_relation,
     expand_relation_on_ite,
@@ -568,9 +568,9 @@ def check_result_matches(source_text: str,
     return sat_matches
 
 
-def build_automaton_from_pressburger_relation_ast(relation_root,
-                                                  ctx: EvaluationContext,
-                                                  depth: int) -> NFA:
+def build_automaton_from_presburger_relation_ast(relation_root,
+                                                 ctx: EvaluationContext,
+                                                 depth: int) -> NFA:
     # This is broken - the building algorithms take more params.
     building_handlers = {
         SolutionDomain.INTEGERS: {
@@ -886,9 +886,9 @@ def eval_smt_tree(root,  # NOQA
             # (maybe a second evaluation pass, after the first expansion)
 
             ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_RELATION, None, None)
-            result = build_automaton_from_pressburger_relation_ast(root,
-                                                                   ctx,
-                                                                   _debug_recursion_depth)
+            result = build_automaton_from_presburger_relation_ast(root,
+                                                                  ctx,
+                                                                  _debug_recursion_depth)
             ctx.stats_operation_ends(result)
             return result
     else:
