@@ -1,5 +1,10 @@
 import pressburger_algorithms as pa
-from ast_relations import extract_relation, expand_relation_on_ite
+from ast_relations import (
+    extract_relation,
+    expand_relation_on_ite,
+    try_retrieve_variable_if_literal,
+)
+
 from automatons import NFA, AutomatonType, MTBDD_NFA, LSBF_Alphabet
 from log import logger
 from logging import INFO
@@ -7,6 +12,7 @@ from dataclasses import dataclass
 import time
 from typing import (
     List,
+    Set,
     Tuple,
     Any,
     Union,
@@ -232,7 +238,7 @@ class EvaluationContext():
 
         maybe_variable = self.lookup_variable(variable_name)
         if maybe_variable is not None:
-            return maybe_variable.id
+            return maybe_variable
 
         logger.debug(f'Querying information for variable (variable_name="{variable_name}") which is unbound, creating global variable entry.')
         variable_id = self._generate_new_variable_id()
@@ -298,9 +304,9 @@ def get_variable_binding_info(bindings: List[Tuple[str, str]]) -> Dict[str, Vari
     for binding in bindings:
         var_name, var_type_raw = binding
         if var_type_raw == 'Int':
-            var_type = VariableType.Int
+            var_type = VariableType.INT
         elif var_type_raw == 'Bool':
-            var_type = VariableType.Bool
+            var_type = VariableType.BOOL
         else:
             raise ValueError("Unknown datatype bound to a variable: {var_type_raw}")
         var_info[var_name] = var_type
@@ -320,6 +326,134 @@ def strip_comments(source: str) -> str:
         if not inside_comment:
             new_src += char
     return new_src
+
+
+def can_tree_be_reduced_to_aritmetic_expr(tree) -> bool:
+    '''Checks that the given `tree` contains only valid function symbols for an
+    aritmetic expression. A valid aritmetic expression is also considered to be
+    an expression that contains ITE that expand itself also to an aritmetic expr.'''
+    if type(tree) == list:
+        root = tree[0]
+        if root in ['+', '*']:
+            return can_tree_be_reduced_to_aritmetic_expr(tree[1]) and can_tree_be_reduced_to_aritmetic_expr(tree[2])
+        elif root in ['-']:
+            if len(tree) == 2:
+                return can_tree_be_reduced_to_aritmetic_expr(tree[1])
+            else:
+                return can_tree_be_reduced_to_aritmetic_expr(tree[1]) and can_tree_be_reduced_to_aritmetic_expr(tree[2])
+        elif root in ['ite']:
+            return can_tree_be_reduced_to_aritmetic_expr(tree[2]) and can_tree_be_reduced_to_aritmetic_expr(tree[3])
+        else:
+            return False
+    return True
+
+
+def is_tree_presburger_equality(tree, ctx: EvaluationContext) -> bool:
+    '''Checks whether the provided AST `tree` represents a an equality
+    (Presburger atomic formula).
+    To do so it first performs checks on the structure of the tree - whether it
+    does contain only operators allowed in a such expression. If it does have
+    a valid form performs further checks on whether it is not SMT equivalence
+    check between a boolean variable and a `let` bound expression.'''
+
+    def is_literal_from_let_or_boolean_var(literal_var: str) -> bool:
+        if ctx.get_let_binding_value(literal_var) is not None:
+            return True
+
+        maybe_left_var_info = ctx.lookup_variable(maybe_left_literal_var)
+        if maybe_left_var_info is not None:
+            return maybe_left_var_info.type == VariableType.BOOL
+        return False
+
+    if type(tree) != list:
+        return False
+
+    if tree[0] != '=' or len(tree) != 3:
+        return False
+
+    if can_tree_be_reduced_to_aritmetic_expr(tree[1]) and can_tree_be_reduced_to_aritmetic_expr(tree[2]):
+        maybe_left_literal_var = try_retrieve_variable_if_literal(tree[1])
+        maybe_right_literal_var = try_retrieve_variable_if_literal(tree[2])
+
+        return not (is_literal_from_let_or_boolean_var(maybe_left_literal_var) and is_literal_from_let_or_boolean_var(maybe_right_literal_var))
+
+    return False
+
+
+def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, VariableType]]:  # NOQA
+    '''Traverses the whole AST `tree` and identifies all the variables used. Manages
+    the variable contexts implaced by the ussage of \\exists, so that two
+    variables with the same name, one of them bound via \\exists other is in
+    FREE(\\psi) are treated as a two separate variables.
+
+    Returns:
+        The set of all identified variables in form of:
+            (<variable_name>, <variable_id>, <variable_type>)
+    '''
+
+    if type(tree) != list:
+        # Dealing with a standalone string
+        if ctx.get_let_binding_value(tree) is not None:
+            return set()
+        else:
+            return set()
+            # info = ctx.get_variable_info(tree)
+            # return {(info.name, info.id, info.type)}
+
+    root = tree[0]
+    if root in ['<', '<=', '>=', '>', '=']:
+        if root == '=':
+            if not is_tree_presburger_equality(tree, ctx):
+                # This is a SMT boolean equality check (all variables should be
+                # defined beforhand (either let, or defun)
+                return set()
+
+        expanded_relation = expand_relation_on_ite(tree)
+        if expanded_relation[0] == 'or':
+            # The relation was successful and produced a new subtree.
+            return get_all_used_variables(expanded_relation, ctx)
+
+        apf = extract_relation(tree)  # Atomic Presburger Formula
+
+        # Register all the variables located in the Presburger formula
+        variables_used: Set[Tuple[str, int, VariableType]] = set()
+        for variable_name in apf.variable_names:
+            var_info = ctx.get_variable_info(variable_name)
+            variables_used.add((var_info.name, var_info.id, var_info.type))
+
+        return variables_used
+
+    elif root in ['exists']:
+        ctx.push_new_variable_info_frame()
+        variable_bindings = get_variable_binding_info(tree[1])
+        ctx.add_multiple_variables_to_current_frame(variable_bindings)
+        used_variables = get_all_used_variables(tree[2], ctx)
+        ctx.pop_variable_frame()
+        return used_variables
+
+    elif root in ['not', 'assert']:
+        return get_all_used_variables(tree[1], ctx)
+
+    elif root in ['or', 'and']:
+        vars: Set[VariableInfo] = set()
+        for conj_term in tree[1:]:
+            term_vars = get_all_used_variables(conj_term, ctx)
+            vars = vars.union(term_vars)
+        return vars
+    elif root in ['let']:
+        # Let has the following structure:
+        # (let (<variable_binding>+) <term>)
+        ctx.new_let_binding_context()
+        vars: Set[VariableInfo] = set()
+        for variable_binding in tree[1]:
+            variable_name, variable_tree = variable_binding
+            ctx.insert_let_binding(variable_name, 'Nonempty binding')
+            vars = vars.union(get_all_used_variables(variable_tree, ctx))
+        term_vars = get_all_used_variables(tree[2], ctx)
+        ctx.pop_binding_context()
+        return term_vars.union(vars)
+    else:
+        raise ValueError(f'Unhandled branch when exploring the SMT tree. {tree}')
 
 
 def lex(source: str) -> List[str]:
@@ -649,7 +783,7 @@ def evaluate_exists_term(term: Union[str, List],
             # used in the tree nderneath - since an optimalization that removes
             # those kinds of variables from the alphabet is performed the
             # projection woul fail.
-            logger.info(f'Skipping projection for a variable "{var_name}" - the variable is not used anywhere in the tree underneath.')
+            logger.info(f'Skipping projecting away a variable "{var_name}" - the variable is not used anywhere in the tree underneath.')
             continue
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
         nfa = nfa.do_projection(var_name)
