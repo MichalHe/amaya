@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 from log import logger
 from relations_structures import Relation
 from utils import number_to_bit_tuple
@@ -104,10 +104,12 @@ def evaluate_expression(expr) -> PresburgerExpr:
         raise ValueError(f'Unsupported operation type: {operation} in expr: {expr}')
 
 
-def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: PresburgerExpr) -> Relation:
-    '''Takes inequation, and produces output in form of:
-        <VARIABLES> <= <ABS>, when op is `<=` or `>=`
-        <VARIABLES> < <ABS>, when op is `<` or `>`
+def normalize_atomic_presburger_formula(op: str, lhs_expr: PresburgerExpr, rhs_expr: PresburgerExpr) -> Relation:
+    '''Takes an automic formula of form:
+            <variables_and_constants2> <op> <variables_and_constants2>,
+        and produces output in form of:
+            <VARIABLES> <= <ABS>, when op is `<=` or `>=`
+            <VARIABLES> < <ABS>, when op is `<` or `>`
     '''
 
     if op == '<=' or op == '<':
@@ -149,7 +151,7 @@ def normalize_inequation(op: str, lhs_expr: PresburgerExpr, rhs_expr: Presburger
     )
 
 
-def extract_relation(ast) -> Relation:
+def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Relation:
     # (<= 2 ?X)  <=> [<=, 2, ?X]
     logger.debug(f'Extracting inequality from: {ast}')
     assert(len(ast) == 3)
@@ -159,10 +161,28 @@ def extract_relation(ast) -> Relation:
     lhs_expr = evaluate_expression(lhs)
     rhs_expr = evaluate_expression(rhs)
 
-    return normalize_inequation(op, lhs_expr, rhs_expr)
+    normalized_expr = normalize_atomic_presburger_formula(op, lhs_expr, rhs_expr)
+
+    # Filter out the variables with zero coeficients.
+    if remove_variables_with_zero_ceofs:
+        coefs = []
+        var_names = []
+        for var_name, coef in zip(normalized_expr.variable_names,
+                                  normalized_expr.variable_coeficients):
+            if coef != 0:
+                coefs.append(coef)
+                var_names.append(var_name)
+            else:
+                logger.info(f'Removing the variable variable_name="{var_name}" from atomic fromula - the variable has a coeficient 0.')
+                logger.debug(f'Ast: {ast}')
+        normalized_expr.variable_coeficients = coefs
+        normalized_expr.variable_names = var_names
+
+    return normalized_expr
 
 
 def get_ite_info(ast) -> Set[str]:
+    '''Returns the set of boolean variables found in the ITE expressions in the given AST.'''
     if type(ast) != list:
         return set()
 
@@ -273,3 +293,17 @@ def expand_relation_on_ite(ast):
 
     logger.info('AST was ITE expanded into {0}'.format(relation_expr))
     return relation_expr
+
+
+def try_retrieve_variable_if_literal(ast) -> Optional[str]:
+    '''Walks the given AST checking for the required structure of a literal -
+    a variable that is prepended by some number of negations.
+
+    Returns:
+        - The literal variable (without negations) if the tree encodes a literal,
+        - None otherwise.'''
+    if type(ast) == list:
+        if ast[0] == 'not':
+            return try_retrieve_variable_if_literal(ast[1])
+    else:
+        return ast
