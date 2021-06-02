@@ -145,11 +145,28 @@ AutomatonConstructor = Callable[[LSBF_Alphabet, AutomatonType], NFA]
 
 
 def build_nfa_from_inequality(ineq: Relation,
+                              ineq_variables_ordered: List[Tuple[str, int]],
                               alphabet: LSBF_Alphabet,
                               automaton_constr: AutomatonConstructor) -> NFA[NFA_AutomatonStateType]:
+    '''Constructs a non-deterministic automaton for the inequality `ineq` (<=).
+    Params:
+        ineq - The inequality. The variables should be pre-sorted according to their IDs.
+        ineq_variables_ordered - An ordered list of the variables used in this
+                                 inequality with their ID (from exec. context)
+        alphabet - Alphabet containing *all* the variables present in the SMT tree.
+        automaton_constr - A factory function for constructing the automaton itself.
+    Returns:
+        The NFA encoding the inequality.
+    '''
     nfa = automaton_constr(alphabet, AutomatonType.NFA)
 
     nfa.add_initial_state(ineq.absolute_part)
+
+    # Not every variable in the overall `alphabet` might be present in the
+    # inequality - we need to iterate over an alphabet projection to the used
+    # variables (the bitvectors used in automaton creation) and use the
+    # cylindrified version of those bitvectors to insert actual transitions.
+    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(ineq.variable_names))
 
     # We have to postpone the addition of final state, since it has to have
     # unique number and that we cannot tell until the end
@@ -160,17 +177,16 @@ def build_nfa_from_inequality(ineq: Relation,
         current_state = work_queue.pop()
         nfa.add_state(current_state)
 
-        for alphabet_symbol in alphabet.symbols:
+        for alphabet_symbol in projected_alphabet:
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             destination_state = math.floor(0.5 * (current_state - dot))
 
             if not nfa.has_state_with_value(destination_state) and destination_state not in work_queue:
                 work_queue.append(destination_state)
 
-            nfa.update_transition_fn(
-                current_state,
-                alphabet_symbol,
-                destination_state)
+            nfa.update_transition_fn(current_state,
+                                     alphabet.cylindify_symbol_of_projected_alphabet(alphabet_symbol),
+                                     destination_state)
 
             # Check whether state is final
             if current_state + dot >= 0:
@@ -187,7 +203,10 @@ def build_nfa_from_inequality(ineq: Relation,
     return nfa
 
 
-def build_nfa_from_equality(eq: Relation):
+def build_nfa_from_equality(eq: Relation,
+                            alphabet: LSBF_Alphabet,
+                            automaton_constr: AutomatonConstructor):
+    '''TODO'''
     alphabet = LSBF_Alphabet.from_inequation(eq)
 
     nfa: NFA[NFA_AutomatonStateType] = NFA(
