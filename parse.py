@@ -7,7 +7,7 @@ from ast_relations import (
 )
 
 from automatons import NFA, AutomatonType, MTBDD_NFA, LSBF_Alphabet
-from log import logger
+from log import logger, formatter
 from logging import INFO
 from dataclasses import dataclass
 import time
@@ -22,6 +22,8 @@ from typing import (
     Optional
 )
 from enum import IntEnum, Enum
+import logging
+import sys
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
@@ -101,7 +103,7 @@ class ExecutionConfig:
     backend_type: BackendType
 
 
-class EvaluationContext():
+class EvaluationContext:
     def __init__(self,
                  domain: SolutionDomain,
                  backend=BackendType.NAIVE,
@@ -124,6 +126,12 @@ class EvaluationContext():
         # Execution settings
         self.execution_config = ExecutionConfig(domain, backend)
 
+        self.logger = logging.getLogger('EvaluationContext')
+        self.logger.setLevel(logging.DEBUG)
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
     def get_let_binding_value(self, var_name: str) -> Optional[NFA]:
         '''Retrieves the (possible) value of a lexical binding introduced via the
         SMTlib `let` construct. Currently we suppose the bindings bind names to the
@@ -135,6 +143,7 @@ class EvaluationContext():
 
     def new_let_binding_context(self):
         '''Creates a new binding frame/context.'''
+        self.logger.debug('Entering a new binding context.')
         self.binding_stack.append(dict())
 
     def insert_let_binding(self, var_name: str, nfa: NFA):
@@ -149,7 +158,8 @@ class EvaluationContext():
             self.insert_let_binding(var_name, nfa)
 
     def pop_binding_context(self):
-        self.binding_stack.pop(-1)
+        popped_ctx = self.binding_stack.pop(-1)
+        self.logger.debug(f'Popping the current let binding context. Contents: {popped_ctx}')
 
     def emit_evaluation_introspection_info(self, nfa: NFA, operation: ParsingOperation):
         self.introspect_handle(nfa, operation)
@@ -191,10 +201,12 @@ class EvaluationContext():
         return variable_id
 
     def push_new_variable_info_frame(self):
+        self.logger.debug('Entering a new variable binding frame (\\exists).')
         self.variables_info_stack.append({})
 
     def pop_variable_frame(self):
-        self.variables_info_stack.pop(-1)
+        popped_frame = self.variables_info_stack.pop(-1)
+        self.logger.debug(f'Exiting a variable binding frame (\\exists). Contents: {popped_frame}.')
 
     def add_variable_to_current_frame(self,
                                       variable_name: str,
@@ -257,7 +269,7 @@ class EvaluationContext():
         if maybe_variable is not None:
             return maybe_variable
 
-        logger.debug(f'Querying information for variable (variable_name="{variable_name}") which is unbound, creating global variable entry.')
+        self.logger.debug(f'Querying information for variable (variable_name="{variable_name}") which is unbound, creating global variable entry.')
         variable_id = self._generate_new_variable_id()
         new_variable_info = VariableInfo(id=variable_id,
                                          name=variable_name,
@@ -417,9 +429,8 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
         if ctx.get_let_binding_value(tree) is not None:
             return set()
         else:
-            return set()
-            # info = ctx.get_variable_info(tree)
-            # return {(info.name, info.id, info.type)}
+            info = ctx.get_variable_info(tree)
+            return {(info.name, info.id, info.type)}
 
     root = tree[0]
     if root in ['<', '<=', '>=', '>', '=']:
@@ -440,11 +451,15 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
         variables_used: Set[Tuple[str, int, VariableType]] = set()
         for variable_name in apf.variable_names:
             var_info = ctx.get_variable_info(variable_name)
+            var_info.ussage_count += 1  # The variable was used somewhere
             variables_used.add((var_info.name, var_info.id, var_info.type))
 
         return variables_used
 
     elif root in ['exists']:
+        # When we are entering the new context (\\exists) we can bound at max
+        # only those variables that are bound by the \\exists, nothing more -
+        # all other variables then belong to the enclosing scopes
         ctx.push_new_variable_info_frame()
         variable_bindings = get_variable_binding_info(tree[1])
         ctx.add_multiple_variables_to_current_frame(variable_bindings)
@@ -468,7 +483,7 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
         vars: Set[VariableInfo] = set()
         for variable_binding in tree[1]:
             variable_name, variable_tree = variable_binding
-            ctx.insert_let_binding(variable_name, 'Nonempty binding')
+            ctx.insert_let_binding(variable_name, 'Prepass - automaton not expanded.')
             vars = vars.union(get_all_used_variables(variable_tree, ctx))
         term_vars = get_all_used_variables(tree[2], ctx)
         ctx.pop_binding_context()
@@ -546,6 +561,15 @@ def check_result_matches(source_text: str,
     constant_symbols = filter(lambda function_symbol: function_symbol.arity == 0, function_symbols)
     for constant_symbol in constant_symbols:
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
+
+    assert_tree = asserts[0]
+    replace_forall_with_exists(assert_tree)
+
+    variables = get_all_used_variables(asserts[0], eval_ctx)
+    for var in sorted(variables, key=lambda x: x[0]):
+        print(var)
+    print(eval_ctx.binding_stack)
+    return
 
     nfa = eval_assert_tree(asserts[0], eval_ctx)
 
