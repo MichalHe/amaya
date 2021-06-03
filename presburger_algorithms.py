@@ -185,7 +185,7 @@ def build_nfa_from_inequality(ineq: Relation,
                 work_queue.append(destination_state)
 
             nfa.update_transition_fn(current_state,
-                                     alphabet.cylindify_symbol_of_projected_alphabet(alphabet_symbol),
+                                     alphabet.cylindrify_symbol_of_projected_alphabet(alphabet_symbol),
                                      destination_state)
 
             # Check whether state is final

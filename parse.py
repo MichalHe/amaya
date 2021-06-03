@@ -566,12 +566,15 @@ def check_result_matches(source_text: str,
     replace_forall_with_exists(assert_tree)
 
     variables = get_all_used_variables(asserts[0], eval_ctx)
-    for var in sorted(variables, key=lambda x: x[0]):
-        print(var)
-    print(eval_ctx.binding_stack)
-    return
+    eval_ctx.logger.info(f'Pre-pass - variable identification - identified variables: {variables}')
+
+    variables_with_ids = list(map(lambda t: (t[0], t[1]), variables))  # Discard the type information
+    logger.info('Extracted variables count:', len(variables_with_ids))
+    alphabet = LSBF_Alphabet.from_variable_names_with_ids(variables_with_ids)
+    logger.info(f'Created alphabet: {alphabet}')
 
     nfa = eval_assert_tree(asserts[0], eval_ctx)
+    return
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
     if ':status' in smt_info:
@@ -697,7 +700,6 @@ def evaluate_let_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA
 
 def get_nfa_for_term(term: Union[str, List],
                      ctx: EvaluationContext,
-                     variable_types: Dict[str, VariableType],
                      _depth: int) -> NFA:
     if type(term) == str:
         # If it is a string, then it should reference a variable
@@ -706,8 +708,9 @@ def get_nfa_for_term(term: Union[str, List],
         logger.debug('Found a usage of a bound variable in evaluated node.')
 
         is_bool_var = False
-        if term in variable_types:
-            if variable_types[term] == VariableType.Bool:
+        variable_info = ctx.lookup_variable(term)
+        if variable_info is not None:
+            if variable_info.type == VariableType.BOOL:
                 is_bool_var = True
 
         if is_bool_var:
@@ -720,10 +723,10 @@ def get_nfa_for_term(term: Union[str, List],
         else:
             logger.debug(f'The variable {term} is not boolean, searching `let` bindings.')
 
-        nfa = ctx.get_binding(term)
+        nfa = ctx.get_let_binding_value(term)
         if nfa is None:
             logger.fatal(f'A referenced variable: `{term}` was not found in any of the binding contexts, is SMT2 file malformed?.')
-            logger.debug(f'Bound variables: `{variable_types}`')
+            logger.debug(f'Bound variables: `{ctx.binding_stack}`')
             raise ValueError(f'A variable `{term}` referenced inside AND could not be queried for its NFA.')
         else:
             logger.debug(f'Value query for variable `{term}` OK.')
@@ -842,7 +845,7 @@ def evaluate_exists_term(term: Union[str, List],
     logger.debug(f'Exists - Extracted variable type bindings for {variable_bindings.keys()}')
     ctx.add_multiple_variables_to_current_frame(variable_bindings)
 
-    nfa = get_nfa_for_term(term[2], ctx, variable_bindings, _depth)
+    nfa = get_nfa_for_term(term[2], ctx, _depth)
 
     vars_info = ctx.get_variables_info_for_current_frame()
     for var_name in variable_bindings:
@@ -932,7 +935,7 @@ def eval_smt_tree(root,  # NOQA
             binding_list = root[1]
             term = root[2]
 
-            ctx.new_binding_context()
+            ctx.new_let_binding_context()
 
             # The variables in bindings can be evaluated to their automatons.
             bindings = evaluate_let_bindings(binding_list, ctx)  # TODO(psyco): Lookup variables when evaluating bindings.
@@ -952,14 +955,13 @@ def eval_smt_tree(root,  # NOQA
 
 
 def eval_assert_tree(assert_tree,
-                     ctx: EvaluationContext,
-                     fn_definitions: List[Dict[str, VariableType]]):
+                     ctx: EvaluationContext):
     assert assert_tree[0] == 'assert'
     forall_cnt = replace_forall_with_exists(assert_tree)
     logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
     implications_cnt = expand_implications(assert_tree)
     logger.info(f'Performed {implications_cnt} implications expansions in the AST.')
-    return eval_smt_tree(assert_tree[1], ctx, fn_definitions)
+    return eval_smt_tree(assert_tree[1], ctx)
 
 
 def expand_multivariable_bindings(assertion_tree):

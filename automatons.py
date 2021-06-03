@@ -100,9 +100,9 @@ class LSBF_Alphabet():
             bit_vector = number_to_bit_tuple(i, tuple_size=symbol_size)
             yield bit_vector
 
-    def cylindify_symbol_of_projected_alphabet(self,
-                                               variables: List[str],
-                                               symbol: Tuple[int, ...]) -> Tuple[Union[str, int], ...]:
+    def cylindrify_symbol_of_projected_alphabet(self,
+                                                variables: List[str],
+                                                symbol: Tuple[int, ...]) -> Tuple[Union[str, int], ...]:
         '''Performs cylindrification on the given symbol that belongs to
         some smaller alphabet that resulted from projecting some variables from
         this one away.'''
@@ -121,20 +121,20 @@ class LSBF_Alphabet():
                 break
 
         ni = 0  # Index to the next bit in the given symbol that should be used.
-        cylindified_symbol = [None] * alphabet_size
+        cylindrified_symbol = [None] * alphabet_size
         for i in range(alphabet_size):
             if i == used_variables_cooficients[ni]:
-                cylindified_symbol[i] = symbol[ni]
+                cylindrified_symbol[i] = symbol[ni]
                 ni += 1
                 # All bits from the given symbol have been used, fill the rest
                 # with *.
                 if ni == len(symbol):
                     for j in range(i+1, alphabet_size):
-                        cylindified_symbol[j] = '*'
+                        cylindrified_symbol[j] = '*'
                     break
             else:
-                cylindified_symbol[i] = '*'
-        return cylindified_symbol
+                cylindrified_symbol[i] = '*'
+        return cylindrified_symbol
 
     @staticmethod
     def generate_compressed_symbols(coefs):
@@ -651,31 +651,25 @@ class NFA(Generic[AutomatonState]):
 
         return nfa
 
-    @staticmethod
-    def for_bool_variable(variable_name: str, var_value: bool):
+    @classmethod
+    def for_bool_variable(cls, overall_alphabet: LSBF_Alphabet, var_name: str, var_value: bool):
         '''Builds an equivalent automaton encoding the provided bool variable.
 
         The resulting autmaton is not complete (must be completed before complement).
         '''
-        if var_value is True:
-            states = set(['q0', 'qT'])
-            final_states = set(['qT'])
-        else:
-            states = set(['q0', 'qF'])
-            final_states = set(['qF'])
-        initial_states = set(['q0'])
-        alphabet = LSBF_Alphabet(((0, ), (1, ),), (variable_name, ), set([variable_name]))
 
-        a_type = AutomatonType.DFA | AutomatonType.BOOL
+        automaton_type = AutomatonType.DFA | AutomatonType.BOOL
 
-        nfa: NFA = NFA(alphabet, a_type, initial_states, final_states, states)
+        nfa = cls(overall_alphabet, automaton_type)
+        nfa.states = {0, 1}
+        nfa.initial_states = {0}
+        nfa.final_states = {1}
 
-        if var_value is True:
-            nfa.update_transition_fn('q0', (1, ), 'qT')  # Var = True --> accepting state
-            nfa.update_transition_fn('qT', ('*', ), 'qT')
-        else:
-            nfa.update_transition_fn('q0', (0, ), 'qF')  # Var = False --> accepting state
-            nfa.update_transition_fn('qF', ('*', ), 'qF')
+        transition_symbol = (1, ) if var_value else (0, )
+        cylindrified_symbol = overall_alphabet.cylindrify_symbol_of_projected_alphabet([var_name], transition_symbol)
+
+        nfa.update_transition_fn(0, cylindrified_symbol, 1)  # Var = True --> accepting state
+        nfa.update_transition_fn(1, cylindrified_symbol, 1)
 
         return nfa
 
