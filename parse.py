@@ -408,7 +408,7 @@ def is_tree_presburger_equality(tree, ctx: EvaluationContext) -> bool:
         if ctx.get_let_binding_value(literal_var) is not None:
             return True
 
-        maybe_left_var_info = ctx.lookup_variable(maybe_left_literal_var)
+        maybe_left_var_info = ctx.lookup_variable(literal_var)
         if maybe_left_var_info is not None:
             return maybe_left_var_info.type == VariableType.BOOL
         return False
@@ -422,6 +422,9 @@ def is_tree_presburger_equality(tree, ctx: EvaluationContext) -> bool:
     if can_tree_be_reduced_to_aritmetic_expr(tree[1]) and can_tree_be_reduced_to_aritmetic_expr(tree[2]):
         maybe_left_literal_var = try_retrieve_variable_if_literal(tree[1])
         maybe_right_literal_var = try_retrieve_variable_if_literal(tree[2])
+
+        if maybe_left_literal_var is None or maybe_right_literal_var is None:
+            return False
 
         return not (is_literal_from_let_or_boolean_var(maybe_left_literal_var) and is_literal_from_let_or_boolean_var(maybe_right_literal_var))
 
@@ -486,7 +489,7 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
         return get_all_used_variables(tree[1], ctx)
 
     elif root in ['or', 'and']:
-        vars: Set[VariableInfo] = set()
+        vars: Set[Tuple[str, int, VariableType]] = set()
         for conj_term in tree[1:]:
             term_vars = get_all_used_variables(conj_term, ctx)
             vars = vars.union(term_vars)
@@ -495,11 +498,11 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
         # Let has the following structure:
         # (let (<variable_binding>+) <term>)
         ctx.new_let_binding_context()
-        vars: Set[VariableInfo] = set()
+        variables_inside_let_bindings: Set[Tuple[str, int, VariableType]] = set()
         for variable_binding in tree[1]:
             variable_name, variable_tree = variable_binding
-            ctx.insert_let_binding(variable_name, 'Prepass - automaton not expanded.')
-            vars = vars.union(get_all_used_variables(variable_tree, ctx))
+            ctx.insert_let_binding(variable_name, NFA(LSBF_Alphabet({}, [], set()), AutomatonType.NFA))
+            variables_inside_let_bindings = variables_inside_let_bindings.union(get_all_used_variables(variable_tree, ctx))
         term_vars = get_all_used_variables(tree[2], ctx)
         ctx.pop_binding_context()
         return term_vars.union(vars)
@@ -625,7 +628,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     an an intersection of a complement of an automaton for the same relation but equation and non-sharp 
     inequality -> (and (not <REL>[< -> =]) <REL>[< -> <=]). 
     '''
-    building_handlers = {
+    building_handlers: Dict[SolutionDomain, Dict[str, Tuple[ParsingOperation, Callable]]] = {
         SolutionDomain.INTEGERS: {
             '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ,
                    pa.build_nfa_from_inequality),
@@ -640,7 +643,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
         }
     }
 
-    automaton_constr = NFA
+    automaton_constr: Callable = NFA
     if ctx.execution_config.backend_type == BackendType.MTBDD:
         automaton_constr = MTBDD_NFA
 
@@ -661,13 +664,13 @@ def build_automaton_from_presburger_relation_ast(relation_root,
 
     # Shuffle the variables in the extracted relation so that it matches the
     # alphabet
-    variables_with_coeficients_dict = {}
+    variables_with_coeficients_dict: Dict[str, int] = {}
     variables_with_coeficients_dict.update(zip(relation.variable_names, relation.variable_coeficients))
     variables_ordered = []
-    coeficients_ordered = []
+    coeficients_ordered: List[int] = []
     for variable_name, _ in variables_with_ids_correct_order:
         variables_ordered.append(variable_name)
-        coeficients_ordered.append(variables_with_coeficients_dict.get(variable_name))
+        coeficients_ordered.append(variables_with_coeficients_dict[variable_name])
     logger.debug(f'Reshufling the variables found in relation from: {0} to {1}'.format(
         list(zip(relation.variable_names, relation.variable_coeficients)),
         list(zip(variables_ordered, coeficients_ordered))
@@ -702,6 +705,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
         automaton = negated_equality_automaton.intersection(inquality_automaton)
         ctx.emit_evaluation_introspection_info(automaton, ParsingOperation.NFA_INTERSECT)
     else:
+        assert automaton_building_function
         automaton = automaton_building_function(*automaton_building_function_args)
         ctx.emit_evaluation_introspection_info(automaton, operation)
 
@@ -710,12 +714,15 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     # Finalization - increment variable ussage counter and bind variable ID to a name in the alphabet (lazy binding)
     # as the variable IDs could not be determined beforehand.
     for var_name, var_id in variables_with_ids:
+        assert ctx.alphabet
         if var_id not in ctx.alphabet.variable_names:
             ctx.alphabet.bind_variable_name_to_id(var_name, var_id)
         else:
             assert ctx.alphabet.variable_names[var_id] == var_name
 
-        ctx.lookup_variable(var_name).ussage_count += 1
+        var_info = ctx.lookup_variable(var_name)
+        assert var_info
+        var_info.ussage_count += 1
 
     return automaton
 
@@ -754,7 +761,7 @@ def get_automaton_for_operand(operand_value: Union[str, List],
         logger.debug('Found a usage of a bound variable in evaluated node.')
 
         is_bool_var = False
-        variable_info = ctx.lookup_variable(operand_value)
+        variable_info = ctx.lookup_variable(str(operand_value))
         if variable_info is not None:
             if variable_info.type == VariableType.BOOL:
                 is_bool_var = True
@@ -765,11 +772,11 @@ def get_automaton_for_operand(operand_value: Union[str, List],
             # the boolean be considered False, it would be encoded
             # ['not', 'var_name'], which is equivalent to the complement of the
             # automaton.
-            return build_automaton_for_boolean_variable(operand_value, True, ctx)
+            return build_automaton_for_boolean_variable(str(operand_value), True, ctx) 
         else:
             logger.debug(f'The variable {operand_value} is not boolean, searching `let` bindings.')
 
-        nfa = ctx.get_let_binding_value(operand_value)
+        nfa = ctx.get_let_binding_value(str(operand_value))
         if nfa is None:
             logger.fatal(f'A referenced variable: `{operand_value}` was not found in any of the binding contexts, is SMT2 file malformed?.')
             logger.debug(f'Bound variables: `{ctx.binding_stack}`')
@@ -909,7 +916,9 @@ def evaluate_exists_expr(exists_expr: List,
             continue
         var_id = vars_info[var_name].id
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
-        nfa = nfa.do_projection(var_id)
+        projection_result = nfa.do_projection(var_id)
+        assert projection_result
+        nfa = projection_result
         ctx.stats_operation_ends(nfa)
 
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
@@ -975,7 +984,7 @@ def eval_smt_tree(root,  # NOQA
             # automaton.
             return build_automaton_for_boolean_variable(root, True, ctx)
         else:
-            nfa = ctx.get_binding(root)
+            nfa = ctx.get_let_binding_value(root)
             if nfa is None:
                 raise ValueError(f'Unknown SMT2 expression: {root}.')
             else:
