@@ -185,29 +185,31 @@ def build_nfa_from_inequality(ineq: Relation,
                 work_queue.append(destination_state)
 
             nfa.update_transition_fn(current_state,
-                                     alphabet.cylindrify_symbol_of_projected_alphabet(alphabet_symbol),
+                                     alphabet.cylindrify_symbol_of_projected_alphabet(ineq_variables_ordered, alphabet_symbol),
                                      destination_state)
 
             # Check whether state is final
             if current_state + dot >= 0:
-                f_transitions.append((current_state, alphabet_symbol))
+                f_transitions.append((current_state, alphabet.cylindrify_symbol_of_projected_alphabet(ineq_variables_ordered, alphabet_symbol)))
 
     # All states have been added, now determine the final state value
-    max_state = max(nfa.states)
-    f_state = max_state + 1
-    nfa.add_state(f_state)
-    nfa.add_final_state(f_state)
-    for origin, symbol in f_transitions:
-        nfa.update_transition_fn(origin, symbol, f_state)
+    if f_transitions:
+        max_state = max(nfa.states)
+        final_state = max_state + 1
+        nfa.add_state(final_state)
+        nfa.add_final_state(final_state)
+        for origin, symbol in f_transitions:
+            nfa.update_transition_fn(origin, symbol, final_state)
 
+    nfa.used_variables = ineq_variables_ordered
     return nfa
 
 
 def build_nfa_from_equality(eq: Relation,
+                            eq_variables_ordered: List[int],
                             alphabet: LSBF_Alphabet,
                             automaton_constr: AutomatonConstructor):
     '''TODO'''
-    alphabet = LSBF_Alphabet.from_inequation(eq)
 
     nfa: NFA[NFA_AutomatonStateType] = NFA(
         alphabet=alphabet,
@@ -218,18 +220,26 @@ def build_nfa_from_equality(eq: Relation,
 
     states_to_explore: List[int] = [eq.absolute_part]
 
+    # We keep only the information about the origin state and transition symbol
+    # as the final state is only one
+    transitions_to_final_state: Set[Tuple[int, Tuple[int, ...]]] = set()
+
+    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(eq_variables_ordered))
+
     while states_to_explore:
-        e_state = states_to_explore.pop()
+        e_state = states_to_explore.pop()  # e_state = (currently) explored state
         nfa.add_state(e_state)
 
-        for symbol in alphabet.symbols:
+        for symbol in projected_alphabet:
             dot = vector_dot(symbol, eq.variable_coeficients)
             d_state = e_state - dot  # Discovered state
 
             # Process only even states
             if d_state % 2 == 0:
                 d_state = int(d_state / 2)
-                nfa.update_transition_fn(e_state, symbol, d_state)
+                nfa.update_transition_fn(e_state,
+                                         alphabet.cylindrify_symbol_of_projected_alphabet(eq_variables_ordered, symbol),
+                                         d_state)
 
                 # Check whether we already did process this state
                 if not nfa.has_state_with_value(d_state):
@@ -240,9 +250,18 @@ def build_nfa_from_equality(eq: Relation,
 
                 # Check whether current state should have transition to final
                 if e_state + dot == 0:
-                    nfa.add_state('FINAL')
-                    nfa.add_final_state('FINAL')
-                    nfa.update_transition_fn(e_state, symbol, 'FINAL')
+                    # Postpone the addition of the transition to final state
+                    # (we do not know the integer value of the state yet)
+                    transitions_to_final_state.add((e_state, alphabet.cylindrify_symbol_of_projected_alphabet(eq_variables_ordered, symbol)))
+
+    if transitions_to_final_state:
+        final_state = max(nfa.states) + 1
+        nfa.add_state(final_state)
+        nfa.add_final_state(final_state)
+        for origin, symbol in transitions_to_final_state:
+            nfa.update_transition_fn(origin, symbol, final_state)
+
+    nfa.used_variables = eq_variables_ordered
 
     return nfa
 
