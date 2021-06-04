@@ -194,7 +194,7 @@ class EvaluationContext:
         logger.critical(f"Operation finished: {stat}")
         self.stats.append(stat)
 
-    def get_all_currently_available_variables() -> List[Tuple[str, str]]:
+    def get_all_currently_available_variables(self) -> List[Tuple[str, str]]:
         '''Retrieves all variables (and their types) in the order they have been
         located by the smt parser.
 
@@ -311,7 +311,10 @@ class EvaluationContext:
         self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
 
 
-def _eval_info(msg, depth):
+def emit_evaluation_progress_info(msg: str, depth: int):
+    '''Logs the provided message with the correct indentation as is the current parser depth 
+    in the SMT tree. The logging level is INFO by default.
+    '''
     logger.info('  ' * depth + msg)
 
 
@@ -340,13 +343,16 @@ def pretty_print_smt_tree(tree, printer=None, depth=0):
         printer(PRETTY_PRINT_INDENT * depth + f'{tree}')
 
 
-def get_variable_binding_info(bindings: List[Tuple[str, str]]) -> Dict[str, VariableType]:
+def parse_variable_bindings_list_to_internal_repr(bindings: List[Tuple[str, str]]) -> Dict[str, VariableType]:
+    '''Converts the list of variable-to-type bindings (such as those found in \\exists)
+    to the internal representations.
+    '''
     var_info: Dict[str, VariableType] = {}
     for binding in bindings:
-        var_name, var_type_raw = binding
-        if var_type_raw == 'Int':
+        var_name, var_type_smt_str = binding
+        if var_type_smt_str == 'Int':
             var_type = VariableType.INT
-        elif var_type_raw == 'Bool':
+        elif var_type_smt_str == 'Bool':
             var_type = VariableType.BOOL
         else:
             raise ValueError("Unknown datatype bound to a variable: {var_type_raw}")
@@ -372,7 +378,7 @@ def strip_comments(source: str) -> str:
 def can_tree_be_reduced_to_aritmetic_expr(tree) -> bool:
     '''Checks that the given `tree` contains only valid function symbols for an
     aritmetic expression. A valid aritmetic expression is also considered to be
-    an expression that contains ITE that expand itself also to an aritmetic expr.'''
+    an expression that contains ITE that expands itself also to an aritmetic expr.'''
     if type(tree) == list:
         root = tree[0]
         if root in ['+', '*']:
@@ -395,7 +401,8 @@ def is_tree_presburger_equality(tree, ctx: EvaluationContext) -> bool:
     To do so it first performs checks on the structure of the tree - whether it
     does contain only operators allowed in a such expression. If it does have
     a valid form performs further checks on whether it is not SMT equivalence
-    check between a boolean variable and a `let` bound expression.'''
+    check between a boolean variable and a `let` bound expression.
+    '''
 
     def is_literal_from_let_or_boolean_var(literal_var: str) -> bool:
         if ctx.get_let_binding_value(literal_var) is not None:
@@ -469,7 +476,7 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
         # only those variables that are bound by the \\exists, nothing more -
         # all other variables then belong to the enclosing scopes
         ctx.push_new_variable_info_frame()
-        variable_bindings = get_variable_binding_info(tree[1])
+        variable_bindings = parse_variable_bindings_list_to_internal_repr(tree[1])
         ctx.add_multiple_variables_to_current_frame(variable_bindings)
         used_variables = get_all_used_variables(tree[2], ctx)
         ctx.pop_variable_frame()
@@ -577,9 +584,9 @@ def check_result_matches(source_text: str,
     get_all_used_variables(asserts[0], eval_ctx)
 
     variable_ids = list(range(1, eval_ctx.next_available_variable_id))  # Discard the name and type information, keep only IDS
-    logger.info(f'Extracted variables({len(variable_ids)}) ids: {variable_ids}')
+    logger.info(f'Extracted the following variables({len(variable_ids)}) ids: {variable_ids}')
     alphabet = LSBF_Alphabet.from_variable_ids(variable_ids)
-    logger.info(f'Created alphabet: {alphabet}')
+    logger.info(f'The created alphabet: {alphabet}')
 
     eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, emit_introspect, alphabet=alphabet)
     for constant_symbol in constant_symbols:
@@ -609,19 +616,23 @@ def check_result_matches(source_text: str,
 def build_automaton_from_presburger_relation_ast(relation_root,
                                                  ctx: EvaluationContext,
                                                  depth: int) -> NFA:
-    # This is broken - the building algorithms take more params.
+    '''Converts the provided relation to an automaton that encodes it. To do so it employs the algorithms
+    provied by the module `presburger_algorithms`. 
+
+    The provided evalaution context `ctx` should have already an overall alphabet attached to it.
+
+    Note: The automaton for sharp inequation (<) is not being directly built. Instead is is build as 
+    an an intersection of a complement of an automaton for the same relation but equation and non-sharp 
+    inequality -> (and (not <REL>[< -> =]) <REL>[< -> <=]). 
+    '''
     building_handlers = {
         SolutionDomain.INTEGERS: {
-            '<':  (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ,
-                   pa.build_nfa_from_sharp_inequality),
             '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ,
                    pa.build_nfa_from_inequality),
             '=':  (ParsingOperation.BUILD_NFA_FROM_EQ,
                    pa.build_nfa_from_equality)
         },
         SolutionDomain.NATURALS: {
-            '<':  (ParsingOperation.BUILD_DFA_FROM_SHARP_INEQ,
-                   pa.build_dfa_from_sharp_inequality),
             '<=': (ParsingOperation.BUILD_DFA_FROM_INEQ,
                    pa.build_dfa_from_inequality),
             '=':  (ParsingOperation.BUILD_DFA_FROM_EQ,
@@ -635,7 +646,9 @@ def build_automaton_from_presburger_relation_ast(relation_root,
 
     logger.debug(f'Building an automaton for: {relation_root}')
     relation = extract_relation(relation_root)
-    operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain][relation.operation]
+    operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(
+        relation.operation,
+        (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, None))  # For the '<' provide no function, as there is no direct conversion (yet?) 
 
     # The relation might have som yet-not-seen variables, add them if need be
     variables_with_ids = ctx.get_multiple_variable_ids(relation.variable_names)
@@ -662,12 +675,11 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     relation.variable_names = variables_ordered
     relation.variable_coeficients = coeficients_ordered
 
+    # Extract just the used variable IDS, so that they can be used when the automaton is build
     _, ordered_variable_ids = zip(*variables_with_ids_correct_order)
 
     logger.info(f'Variables with IDs used: {variables_with_ids_correct_order}')
-    # We need to construct the alphabet for the automaton beforehand.
-    # Use the variable ids for the alphabet
-    # alphabet = LSBF_Alphabet.from_variable_names_with_ids(variables_with_ids_correct_order)
+
     automaton_building_function_args = (relation,
                                         list(ordered_variable_ids),
                                         ctx.get_alphabet(),
@@ -675,28 +687,35 @@ def build_automaton_from_presburger_relation_ast(relation_root,
 
     if relation.operation == '<':
         # We are going to evaluate this as '<' = ('<=' and (not '='))
-        # First we build an automaton from the equality
+
         eq_op, equality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['=']
         ineq_op, inequality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['<=']
 
         equality_automaton = equality_automaton_building_function(*automaton_building_function_args)
 
-        ctx.emit_evaluation_introspection_info(equality_automaton,
-                                               eq_op)
+        ctx.emit_evaluation_introspection_info(equality_automaton, eq_op)
         negated_equality_automaton = equality_automaton.determinize().complement()
 
         inquality_automaton = inequality_automaton_building_function(*automaton_building_function_args)
-        ctx.emit_evaluation_introspection_info(inquality_automaton,
-                                               ineq_op)
+        ctx.emit_evaluation_introspection_info(inquality_automaton, ineq_op)
+
         automaton = negated_equality_automaton.intersection(inquality_automaton)
         ctx.emit_evaluation_introspection_info(automaton, ParsingOperation.NFA_INTERSECT)
     else:
         automaton = automaton_building_function(*automaton_building_function_args)
         ctx.emit_evaluation_introspection_info(automaton, operation)
-    _eval_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)})', depth)
 
-    for variable, _ in variables_with_ids:
-        ctx.lookup_variable(variable).ussage_count += 1
+    emit_evaluation_progress_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)})', depth)
+
+    # Finalization - increment variable ussage counter and bind variable ID to a name in the alphabet (lazy binding)
+    # as the variable IDs could not be determined beforehand.
+    for var_name, var_id in variables_with_ids:
+        if var_id not in ctx.alphabet.variable_names:
+            ctx.alphabet.bind_variable_name_to_id(var_name, var_id)
+        else:
+            assert ctx.alphabet.variable_names[var_id] == var_name
+
+        ctx.lookup_variable(var_name).ussage_count += 1
 
     return automaton
 
@@ -706,6 +725,7 @@ def build_automaton_for_boolean_variable(var_name: str,
                                          ctx: EvaluationContext) -> NFA:
     logger.debug(f'Building an equivalent automaton for the bool variable {var_name}, with value {var_value}.')
     var_id = ctx.get_variable_id(var_name)
+    # @Mark(Multiple backends):   This needs to be changed to be chosen the backed currenly employed.
     return NFA.for_bool_variable(ctx.get_alphabet(), var_id, var_value)
 
 
@@ -720,110 +740,115 @@ def evaluate_let_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA
     return binding
 
 
-def get_nfa_for_term(term: Union[str, List],
-                     ctx: EvaluationContext,
-                     _depth: int) -> NFA:
-    if type(term) == str:
+def get_automaton_for_operand(operand_value: Union[str, List],
+                              ctx: EvaluationContext,
+                              _depth: int) -> NFA:
+    '''Tries to convert the given SMT subtree to a corresponding NFA. This is used on various places throughout
+    the codebase e.g. and/or evaluation as this function provides capabilities of differentiating between
+    evaluation of a string (a SMT bool var, or some `let` bound substitution) and a situation when there is 
+    really a real subtree.'''
+    if type(operand_value) == str:
         # If it is a string, then it should reference a variable
         # previously bound to a value, or a bool variable which can be
         # converted to Automaton directly
         logger.debug('Found a usage of a bound variable in evaluated node.')
 
         is_bool_var = False
-        variable_info = ctx.lookup_variable(term)
+        variable_info = ctx.lookup_variable(operand_value)
         if variable_info is not None:
             if variable_info.type == VariableType.BOOL:
                 is_bool_var = True
 
         if is_bool_var:
-            logger.debug(f'The reached variable {term} was queried as a boolean variable.')
+            logger.debug(f'The reached variable {operand_value} was queried as a boolean variable.')
             # We build an automaton for `var_name` with True value. Should
             # the boolean be considered False, it would be encoded
             # ['not', 'var_name'], which is equivalent to the complement of the
             # automaton.
-            return build_automaton_for_boolean_variable(term, True, ctx)
+            return build_automaton_for_boolean_variable(operand_value, True, ctx)
         else:
-            logger.debug(f'The variable {term} is not boolean, searching `let` bindings.')
+            logger.debug(f'The variable {operand_value} is not boolean, searching `let` bindings.')
 
-        nfa = ctx.get_let_binding_value(term)
+        nfa = ctx.get_let_binding_value(operand_value)
         if nfa is None:
-            logger.fatal(f'A referenced variable: `{term}` was not found in any of the binding contexts, is SMT2 file malformed?.')
+            logger.fatal(f'A referenced variable: `{operand_value}` was not found in any of the binding contexts, is SMT2 file malformed?.')
             logger.debug(f'Bound variables: `{ctx.binding_stack}`')
-            raise ValueError(f'A variable `{term}` referenced inside AND could not be queried for its NFA.')
+            raise ValueError(f'A variable `{operand_value}` referenced inside AND could not be queried for its NFA.')
         else:
-            logger.debug(f'Value query for variable `{term}` OK.')
+            logger.debug(f'Value query for variable `{operand_value}` OK.')
         return nfa
     else:
         # The node must be evaluated first
-        nfa = eval_smt_tree(term,
+        nfa = eval_smt_tree(operand_value,
                             ctx,
                             _debug_recursion_depth=_depth+1)
         return nfa
 
 
-def evaluate_binary_conjunction_term(term: Union[str, List],
+def evaluate_binary_conjunction_expr(expr: List,
                                      ctx: EvaluationContext,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
-                                     reduction_name: str,
+                                     reduction_operation: ParsingOperation,
                                      _depth: int) -> NFA:
-    ''' Evaluates AND, OR terms'''
-    assert len(term) >= 3
-    lhs_term = term[1]
+    '''Perform the evaluation of AND and OR expressions in an abstract fashion using the provided 
+    reduction function (used to fold the operands into a result).'''
+    assert type(expr) == list and len(expr) >= 3
+    first_operand = expr[1]
 
-    op = ParsingOperation.NFA_INTERSECT if reduction_name == 'intersection' else ParsingOperation.NFA_UNION
+    reduction_result = get_automaton_for_operand(first_operand, ctx, _depth)
 
-    lhs = get_nfa_for_term(lhs_term, ctx, _depth)
+    for next_operand in expr[2:]:
+        next_operand_automaton = get_automaton_for_operand(next_operand, ctx, _depth)
 
-    for term_i in range(2, len(term)):
-        rhs_term = term[term_i]
-        rhs = get_nfa_for_term(rhs_term, ctx, _depth)
+        assert type(next_operand_automaton) == NFA
 
-        assert type(rhs) == NFA
+        ctx.stats_operation_starts(reduction_operation, reduction_result, next_operand_automaton)
+        reduction_result = reduction_fn(reduction_result, next_operand_automaton)
+        ctx.stats_operation_ends(reduction_result)
 
-        ctx.stats_operation_starts(op, lhs, rhs)
-        lhs = reduction_fn(lhs, rhs)
-        ctx.stats_operation_ends(lhs)
+        emit_evaluation_progress_info(f' >> {reduction_operation}(lhs, rhs) (result size: {len(reduction_result.states)})', _depth)
+        ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
 
-        _eval_info(f' >> {reduction_name}(lhs, rhs) (result size: {len(lhs.states)})', _depth)
-        ctx.emit_evaluation_introspection_info(lhs, ParsingOperation.NFA_INTERSECT)
-
-    return lhs
+    return reduction_result
 
 
-def evaluate_and_term(term: Union[str, List],
+def evaluate_and_expr(and_expr: List,
                       ctx: EvaluationContext,
                       _depth: int) -> NFA:
+    '''Evaluates the given AND SMT expression and returns the resulting NFA.'''
 
-    result = evaluate_binary_conjunction_term(
-        term,
+    result = evaluate_binary_conjunction_expr(
+        and_expr,
         ctx,
         lambda nfa1, nfa2: nfa1.intersection(nfa2),
-        'intersection',
+        ParsingOperation.NFA_INTERSECT,
         _depth
     )
 
     return result
 
 
-def evaluate_or_term(term: Union[str, List],
+def evaluate_or_expr(or_expr: List,
                      ctx: EvaluationContext,
                      _depth: int) -> NFA:
+    '''Evaluates the given OR SMT expression and returns the resulting NFA.'''
 
-    return evaluate_binary_conjunction_term(
-        term,
+    return evaluate_binary_conjunction_expr(
+        or_expr,
         ctx,
         lambda nfa1, nfa2: nfa1.union(nfa2),
-        'union',
+        ParsingOperation.NFA_UNION,
         _depth
     )
 
 
-def evaluate_not_term(term: Union[str, List],
+def evaluate_not_expr(not_expr: List,
                       ctx: EvaluationContext,
                       _depth: int) -> NFA:
+    '''Evaluates the given NOT SMT expression and returns the resulting NFA.'''
 
-    assert len(term) == 2
-    operand = get_nfa_for_term(term[1], ctx, _depth)
+    assert len(not_expr) == 2
+    operand = get_automaton_for_operand(not_expr[1], ctx, _depth)
 
     assert type(operand) == NFA
 
@@ -842,7 +867,7 @@ def evaluate_not_term(term: Union[str, List],
         ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
         operand = operand.determinize()
         ctx.stats_operation_ends(operand)
-        _eval_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
+        emit_evaluation_progress_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
 
     # TODO(psyco): Here we should check, whether the automaton is Complete
     # (Determinism is not enough)
@@ -851,25 +876,26 @@ def evaluate_not_term(term: Union[str, List],
     operand = operand.complement()
     ctx.stats_operation_ends(operand)
 
-    _eval_info(f' >> complement(operand) - (result size: {len(operand.states)})', _depth)
+    emit_evaluation_progress_info(f' >> complement(operand) - (result size: {len(operand.states)})', _depth)
 
     ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_COMPLEMENT)
     return operand
 
 
-def evaluate_exists_term(term: Union[str, List],
+def evaluate_exists_expr(exists_expr: List,
                          ctx: EvaluationContext,
                          _depth: int) -> NFA:
-    assert len(term) == 3
+    '''Evaluates the given EXISTS SMT expression and returns the resulting NFA.'''
+    assert len(exists_expr) == 3
 
     # We are entering a new variable frame (only exists can bind variables to
     # types / manipulate FREE/BOUND sets)
     ctx.push_new_variable_info_frame()
-    variable_bindings: Dict[str, VariableType] = get_variable_binding_info(term[1])
+    variable_bindings: Dict[str, VariableType] = parse_variable_bindings_list_to_internal_repr(exists_expr[1])
     logger.debug(f'Exists - Extracted variable type bindings for {variable_bindings.keys()}')
     ctx.add_multiple_variables_to_current_frame(variable_bindings)
 
-    nfa = get_nfa_for_term(term[2], ctx, _depth)
+    nfa = get_automaton_for_operand(exists_expr[2], ctx, _depth)
 
     vars_info = ctx.get_variables_info_for_current_frame()
     for var_name in variable_bindings:
@@ -879,6 +905,7 @@ def evaluate_exists_term(term: Union[str, List],
             # those kinds of variables from the alphabet is performed the
             # projection woul fail.
             logger.info(f'Skipping projecting away a variable "{var_name}" - the variable is not used anywhere in the tree underneath.')
+            logger.debug(f'{exists_expr}')
             continue
         var_id = vars_info[var_name].id
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
@@ -887,16 +914,47 @@ def evaluate_exists_term(term: Union[str, List],
 
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
 
-    _eval_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
+    emit_evaluation_progress_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
 
     ctx.pop_variable_frame()
     return nfa
+
+
+def evaluate_let_expr(let_expr: List,
+                      ctx: EvaluationContext,
+                      _depth: int) -> NFA:
+    '''Evaluates the given let expression and returns the resulting automaton.
+
+    The let expression itself does not perform no mutation on the tree underneath, 
+    however it introduces lexical bindings (variable to NFA).   
+    '''
+    # `let` has this structure [`let`, `<binding_list>`, <term>]
+
+    assert len(let_expr) == 3
+    binding_list = let_expr[1]
+    expr_using_let_bindings = let_expr[2]
+
+    ctx.new_let_binding_context()
+
+    # The variables in bindings can be evaluated to their automatons.
+    bindings = evaluate_let_bindings(binding_list, ctx)
+    logger.debug(f'Extracted bindings {bindings.keys()}')
+
+    ctx.insert_all_bindings_into_current_context(bindings)
+
+    # The we evaluate the term, in fact represents the value of the
+    # whole `let` block
+    term_nfa = eval_smt_tree(expr_using_let_bindings, ctx, _depth + 1)
+
+    ctx.pop_binding_context()
+    return term_nfa
 
 
 def eval_smt_tree(root,  # NOQA
                   ctx: EvaluationContext,
                   _debug_recursion_depth=0,
                   ) -> NFA:
+    '''Evaluates the SMT given SMT tree and returns the resulting NFA.'''
 
     if not type(root) == list:
         # This means that either we hit a SMT2 term (boolean variable) or
@@ -915,11 +973,11 @@ def eval_smt_tree(root,  # NOQA
             # the boolean be considered False, it would be encoded
             # ['not', 'var_name'], which is equivalent to the complement of the
             # automaton.
-            return build_automaton_for_boolean_variable(root, True)
+            return build_automaton_for_boolean_variable(root, True, ctx)
         else:
             nfa = ctx.get_binding(root)
             if nfa is None:
-                raise ValueError(f'Unknown SMT2 term: {root}.')
+                raise ValueError(f'Unknown SMT2 expression: {root}.')
             else:
                 return nfa
 
@@ -944,43 +1002,26 @@ def eval_smt_tree(root,  # NOQA
             ctx.stats_operation_ends(result)
             return result
     else:
-        _eval_info(f'eval_smt_tree({root})', _debug_recursion_depth)
+        emit_evaluation_progress_info(f'eval_smt_tree({root})', _debug_recursion_depth)
         # Current node is a NFA operation
-        if node_name == 'and':
-            return evaluate_and_term(root, ctx, _debug_recursion_depth)
-        elif node_name == 'or':
-            return evaluate_or_term(root, ctx, _debug_recursion_depth)
-        elif node_name == 'not':
-            return evaluate_not_term(root, ctx, _debug_recursion_depth)
-        elif node_name == 'exists':
-            return evaluate_exists_term(root, ctx, _debug_recursion_depth)
-        elif node_name == 'let':
-            # `let` has this structure [`let`, `<binding_list>`, <term>]
-            assert len(root) == 3
-            binding_list = root[1]
-            term = root[2]
+        evaluation_functions = {
+            'and': evaluate_and_expr,
+            'or': evaluate_or_expr,
+            'not': evaluate_not_expr,
+            'exists': evaluate_exists_expr,
+            'let': evaluate_let_expr,
+        }
 
-            ctx.new_let_binding_context()
+        if node_name not in evaluation_functions:
+            raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}')
 
-            # The variables in bindings can be evaluated to their automatons.
-            bindings = evaluate_let_bindings(binding_list, ctx)  # TODO(psyco): Lookup variables when evaluating bindings.
-            logger.debug(f'Extracted bindings {bindings.keys()}')
+        evaluation_function = evaluation_functions[node_name]
+        return evaluation_function(root, ctx, _debug_recursion_depth)
 
-            ctx.insert_all_bindings_into_current_context(bindings)
-
-            # The we evaluate the term, in fact represents the value of the
-            # whole `let` block
-            term_nfa = eval_smt_tree(term, ctx, _debug_recursion_depth)
-
-            ctx.pop_binding_context()  # We are leaving the `let` block
-            return term_nfa
-
-        else:
-            raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}, assert_tree')
 
 
 def eval_assert_tree(assert_tree,
-                     ctx: EvaluationContext):
+                     ctx: EvaluationContext) -> NFA:
     assert assert_tree[0] == 'assert'
     forall_cnt = replace_forall_with_exists(assert_tree)
     logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
@@ -990,6 +1031,8 @@ def eval_assert_tree(assert_tree,
 
 
 def expand_multivariable_bindings(assertion_tree):
+    '''Preprocessing operation. In place expansion of multivariable \\exists and \\forall quantifiers to many 
+    single variable quantifiers.'''
     if assertion_tree[0] in ['exists', 'forall']:
         binding_type, bindings, term = assertion_tree
         assert len(bindings) > 0
