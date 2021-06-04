@@ -503,11 +503,15 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                             old_symbol, missing_indices),  # type: ignore
                         self.data[origin][dest]))
 
-    def complete_with_trap_state(self, alphabet, states: List, trap_state: Any = 'TRAP') -> bool:
+    def complete_with_trap_state(self, alphabet,
+                                 used_variable_ids: List[int],
+                                 states: List,
+                                 trap_state: Any = 'TRAP') -> bool:
         trap_state_present: bool = False
 
         # This is basically the whole alphabet, with nonactive symbols compacted.
-        alphabet_active_symbols = set(iterate_over_active_variables(alphabet.variable_names, alphabet.active_variables))
+        projected_alphabet = alphabet.gen_projection_symbols_onto_variables(used_variable_ids)
+        viable_symbols = set(map(lambda symbol: alphabet.cylindrify_symbol_of_projected_alphabet(used_variable_ids, symbol), projected_alphabet))
 
         for origin in states:
             out_symbols = set()
@@ -515,10 +519,10 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                 for dest in self.data[origin]:
                     out_symbols.update(self.data[origin][dest])
 
-            missing_symbols = alphabet_active_symbols - out_symbols
+            missing_symbols = viable_symbols - out_symbols
 
             if missing_symbols and not trap_state_present:
-                universal_symbol = tuple(['*' for v in alphabet.variable_names])
+                universal_symbol = tuple(['*' for v in alphabet.variable_numbers])
                 self.insert_transition(trap_state, universal_symbol, trap_state)
                 trap_state_present = True
 
@@ -778,5 +782,4 @@ class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
                 system[destination_state_imm] = bdd
 
-        print(f'Apply operations for {states} with number of BDDs {len(deltas)}:', apply_cnt)
         return system
