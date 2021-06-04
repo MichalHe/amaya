@@ -108,6 +108,7 @@ class EvaluationContext:
                  domain: SolutionDomain,
                  backend=BackendType.NAIVE,
                  emit_introspect=lambda nfa, operation: None,
+                 alphabet: Optional[LSBF_Alphabet] = None  # From previous passes
                  ):
         self.binding_stack: List[Dict[str, NFA]] = []
         self.domain = domain
@@ -131,6 +132,13 @@ class EvaluationContext:
         handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
+
+        self.alphabet = alphabet
+
+    def get_alphabet(self) -> LSBF_Alphabet:
+        if self.alphabet is None:
+            raise ValueError('Requesting an overall alphabet from the evaluation context when None has been set.')
+        return self.alphabet
 
     def get_let_binding_value(self, var_name: str) -> Optional[NFA]:
         '''Retrieves the (possible) value of a lexical binding introduced via the
@@ -201,12 +209,12 @@ class EvaluationContext:
         return variable_id
 
     def push_new_variable_info_frame(self):
-        self.logger.debug('Entering a new variable binding frame (\\exists).')
+        logger.debug('Entering a new variable binding frame (\\exists).')
         self.variables_info_stack.append({})
 
     def pop_variable_frame(self):
         popped_frame = self.variables_info_stack.pop(-1)
-        self.logger.debug(f'Exiting a variable binding frame (\\exists). Contents: {popped_frame}.')
+        logger.debug(f'Exiting a variable binding frame (\\exists). Contents: {popped_frame}.')
 
     def add_variable_to_current_frame(self,
                                       variable_name: str,
@@ -290,7 +298,7 @@ class EvaluationContext:
             return self.global_variables[variable_name]
         return None
 
-    def get_multiple_variable_ids(self, variable_names: List[str]) -> List[int]:
+    def get_multiple_variable_ids(self, variable_names: List[str]) -> List[Tuple[str, int]]:
         '''The bulk version of notify get_variable_id.'''
         assigned_ids = []
         for variable_name in variable_names:
@@ -555,26 +563,29 @@ def check_result_matches(source_text: str,
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Extracted {len(asserts)} from source text.')
 
-    eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, emit_introspect)
+    eval_ctx = EvaluationContext(SolutionDomain.INTEGERS)
 
     function_symbols = get_declared_function_symbols(ast)
-    constant_symbols = filter(lambda function_symbol: function_symbol.arity == 0, function_symbols)
+    constant_symbols = list(filter(lambda function_symbol: function_symbol.arity == 0, function_symbols))
     for constant_symbol in constant_symbols:
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
     assert_tree = asserts[0]
     replace_forall_with_exists(assert_tree)
+    expand_implications(assert_tree)
 
-    variables = get_all_used_variables(asserts[0], eval_ctx)
-    eval_ctx.logger.info(f'Pre-pass - variable identification - identified variables: {variables}')
+    get_all_used_variables(asserts[0], eval_ctx)
 
-    variables_with_ids = list(map(lambda t: (t[0], t[1]), variables))  # Discard the type information
-    logger.info('Extracted variables count:', len(variables_with_ids))
-    alphabet = LSBF_Alphabet.from_variable_names_with_ids(variables_with_ids)
+    variable_ids = list(range(1, eval_ctx.next_available_variable_id))  # Discard the name and type information, keep only IDS
+    logger.info(f'Extracted variables({len(variable_ids)}) ids: {variable_ids}')
+    alphabet = LSBF_Alphabet.from_variable_ids(variable_ids)
     logger.info(f'Created alphabet: {alphabet}')
 
+    eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, emit_introspect, alphabet=alphabet)
+    for constant_symbol in constant_symbols:
+        eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
+
     nfa = eval_assert_tree(asserts[0], eval_ctx)
-    return
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
     if ':status' in smt_info:
@@ -588,7 +599,7 @@ def check_result_matches(source_text: str,
         if is_sat:
             logger.debug(f'The result\'s SAT is OK (as expected) (SAT={is_sat}, example: {example_word})')
         else:
-            logger.debug(f'The result\'s SAT is OK (as expected) (SAT={is_sat}')
+            logger.debug(f'The result\'s SAT is OK (as expected) (SAT={is_sat})')
     else:
         logger.warn(f'The automaton\'s SAT didn\'t match expected: actual={is_sat}, given word: {example_word}, expected={should_be_sat}')
 
@@ -651,11 +662,16 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     relation.variable_names = variables_ordered
     relation.variable_coeficients = coeficients_ordered
 
-    logger.debug(f'Variables with IDs used: {variables_with_ids_correct_order}')
+    _, ordered_variable_ids = zip(*variables_with_ids_correct_order)
+
+    logger.info(f'Variables with IDs used: {variables_with_ids_correct_order}')
     # We need to construct the alphabet for the automaton beforehand.
     # Use the variable ids for the alphabet
-    alphabet = LSBF_Alphabet.from_variable_names_with_ids(variables_with_ids_correct_order)
-    automaton_building_function_args = (relation, alphabet, automaton_constr)
+    # alphabet = LSBF_Alphabet.from_variable_names_with_ids(variables_with_ids_correct_order)
+    automaton_building_function_args = (relation,
+                                        list(ordered_variable_ids),
+                                        ctx.get_alphabet(),
+                                        automaton_constr)
 
     if relation.operation == '<':
         # We are going to evaluate this as '<' = ('<=' and (not '='))
@@ -679,12 +695,18 @@ def build_automaton_from_presburger_relation_ast(relation_root,
         ctx.emit_evaluation_introspection_info(automaton, operation)
     _eval_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)})', depth)
 
+    for variable, _ in variables_with_ids:
+        ctx.lookup_variable(variable).ussage_count += 1
+
     return automaton
 
 
-def build_automaton_for_boolean_variable(var_name: str, var_value: bool) -> NFA:
+def build_automaton_for_boolean_variable(var_name: str,
+                                         var_value: bool,
+                                         ctx: EvaluationContext) -> NFA:
     logger.debug(f'Building an equivalent automaton for the bool variable {var_name}, with value {var_value}.')
-    return NFA.for_bool_variable(var_name, var_value)
+    var_id = ctx.get_variable_id(var_name)
+    return NFA.for_bool_variable(ctx.get_alphabet(), var_id, var_value)
 
 
 def evaluate_let_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA]:
@@ -719,7 +741,7 @@ def get_nfa_for_term(term: Union[str, List],
             # the boolean be considered False, it would be encoded
             # ['not', 'var_name'], which is equivalent to the complement of the
             # automaton.
-            return build_automaton_for_boolean_variable(term, True)
+            return build_automaton_for_boolean_variable(term, True, ctx)
         else:
             logger.debug(f'The variable {term} is not boolean, searching `let` bindings.')
 
@@ -805,6 +827,17 @@ def evaluate_not_term(term: Union[str, List],
 
     assert type(operand) == NFA
 
+    if (operand.automaton_type & AutomatonType.BOOL):
+        assert len(operand.used_variables) == 1
+
+        variable_id: int = operand.used_variables[0]
+        variable_value: bool = operand.extra_info['bool_var_value']
+        logger.debug('Complementing an automaton for a bool variable {variable_id}, returninig direct complement.')
+        ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
+        result = NFA.for_bool_variable(ctx.get_alphabet(), variable_id, not variable_value)
+        ctx.stats_operation_ends(result)
+        return result
+
     if (operand.automaton_type & AutomatonType.NFA):
         ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
         operand = operand.determinize()
@@ -813,15 +846,6 @@ def evaluate_not_term(term: Union[str, List],
 
     # TODO(psyco): Here we should check, whether the automaton is Complete
     # (Determinism is not enough)
-
-    if (operand.automaton_type & AutomatonType.BOOL):
-        assert len(operand.alphabet.variable_names) == 1
-        variable_name = operand.alphabet.variable_names[0]
-        logger.debug('Complementing an automaton for a bool variable {variable_name}, returninig direct complement.')
-        ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
-        result = NFA.for_bool_variable(variable_name, False)
-        ctx.stats_operation_ends(result)
-        return result
 
     ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
     operand = operand.complement()
@@ -856,8 +880,9 @@ def evaluate_exists_term(term: Union[str, List],
             # projection woul fail.
             logger.info(f'Skipping projecting away a variable "{var_name}" - the variable is not used anywhere in the tree underneath.')
             continue
+        var_id = vars_info[var_name].id
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
-        nfa = nfa.do_projection(var_name)
+        nfa = nfa.do_projection(var_id)
         ctx.stats_operation_ends(nfa)
 
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
