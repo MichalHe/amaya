@@ -35,8 +35,6 @@ from relations_structures import Relation
 from transitions import (
     calculate_variable_bit_position,
     unite_alphabets,
-    iterate_over_active_variables,
-    construct_transition_fn_to_bddtfn,
     SparseSimpleTransitionFunction
 )
 
@@ -45,7 +43,6 @@ from visualization import AutomatonVisRepresentation
 from mtbdd_transitions import MTBDDTransitionFn, mtbdd_false
 
 import functools
-import dd  # type: ignore
 
 
 AutomatonState = TypeVar('AutomatonState')
@@ -69,8 +66,7 @@ class AutomatonType(IntFlag):
 
 @dataclass
 class LSBF_Alphabet():
-    symbols: Tuple[LSBF_AlphabetSymbol, ...]
-    variable_names: Tuple[str, ...]
+    variable_names: Dict[int, str]
     variable_numbers: Tuple[int, ...]
     active_variables: Set[str]
     active_symbols: Optional[Tuple[LSBF_AlphabetSymbol, ...]] = None
@@ -89,7 +85,7 @@ class LSBF_Alphabet():
                              active_variables=set(active_variables),
                              active_symbols=act_symbols)
 
-    def gen_projection_symbols_onto_variables(self, variables_subset: List[str]) -> Generator[Tuple[int, ...], Any, Any]:
+    def gen_projection_symbols_onto_variables(self, variables_subset: List[int]) -> Generator[Tuple[int, ...], Any, Any]:
         '''Generates all symbols that would be contained in an alphabet that
         would result from projecting onto the given subset of alphabet
         variables.'''
@@ -101,19 +97,19 @@ class LSBF_Alphabet():
             yield bit_vector
 
     def cylindrify_symbol_of_projected_alphabet(self,
-                                                variables: List[str],
+                                                variables: List[int],
                                                 symbol: Tuple[int, ...]) -> Tuple[Union[str, int], ...]:
         '''Performs cylindrification on the given symbol that belongs to
         some smaller alphabet that resulted from projecting some variables from
         this one away.'''
-        alphabet_size = len(self.variable_names)
+        alphabet_size = len(self.variable_numbers)
 
         # Create a list of indices where we should put the values from the
         # provided symbol (rest will be '*')
         vi = 0  # Index of the next variable name in provided variables to be checked
         used_variables_cooficients = []
-        for i, var_name in enumerate(self.variable_names):
-            if var_name == variables[vi]:
+        for i, var_id in enumerate(self.variable_numbers):
+            if var_id == variables[vi]:
                 used_variables_cooficients.append(i)
                 vi += 1
 
@@ -134,7 +130,7 @@ class LSBF_Alphabet():
                     break
             else:
                 cylindrified_symbol[i] = '*'
-        return cylindrified_symbol
+        return tuple(cylindrified_symbol)
 
     @staticmethod
     def generate_compressed_symbols(coefs):
@@ -189,29 +185,27 @@ class LSBF_Alphabet():
         )
 
     @staticmethod
-    def from_variable_names_with_ids(variables: List[Tuple[str, id]]) -> LSBF_AlphabetSymbol:
+    def from_variable_ids(variable_ids: List[int]) -> LSBF_AlphabetSymbol:
         '''Creates a new alphabet from the given variable_name, id pairs.
         The variables list should be sorted by the ID.
         '''
-        variable_names = []
-        variable_ids = []
-        for var, id in variables:
-            variable_names.append(var)
-            variable_ids.append(id)
-
-        # Do we really need to generate this?
-        letter_size = len(variable_names)
-        symbols = tuple(map(
-            lambda i: number_to_bit_tuple(i, tuple_size=letter_size, pad=0),
-            range(2**letter_size)
-        ))
+        variable_names = dict()
+        variable_ids = sorted(variable_ids)
 
         return LSBF_Alphabet(
             active_variables=set(variable_names),
-            symbols=symbols,
             variable_names=variable_names,
             variable_numbers=variable_ids
         )
+
+    @property
+    def symbols(self):
+        letter_size = len(self.variable_numbers)
+        for i in range(2**letter_size):
+            yield number_to_bit_tuple(i, tuple_size=letter_size, pad=0)
+
+    def bind_variable_name_to_id(self, variable_name: str, variable_id: int):
+        self.variable_names[variable_id] = variable_name
 
     def new_with_variable_removed(self,
                                   removed_var: str) -> Optional[LSBF_Alphabet]:
@@ -255,7 +249,8 @@ class NFA(Generic[AutomatonState]):
                  initial_states: Optional[Set] = None,
                  final_states: Optional[Set] = None,
                  states: Optional[Set] = None,
-                 transition_fn: Optional[SparseSimpleTransitionFunction] = None):
+                 transition_fn: Optional[SparseSimpleTransitionFunction] = None,
+                 used_variables: List[int] = []):
 
         self.alphabet = alphabet
         self.automaton_type = automaton_type
@@ -263,6 +258,9 @@ class NFA(Generic[AutomatonState]):
         self.states = get_default_if_none(states, set)
         self.initial_states = get_default_if_none(initial_states, set)
         self.transition_fn = get_default_if_none(transition_fn, SparseSimpleTransitionFunction)
+
+        self.extra_info: Dict[str, Any] = dict()
+        self.used_variables = used_variables
 
     def update_transition_fn(self,
                              from_state: AutomatonState,
@@ -295,6 +293,7 @@ class NFA(Generic[AutomatonState]):
 
     def intersection(self, other: NFA[S]):
         if self.alphabet != other.alphabet:
+            assert(False)
             self.extend_to_common_alphabet(other)
 
         logger.debug(f'Calculating intercestion with alphabet size: {len(self.alphabet.variable_names)}')
@@ -307,26 +306,15 @@ class NFA(Generic[AutomatonState]):
             automaton_type=AutomatonType.NFA
         )
 
+        used_variable_ids = sorted(set(self.used_variables + other.used_variables))
+        projected_alphabet = list(self.alphabet.gen_projection_symbols_onto_variables(used_variable_ids))
+
         # Add all the initial states to the to-be-processed queue
         work_queue = carthesian_product(self_renamed.initial_states,
                                         other_renamed.initial_states)
+
         for initial_state in work_queue:
             resulting_nfa.add_initial_state(initial_state)
-
-        bdd_manager = dd.autoref.BDD()
-
-        _var_names = []
-        for i, _ in enumerate(self_renamed.alphabet.variable_names):
-            _var_names .append(chr(ord('A') + i))
-
-        bdd_manager.declare(*_var_names)
-
-        logger.info('Converting transition FNs to BDDs.')
-        logger.info(f'Transition functions before conversion to BDD ones: {_var_names}')
-        logger.info(f'Transition functions before conversion to BDD ones: {other_renamed.transition_fn.data}')
-        self_tfn = construct_transition_fn_to_bddtfn(self_renamed.transition_fn.data, _var_names, bdd_manager)
-        other_tfn = construct_transition_fn_to_bddtfn(other_renamed.transition_fn.data, _var_names, bdd_manager)
-        logger.info('Done.')
 
         while work_queue:
             current_state: Tuple[int, int] = work_queue.pop(0)
@@ -341,53 +329,33 @@ class NFA(Generic[AutomatonState]):
             if (self_state in self_renamed.final_states and others_state in other_renamed.final_states):
                 resulting_nfa.add_final_state((self_state, others_state))
 
-            used_symbols = 0
-
             # optimized_intersection: Set[Tuple[LSBF_AlphabetSymbol, Tuple[int, int]]] = set()
-            if self_state in self_tfn and others_state in other_tfn:
-                for self_dest_state in self_tfn[self_state]:
-                    for other_dest_state in other_tfn[others_state]:
-                        transition_self_bdd = self_tfn[self_state][self_dest_state]
-                        transition_other_bdd = other_tfn[others_state][other_dest_state]
+            has_self_state_out_transitions = bool(self_renamed.transition_fn.get_state_post(self_state))
+            has_other_state_out_transitions = bool(other_renamed.transition_fn.get_state_post(others_state))
 
-                        for transition_model in bdd_manager.pick_iter(transition_self_bdd & transition_other_bdd, care_vars=_var_names):
-                            symbol = tuple(map(lambda var_name: transition_model[var_name], _var_names))
-                            dest_state = (self_dest_state, other_dest_state)
-                            if dest_state not in resulting_nfa.states:
-                                if dest_state not in work_queue:
-                                    work_queue.append(dest_state)
+            if has_self_state_out_transitions and has_other_state_out_transitions:
+                for projected_symbol in projected_alphabet:
+                    cylindrified_symbol = self.alphabet.cylindrify_symbol_of_projected_alphabet(used_variable_ids,
+                                                                                                projected_symbol)
+                    self_destination_set = self_renamed.get_transition_target(self_state, cylindrified_symbol)
+                    other_destination_set = other_renamed.get_transition_target(others_state, cylindrified_symbol)
 
-                            resulting_nfa.update_transition_fn(current_state, symbol, (self_dest_state, other_dest_state))
-                            used_symbols += 1
+                    for produced_intersection_metastate in carthesian_product(self_destination_set,
+                                                                              other_destination_set):
 
-            logger.info('Intersection: Used symbols minimized to: {0}/{1}'.format(used_symbols, len(self.alphabet.symbols)))
+                        resulting_nfa.update_transition_fn(current_state,
+                                                           cylindrified_symbol,
+                                                           produced_intersection_metastate)
 
-            # for symbol in self_renamed.alphabet.symbols:
-            # generated_intersection: Set[Tuple[LSBF_AlphabetSymbol, Tuple[int, int]]] = set()
-            # for symbol in intersect_symbols:
-            #     self_targets = self_renamed.get_transition_target(self_state, symbol)
-            #     other_targets = other_renamed.get_transition_target(others_state, symbol)
+                        if not resulting_nfa.has_state_with_value(produced_intersection_metastate) and produced_intersection_metastate not in work_queue:
+                            work_queue.append(produced_intersection_metastate)
 
-            #     if self_targets is None or other_targets is None:
-            #         continue
-
-            #     for new_intersect_state in carthesian_product(self_targets, other_targets):
-            #         if new_intersect_state not in resulting_nfa.states:
-            #             if new_intersect_state not in work_queue:
-            #                 work_queue.append(new_intersect_state)
-
-            #         generated_intersection.add((symbol, new_intersect_state))
-            #         resulting_nfa.update_transition_fn(current_state, symbol, new_intersect_state)
-
-            # logger.info(f'Standard intersection produced: {len(generated_intersection)}')
-            # logger.info(f'Optimized intersection produced: {len(optimized_intersection)}')
-            # msg: str = 'OK' if len(generated_intersection) == len(optimized_intersection) else 'FAIL'
-            # logger.info(f'Size {msg}.')
-
+        resulting_nfa.used_variables = used_variable_ids
         return resulting_nfa
 
     def union(self, other: NFA[S]) -> NFA[int]:
         if self.alphabet != other.alphabet:
+            assert False
             self.extend_to_common_alphabet(other)
 
         latest_state_value, self_renamed = self.rename_states()
@@ -398,7 +366,7 @@ class NFA(Generic[AutomatonState]):
         initial_states = self_renamed.initial_states.union(other_renamed.initial_states)
         final_states = self_renamed.final_states.union(other_renamed.final_states)
 
-        return NFA(
+        union_nfa = NFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA,
             initial_states=initial_states,
@@ -406,6 +374,9 @@ class NFA(Generic[AutomatonState]):
             states=states,
             transition_fn=transitions
         )
+        union_nfa.used_variables = sorted(set(self.used_variables + other.used_variables))
+
+        return union_nfa
 
     def extend_to_common_alphabet(self, other: NFA[S]):
         unified_variable_names = unite_alphabets(self.alphabet.variable_names, other.alphabet.variable_names)
@@ -427,6 +398,8 @@ class NFA(Generic[AutomatonState]):
             automaton_type=AutomatonType.DFA)
         determinized_automaton.add_initial_state(working_queue[0])
 
+        projected_alphabet_symbols = list(self.alphabet.gen_projection_symbols_onto_variables(self.used_variables))
+
         while working_queue:
             unexplored_dfa_state: Tuple[AutomatonState, ...] = working_queue.pop(0)
             logger.debug(f'Determinization for {unexplored_dfa_state}, remaining in work queue: {len(working_queue)}')
@@ -437,11 +410,14 @@ class NFA(Generic[AutomatonState]):
             if intersect:
                 determinized_automaton.add_final_state(unexplored_dfa_state)
 
-            for symbol in iterate_over_active_variables(self.alphabet.variable_names, self.alphabet.active_variables):
+            for symbol in projected_alphabet_symbols:
                 reachable_states: List[AutomatonState] = list()
+
+                cylindrified_symbol = self.alphabet.cylindrify_symbol_of_projected_alphabet(self.used_variables,
+                                                                                            symbol)
                 for state in unexplored_dfa_state:
                     # Get all states reacheble from current state via symbol
-                    out_states = self.get_transition_target(state, symbol)
+                    out_states = self.get_transition_target(state, cylindrified_symbol)
                     if out_states:
                         reachable_states += list(out_states)
 
@@ -453,8 +429,9 @@ class NFA(Generic[AutomatonState]):
                         working_queue.append(dfa_state)
 
                 if dfa_state:
-                    determinized_automaton.update_transition_fn(unexplored_dfa_state, symbol, dfa_state)
+                    determinized_automaton.update_transition_fn(unexplored_dfa_state, cylindrified_symbol, dfa_state)
 
+        determinized_automaton.used_variables = self.used_variables
         determinized_automaton.add_trap_state()
         return determinized_automaton
 
@@ -464,7 +441,7 @@ class NFA(Generic[AutomatonState]):
         '''
         trap_state = 'TRAP'
         states = list(self.states)
-        added_trap_state = self.transition_fn.complete_with_trap_state(self.alphabet, states, trap_state=trap_state)
+        added_trap_state = self.transition_fn.complete_with_trap_state(self.alphabet, self.used_variables, states, trap_state=trap_state)
         if added_trap_state:
             self.states.add(trap_state)
 
@@ -486,11 +463,13 @@ class NFA(Generic[AutomatonState]):
 
         self.transition_fn.rename_states(state_name_translation)
 
-    def do_projection(self, variable_name: str) -> Optional[NFA]:
-        resulting_alphabet_var_count = len(self.alphabet.active_variables) - 1
+    def do_projection(self, variable_id: int) -> Optional[NFA]:
+        resulting_alphabet_var_count = len(self.used_variables) - 1
 
         if resulting_alphabet_var_count == 0:
+            logger.info('Projecting away the last variable for automaton - performing DFS search for a model.')
             is_sat, _ = self.is_sat()  # Check whether the language is nonempty
+            logger.info(f'Was model found? {is_sat}')
             if is_sat:
                 return NFA.trivial_accepting(self.alphabet)
             else:
@@ -507,16 +486,17 @@ class NFA(Generic[AutomatonState]):
             new_nfa.initial_states = set(self.initial_states)
             new_nfa.final_states = set(self.final_states)
 
-            bit_pos = calculate_variable_bit_position(self.alphabet.variable_names, variable_name)
+            bit_pos = calculate_variable_bit_position(self.alphabet.variable_numbers, variable_id)
             if bit_pos is None:
-                raise ValueError(f'Could not find variable_name "{variable_name}" in current alphabet {self.alphabet}')
+                raise ValueError(f'Could not find variable_name "{variable_id}" in current alphabet {self.alphabet}')
 
             new_nfa.transition_fn = self.transition_fn
             new_nfa.transition_fn.project_bit_away(bit_pos)
 
-            new_nfa.alphabet.active_variables -= set((variable_name, ))
-
             new_nfa.perform_pad_closure()
+            new_used_vars = list(self.used_variables)
+            new_used_vars.remove(variable_id)
+            new_nfa.used_variables = new_used_vars
             return new_nfa
 
     def perform_pad_closure(self):
@@ -569,6 +549,7 @@ class NFA(Generic[AutomatonState]):
 
         result.transition_fn = self.transition_fn.copy()
 
+        result.used_variables = list(self.used_variables)
         return result
 
     def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
@@ -624,35 +605,26 @@ class NFA(Generic[AutomatonState]):
 
     @staticmethod
     def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA:
-        nfa: NFA[str] = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
-
-        final_state = 'FINAL'
-        nfa.add_state(final_state)
-        nfa.add_initial_state(final_state)
-        nfa.add_final_state(final_state)
-
-        self_loop_symbol = tuple(['*'] * len(alphabet.variable_names))
-        nfa.update_transition_fn(final_state, self_loop_symbol, final_state)
-        nfa.alphabet.active_variables = set()
-
+        nfa = NFA.trivial_nonaccepting(alphabet)
+        nfa.add_final_state(0)
         return nfa
 
     @staticmethod
     def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA:
         nfa: NFA[str] = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
 
-        initial_state = 'INITIAL'
-        nfa.add_state(initial_state)
-        nfa.add_initial_state(initial_state)
+        state = 0
+        nfa.add_state(state)
+        nfa.add_initial_state(state)
 
-        self_loop_symbol = tuple(['*'] * len(alphabet.variable_names))
-        nfa.update_transition_fn(initial_state, self_loop_symbol, initial_state)
+        self_loop_symbol = tuple(['*'] * len(alphabet.variable_numbers))
+        nfa.update_transition_fn(state, self_loop_symbol, state)
         nfa.alphabet.active_variables = set()
 
         return nfa
 
     @classmethod
-    def for_bool_variable(cls, overall_alphabet: LSBF_Alphabet, var_name: str, var_value: bool):
+    def for_bool_variable(cls, overall_alphabet: LSBF_Alphabet, var_id: int, var_value: bool):
         '''Builds an equivalent automaton encoding the provided bool variable.
 
         The resulting autmaton is not complete (must be completed before complement).
@@ -660,16 +632,18 @@ class NFA(Generic[AutomatonState]):
 
         automaton_type = AutomatonType.DFA | AutomatonType.BOOL
 
-        nfa = cls(overall_alphabet, automaton_type)
+        nfa = cls(overall_alphabet, automaton_type, used_variables=[var_id])
         nfa.states = {0, 1}
         nfa.initial_states = {0}
         nfa.final_states = {1}
 
         transition_symbol = (1, ) if var_value else (0, )
-        cylindrified_symbol = overall_alphabet.cylindrify_symbol_of_projected_alphabet([var_name], transition_symbol)
+        cylindrified_symbol = overall_alphabet.cylindrify_symbol_of_projected_alphabet([var_id], transition_symbol)
 
         nfa.update_transition_fn(0, cylindrified_symbol, 1)  # Var = True --> accepting state
         nfa.update_transition_fn(1, cylindrified_symbol, 1)
+
+        nfa.extra_info['bool_var_value'] = var_value
 
         return nfa
 
@@ -684,14 +658,17 @@ class NFA(Generic[AutomatonState]):
             _transitions[(origin_state, destination_state)].append(symbol)
 
         transitions = []
-        for state_pair, symbols in _transitions:
-            transitions.append(state_pair[0], symbols, state_pair[1])
+        for state_pair, symbols in _transitions.items():
+            transitions.append((state_pair[0], symbols, state_pair[1]))
+
+        # TODO(temporary hack)
+        var_names = list(map(lambda id: 'v' + str(id), self.alphabet.variable_numbers))
 
         return AutomatonVisRepresentation(
             states=set(self.states),
             final_states=set(self.final_states),
             initial_states=set(self.initial_states),
-            variable_names=list(self.alphabet.variable_names),
+            variable_names=var_names,
             transitions=transitions
         )
 
