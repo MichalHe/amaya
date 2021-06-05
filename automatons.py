@@ -34,7 +34,6 @@ from relations_structures import Relation
 
 from transitions import (
     calculate_variable_bit_position,
-    unite_alphabets,
     SparseSimpleTransitionFunction
 )
 
@@ -67,20 +66,18 @@ class AutomatonType(IntFlag):
 @dataclass
 class LSBF_Alphabet():
     variable_names: Dict[int, str]
-    variable_numbers: Tuple[int, ...]
+    variable_numbers: List[int]
     active_variables: Set[str]
     active_symbols: Optional[Tuple[LSBF_AlphabetSymbol, ...]] = None
 
     @staticmethod
     def from_inequation(ineq: Relation) -> LSBF_Alphabet:
         '''Generates a compressed alphabet from given relation.'''
-        act_symbols, symbols = LSBF_Alphabet.generate_compressed_symbols(ineq.variable_coeficients)
+        act_symbols, _ = LSBF_Alphabet.generate_compressed_symbols(ineq.variable_coeficients)
 
         active_variables = [var for i, var in enumerate(ineq.variable_names) if ineq.variable_coeficients[i] != 0]
-        variable_names = sorted(ineq.variable_names)
         variable_ids = list(range(1, len(active_variables) + 1))
-        return LSBF_Alphabet(tuple(symbols),
-                             variable_names=variable_names,
+        return LSBF_Alphabet(variable_names={},
                              variable_numbers=variable_ids,
                              active_variables=set(active_variables),
                              active_symbols=act_symbols)
@@ -117,7 +114,7 @@ class LSBF_Alphabet():
                 break
 
         ni = 0  # Index to the next bit in the given symbol that should be used.
-        cylindrified_symbol = [None] * alphabet_size
+        cylindrified_symbol: List = [None] * alphabet_size
         for i in range(alphabet_size):
             if i == used_variables_cooficients[ni]:
                 cylindrified_symbol[i] = symbol[ni]
@@ -148,7 +145,7 @@ class LSBF_Alphabet():
             bits = number_to_bit_tuple(i, tuple_size=nonzero_coefs_cnt)
 
             ni = 0  # Index to the next nonused nonzero coef index
-            symbol = [None] * total_coefs_cnt
+            symbol: List = [None] * total_coefs_cnt
             for i in range(total_coefs_cnt):
                 if i == nonzero_coefs_pos[ni]:
                     symbol[i] = bits[ni]
@@ -167,33 +164,27 @@ class LSBF_Alphabet():
 
     @staticmethod
     def from_variable_names(variable_names: Tuple[str, ...]) -> LSBF_Alphabet:
-        letter_size = len(variable_names)
-        symbols = tuple(map(
-            lambda i: number_to_bit_tuple(i, tuple_size=letter_size, pad=0),
-            range(2**letter_size)
-        ))
 
-        variable_numbers = tuple(map(
+        variable_numbers = list(map(
             lambda index: index + 1,
             range(len(variable_names))))
 
         return LSBF_Alphabet(
             active_variables=set(variable_names),
-            symbols=symbols,
-            variable_names=variable_names,
+            variable_names={},
             variable_numbers=variable_numbers
         )
 
     @staticmethod
-    def from_variable_ids(variable_ids: List[int]) -> LSBF_AlphabetSymbol:
+    def from_variable_ids(variable_ids: List[int]) -> LSBF_Alphabet:
         '''Creates a new alphabet from the given variable_name, id pairs.
         The variables list should be sorted by the ID.
         '''
-        variable_names = dict()
+        variable_names: Dict[int, str] = dict()
         variable_ids = sorted(variable_ids)
 
         return LSBF_Alphabet(
-            active_variables=set(variable_names),
+            active_variables=set(),
             variable_names=variable_names,
             variable_numbers=variable_ids
         )
@@ -206,27 +197,6 @@ class LSBF_Alphabet():
 
     def bind_variable_name_to_id(self, variable_name: str, variable_id: int):
         self.variable_names[variable_id] = variable_name
-
-    def new_with_variable_removed(self,
-                                  removed_var: str) -> Optional[LSBF_Alphabet]:
-
-        new_variable_names = tuple(
-            filter(lambda variable_name: removed_var != variable_name,
-                   self.variable_names))
-
-        if len(new_variable_names) == len(self.variable_names):
-            return None  # The variable name to be removed was not present in the current variable list
-
-        active_variables = set(self.active_variables)
-        if removed_var in active_variables:
-            active_variables.remove(removed_var)
-
-        new_symbols = tuple(
-            map(number_to_bit_tuple, range(2**len(new_variable_names))))
-
-        return LSBF_Alphabet(symbols=new_symbols,
-                             variable_names=new_variable_names,
-                             active_variables=active_variables)
 
 
 @dataclass
@@ -294,7 +264,6 @@ class NFA(Generic[AutomatonState]):
     def intersection(self, other: NFA[S]):
         if self.alphabet != other.alphabet:
             assert(False)
-            self.extend_to_common_alphabet(other)
 
         logger.debug(f'Calculating intercestion with alphabet size: {len(self.alphabet.variable_names)}')
 
@@ -356,7 +325,6 @@ class NFA(Generic[AutomatonState]):
     def union(self, other: NFA[S]) -> NFA[int]:
         if self.alphabet != other.alphabet:
             assert False
-            self.extend_to_common_alphabet(other)
 
         latest_state_value, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=latest_state_value)
@@ -366,7 +334,7 @@ class NFA(Generic[AutomatonState]):
         initial_states = self_renamed.initial_states.union(other_renamed.initial_states)
         final_states = self_renamed.final_states.union(other_renamed.final_states)
 
-        union_nfa = NFA(
+        union_nfa: NFA[int] = NFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA,
             initial_states=initial_states,
@@ -377,14 +345,6 @@ class NFA(Generic[AutomatonState]):
         union_nfa.used_variables = sorted(set(self.used_variables + other.used_variables))
 
         return union_nfa
-
-    def extend_to_common_alphabet(self, other: NFA[S]):
-        unified_variable_names = unite_alphabets(self.alphabet.variable_names, other.alphabet.variable_names)
-        self.transition_fn.extend_to_new_alphabet_symbols(unified_variable_names, self.alphabet.variable_names)
-        other.transition_fn.extend_to_new_alphabet_symbols(unified_variable_names, other.alphabet.variable_names)
-
-        self.alphabet = LSBF_Alphabet.from_variable_names(unified_variable_names)
-        other.alphabet = self.alphabet
 
     def determinize(self):
         '''Performs NFA -> DFA using the powerset construction'''
@@ -676,11 +636,12 @@ class NFA(Generic[AutomatonState]):
 class MTBDD_NFA(NFA):
     automaton_id_counter = 0
     # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
-    fast_prunining_enabled = True
+    fast_prunining_enabled = False
 
     def __init__(self,
                  alphabet: LSBF_Alphabet,
                  automaton_type: AutomatonType):
+        logger.debug('Initializing an MTBDD NFA Automaton.')
         self.alphabet = alphabet
         self.automaton_type = automaton_type
         self.states: Set[int] = set()
@@ -757,6 +718,7 @@ class MTBDD_NFA(NFA):
         self.initial_states.update(other.initial_states)
 
         self.applied_operations_info += ['union']
+        self.used_variables = sorted(set(self.used_variables + other.used_variables))
 
         return self
 
@@ -838,6 +800,7 @@ class MTBDD_NFA(NFA):
         MTBDDTransitionFn.end_intersection()
         int_nfa.applied_operations_info = self.applied_operations_info + ['intersection']
 
+        int_nfa.used_variables = sorted(set(self.used_variables + other.used_variables))
         return int_nfa
 
     def perform_pad_closure(self):
@@ -851,6 +814,10 @@ class MTBDD_NFA(NFA):
         The determinized automaton has a transition for every alphabet symbol
         in every state - after determinization a completion with a trapstate is
         performed.  '''
+
+        if self.automaton_type & AutomatonType.DFA:
+            return self
+        logger.debug('Performing MTBDD NFA determinization.')
 
         work_queue = [tuple(self.initial_states)]
         dfa = MTBDD_NFA(self.alphabet, AutomatonType.DFA)
@@ -915,6 +882,7 @@ class MTBDD_NFA(NFA):
         dfa.add_trap_state()
 
         dfa.applied_operations_info = self.applied_operations_info + ['determinization']
+        dfa.used_variables = list(self.used_variables)
         return dfa
 
     def complement(self) -> MTBDD_NFA:
@@ -932,11 +900,13 @@ class MTBDD_NFA(NFA):
 
         # The initial states can never become final - the language cannot
         # contain empty word.
-        new_final_states -= dfa.initial_states
+        if not self.automaton_type & AutomatonType.TRIVIAL:
+            new_final_states -= dfa.initial_states
         dfa.final_states = new_final_states
 
         dfa.applied_operations_info += ['complement']
-
+        # Do not need to set used_variables here as the determinized automaton
+        # already has them set
         return dfa
 
     def add_trap_state(self):
@@ -947,18 +917,22 @@ class MTBDD_NFA(NFA):
         # Some states might not be present in the transition fn - have no
         # outgoing entries - fix it, so the they will have the transition to
         # trapstate afterwards
+        logger.debug('MTBDD NFA Adding trapstate...')
+        print('>>>> Before adding trapstate: \n', self.get_visualization_representation().into_graphviz())
         for state in self.states:
             if state not in self.transition_fn.mtbdds:
                 self.transition_fn.mtbdds[state] = mtbdd_false
 
         trapstate = max(self.states) + 1
         was_trapstate_added = self.transition_fn.complete_transitions_with_trapstate(trapstate)
+        logger.debug(f'Was a trapstate needed? {was_trapstate_added}.')
 
         if was_trapstate_added:
+            logger.debug(f'The trapstate value is: {trapstate}.')
             self.trapstate = trapstate
             self.states.add(self.trapstate)
 
-            all_symbols = tuple(['*'] * len(self.alphabet.active_variables))
+            all_symbols = tuple(['*'] * len(self.alphabet.variable_numbers))
 
             self.transition_fn.insert_transition(self.trapstate,
                                                  all_symbols,
@@ -972,20 +946,23 @@ class MTBDD_NFA(NFA):
         return c
 
     def do_projection(self, var: int):
-        # TODO: Check whether the variable is in fact in the active set.
+        logger.info(f'Performing MTBDD NFA projection on variable: {var}. Currently employed variables: {self.used_variables}')
         self.transition_fn.project_variable_away(var)
         self.transition_fn.do_pad_closure(self.initial_states,
                                           list(self.final_states))
 
-        removed_var = self.alphabet.variable_names[var - 1]
-        self.alphabet.active_variables.remove(removed_var)
+        self.used_variables.remove(var)
 
-        if not self.alphabet.active_variables:
+        if not self.used_variables:
+            logger.info('After the projection there are no more variables used by the MTBDD NFA - performing reduction to a trivial automaton.')
             model = self.find_some_model()
+            logger.info(f'Does the automaton have a model? model={model}')
 
             if model is None:
+                logger.info('Returning trivial rejecting automaton.')
                 return MTBDD_NFA.new_trivial_rejecting(self.alphabet)
             else:
+                logger.info('Returning trivial accepting automaton.')
                 return MTBDD_NFA.new_trivial_accepting(self.alphabet)
 
         self.applied_operations_info.append('projection')
@@ -1002,11 +979,12 @@ class MTBDD_NFA(NFA):
             The created (trivial) mtbdd automaton.
         @TODO: Can we somehow get merge the trivial automatons of plain NFA with ours?
         '''
-        nfa = MTBDD_NFA(alphabet, AutomatonType.DFA)
+        nfa = MTBDD_NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
         nfa.add_state(0)
         nfa.add_initial_state(0)
-        universal_symbol = tuple(['*'] * len(alphabet.variable_names))
+        universal_symbol = tuple(['*'] * len(alphabet.variable_numbers))
         nfa.update_transition_fn(0, universal_symbol, 0)
+        nfa.used_variables = []
         return nfa
 
     @staticmethod
@@ -1084,7 +1062,7 @@ class MTBDD_NFA(NFA):
             final_states=set(self.final_states),
             states=set(self.states),
             transitions=vis_transitions,
-            variable_names=self.alphabet.variable_names
+            variable_names=self.alphabet.variable_numbers
         )
 
 
