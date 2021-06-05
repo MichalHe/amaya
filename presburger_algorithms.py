@@ -211,7 +211,7 @@ def build_nfa_from_equality(eq: Relation,
                             automaton_constr: AutomatonConstructor):
     '''TODO'''
 
-    nfa: NFA[NFA_AutomatonStateType] = NFA(
+    nfa = automaton_constr(
         alphabet=alphabet,
         automaton_type=AutomatonType.NFA
     )
