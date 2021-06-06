@@ -310,9 +310,15 @@ class EvaluationContext:
         var_id = self._generate_new_variable_id()
         self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
 
+    def get_automaton_class_for_current_backend(self) -> Callable:
+        if self.domain == BackendType.MTBDD:
+            return MTBDD_NFA
+        else:
+            return NFA
+
 
 def emit_evaluation_progress_info(msg: str, depth: int):
-    '''Logs the provided message with the correct indentation as is the current parser depth 
+    '''Logs the provided message with the correct indentation as is the current parser depth
     in the SMT tree. The logging level is INFO by default.
     '''
     logger.info('  ' * depth + msg)
@@ -591,10 +597,11 @@ def check_result_matches(source_text: str,
     alphabet = LSBF_Alphabet.from_variable_ids(variable_ids)
     logger.info(f'The created alphabet: {alphabet}')
 
-    eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, emit_introspect, alphabet=alphabet)
+    eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, BackendType.MTBDD, emit_introspect, alphabet=alphabet)
     for constant_symbol in constant_symbols:
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
+    logger.info(f'Proceeding to assert tree evaluation (backend={eval_ctx.execution_config.backend_type.name})')
     nfa = eval_assert_tree(asserts[0], eval_ctx)
 
     should_be_sat = True  # Assume true, in case there is no info in the smt source
@@ -620,13 +627,13 @@ def build_automaton_from_presburger_relation_ast(relation_root,
                                                  ctx: EvaluationContext,
                                                  depth: int) -> NFA:
     '''Converts the provided relation to an automaton that encodes it. To do so it employs the algorithms
-    provied by the module `presburger_algorithms`. 
+    provied by the module `presburger_algorithms`.
 
     The provided evalaution context `ctx` should have already an overall alphabet attached to it.
 
-    Note: The automaton for sharp inequation (<) is not being directly built. Instead is is build as 
-    an an intersection of a complement of an automaton for the same relation but equation and non-sharp 
-    inequality -> (and (not <REL>[< -> =]) <REL>[< -> <=]). 
+    Note: The automaton for sharp inequation (<) is not being directly built. Instead is is build as
+    an an intersection of a complement of an automaton for the same relation but equation and non-sharp
+    inequality -> (and (not <REL>[< -> =]) <REL>[< -> <=]).
     '''
     building_handlers: Dict[SolutionDomain, Dict[str, Tuple[ParsingOperation, Callable]]] = {
         SolutionDomain.INTEGERS: {
@@ -651,7 +658,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     relation = extract_relation(relation_root)
     operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(
         relation.operation,
-        (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, None))  # For the '<' provide no function, as there is no direct conversion (yet?) 
+        (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, None))  # For the '<' provide no function, as there is no direct conversion (yet?)
 
     # The relation might have som yet-not-seen variables, add them if need be
     variables_with_ids = ctx.get_multiple_variable_ids(relation.variable_names)
@@ -732,8 +739,7 @@ def build_automaton_for_boolean_variable(var_name: str,
                                          ctx: EvaluationContext) -> NFA:
     logger.debug(f'Building an equivalent automaton for the bool variable {var_name}, with value {var_value}.')
     var_id = ctx.get_variable_id(var_name)
-    # @Mark(Multiple backends):   This needs to be changed to be chosen the backed currenly employed.
-    return NFA.for_bool_variable(ctx.get_alphabet(), var_id, var_value)
+    return ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), var_id, var_value)
 
 
 def evaluate_let_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA]:
@@ -752,7 +758,7 @@ def get_automaton_for_operand(operand_value: Union[str, List],
                               _depth: int) -> NFA:
     '''Tries to convert the given SMT subtree to a corresponding NFA. This is used on various places throughout
     the codebase e.g. and/or evaluation as this function provides capabilities of differentiating between
-    evaluation of a string (a SMT bool var, or some `let` bound substitution) and a situation when there is 
+    evaluation of a string (a SMT bool var, or some `let` bound substitution) and a situation when there is
     really a real subtree.'''
     if type(operand_value) == str:
         # If it is a string, then it should reference a variable
@@ -772,7 +778,7 @@ def get_automaton_for_operand(operand_value: Union[str, List],
             # the boolean be considered False, it would be encoded
             # ['not', 'var_name'], which is equivalent to the complement of the
             # automaton.
-            return build_automaton_for_boolean_variable(str(operand_value), True, ctx) 
+            return build_automaton_for_boolean_variable(str(operand_value), True, ctx)
         else:
             logger.debug(f'The variable {operand_value} is not boolean, searching `let` bindings.')
 
@@ -797,7 +803,7 @@ def evaluate_binary_conjunction_expr(expr: List,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
                                      reduction_operation: ParsingOperation,
                                      _depth: int) -> NFA:
-    '''Perform the evaluation of AND and OR expressions in an abstract fashion using the provided 
+    '''Perform the evaluation of AND and OR expressions in an abstract fashion using the provided
     reduction function (used to fold the operands into a result).'''
     assert type(expr) == list and len(expr) >= 3
     first_operand = expr[1]
@@ -806,8 +812,6 @@ def evaluate_binary_conjunction_expr(expr: List,
 
     for next_operand in expr[2:]:
         next_operand_automaton = get_automaton_for_operand(next_operand, ctx, _depth)
-
-        assert type(next_operand_automaton) == NFA
 
         ctx.stats_operation_starts(reduction_operation, reduction_result, next_operand_automaton)
         reduction_result = reduction_fn(reduction_result, next_operand_automaton)
@@ -857,8 +861,6 @@ def evaluate_not_expr(not_expr: List,
     assert len(not_expr) == 2
     operand = get_automaton_for_operand(not_expr[1], ctx, _depth)
 
-    assert type(operand) == NFA
-
     if (operand.automaton_type & AutomatonType.BOOL):
         assert len(operand.used_variables) == 1
 
@@ -866,7 +868,7 @@ def evaluate_not_expr(not_expr: List,
         variable_value: bool = operand.extra_info['bool_var_value']
         logger.debug('Complementing an automaton for a bool variable {variable_id}, returninig direct complement.')
         ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
-        result = NFA.for_bool_variable(ctx.get_alphabet(), variable_id, not variable_value)
+        result = ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), variable_id, not variable_value)
         ctx.stats_operation_ends(result)
         return result
 
@@ -934,8 +936,8 @@ def evaluate_let_expr(let_expr: List,
                       _depth: int) -> NFA:
     '''Evaluates the given let expression and returns the resulting automaton.
 
-    The let expression itself does not perform no mutation on the tree underneath, 
-    however it introduces lexical bindings (variable to NFA).   
+    The let expression itself does not perform no mutation on the tree underneath,
+    however it introduces lexical bindings (variable to NFA).
     '''
     # `let` has this structure [`let`, `<binding_list>`, <term>]
 
@@ -1028,7 +1030,6 @@ def eval_smt_tree(root,  # NOQA
         return evaluation_function(root, ctx, _debug_recursion_depth)
 
 
-
 def eval_assert_tree(assert_tree,
                      ctx: EvaluationContext) -> NFA:
     assert assert_tree[0] == 'assert'
@@ -1040,7 +1041,7 @@ def eval_assert_tree(assert_tree,
 
 
 def expand_multivariable_bindings(assertion_tree):
-    '''Preprocessing operation. In place expansion of multivariable \\exists and \\forall quantifiers to many 
+    '''Preprocessing operation. In place expansion of multivariable \\exists and \\forall quantifiers to many
     single variable quantifiers.'''
     if assertion_tree[0] in ['exists', 'forall']:
         binding_type, bindings, term = assertion_tree
