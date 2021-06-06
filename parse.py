@@ -1133,8 +1133,40 @@ def expand_implications(assertion_tree) -> int:
             return 0
 
 
-def remove_multiple_negations(assertion_tree):
-    pass
+def remove_multiple_negations(assertion_tree) -> int:
+    '''In place removes multiple negations that follow consenquently in the
+    given SMT tree.'''
+
+    if type(assertion_tree) == list:
+        root = assertion_tree[0]
+        if root == 'not':
+            assert len(assertion_tree) == 2
+            negated_expr_tree = assertion_tree[1]
+            if type(negated_expr_tree) == list:
+                negated_expr_tree_root = negated_expr_tree[0]
+                if negated_expr_tree_root == 'not':
+                    assert len(negated_expr_tree) == 2
+
+                    # We have detected the double negation, leave only one.
+                    # Copy the references (contents) of the node bellow the
+                    # double negation to the current tree - equal removing them
+
+                    # Pop both - the current node is empty
+                    assertion_tree.pop(-1)
+                    assertion_tree.pop(-1)
+
+                    for node_under_double_negation_elem in negated_expr_tree[1]:
+                        assertion_tree.append(node_under_double_negation_elem)
+
+                    return 1 + remove_multiple_negations(assertion_tree)
+        else:
+            # The current node is n-ary and is not a negation, recurse to every
+            # subtree
+            total_removed_negations = 0
+            for subtree in assertion_tree[1:]:
+                total_removed_negations += remove_multiple_negations(subtree)
+            return total_removed_negations
+    return 0
 
 
 def get_formula(_assert):
