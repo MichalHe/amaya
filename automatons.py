@@ -263,7 +263,7 @@ class NFA(Generic[AutomatonState]):
 
     def intersection(self, other: NFA[S]):
         if self.alphabet != other.alphabet:
-            assert(False)
+            assert False
 
         logger.debug(f'Calculating intercestion with alphabet size: {len(self.alphabet.variable_names)}')
 
@@ -720,13 +720,17 @@ class MTBDD_NFA(NFA):
         self.applied_operations_info += ['union']
         self.used_variables = sorted(set(self.used_variables + other.used_variables))
 
+        self.automaton_type = AutomatonType.NFA
+
         return self
 
     def is_safe_to_quick_prune_intersection_states(self) -> bool:
         no_determinization = 'determinization' not in self.applied_operations_info
         return no_determinization
 
-    def intersection(self, other: MTBDD_NFA, metastate_map={}):  # NOQA
+    def intersection(self, other: MTBDD_NFA, metastate_map: Optional[Dict[int, Tuple[int, int]]] = None):  # NOQA
+        if metastate_map is None:
+            metastate_map = dict()
 
         hightest_state = self.renumber_states(start_from=0)
         other.renumber_states(start_from=hightest_state)
@@ -754,6 +758,7 @@ class MTBDD_NFA(NFA):
 
         int_nfa = MTBDD_NFA(self.alphabet, AutomatonType.NFA)
         # Make sure that we use the single-integer state numbers not pairs
+        logger.info(f'Setting initial states to: {metastate_map.keys()} {metastate_map}')
         int_nfa.initial_states = set(metastate_map.keys())
 
         # The new automaton should have unique ID
@@ -918,7 +923,7 @@ class MTBDD_NFA(NFA):
         # outgoing entries - fix it, so the they will have the transition to
         # trapstate afterwards
         logger.debug('MTBDD NFA Adding trapstate...')
-        print('>>>> Before adding trapstate: \n', self.get_visualization_representation().into_graphviz())
+
         for state in self.states:
             if state not in self.transition_fn.mtbdds:
                 self.transition_fn.mtbdds[state] = mtbdd_false
@@ -1053,10 +1058,9 @@ class MTBDD_NFA(NFA):
             compressed_vis_symbol = replace_dont_care_bits_with_star(compressed_symbol)
             transitions[(origin, dest)].append(compressed_vis_symbol)
 
-        vis_transitions = []
+        vis_transitions = []  # Visualization transitions
         for state_pair, transition_symbols in transitions.items():
             vis_transitions.append((state_pair[0], transition_symbols, state_pair[1]))
-
         return AutomatonVisRepresentation(
             initial_states=set(self.initial_states),
             final_states=set(self.final_states),
