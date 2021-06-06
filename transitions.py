@@ -175,7 +175,7 @@ def translate_transition_fn_states(t: Transitions[State], translation: Mapping[S
     return translated_transitions
 
 
-def calculate_variable_bit_position(variable_names: Iterable[str], var: str) -> Optional[int]:
+def calculate_variable_bit_position(variable_names: Iterable[T], var: T) -> Optional[int]:
     for pos, alphabet_var_name in enumerate(variable_names):
         if alphabet_var_name == var:
             return pos
