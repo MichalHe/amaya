@@ -9,7 +9,7 @@ def vector_dot(vec1, vec2) -> int:
     assert(len(vec1) == len(vec2))
     sum_ = 0
     for a, b in zip(vec1, vec2):
-        sum_ += a*b
+        sum_ += 0 if a == '*' or b == '*' else a*b
     return sum_
 
 
@@ -105,3 +105,11 @@ def create_enumeration_state_translation_map(states: Iterable[S],
         translation[state] = new_state_name
         state_cnt += 1
     return (state_cnt, translation)
+
+
+K = TypeVar('K')
+def get_default_if_none(maybe_none: Optional[K], default: Callable[[], K]) -> K:
+    if maybe_none is None:
+        return default()
+    else:
+        return maybe_none

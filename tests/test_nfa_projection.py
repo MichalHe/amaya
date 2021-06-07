@@ -1,27 +1,34 @@
-from tests.test_nfa_intersection import nfa1  # NOQA
-from automatons import NFA
+from tests.test_nfa_intersection import mtbdd_nfa1  # NOQA
+from automatons import MTBDD_NFA, AutomatonSnapshot
 
-def test_nfa_projection(nfa1: NFA):  # NOQA
-    print(nfa1)
 
-    pnfa = nfa1.do_projection('x')
+def complement_nth_bit(symbol, bit_pos):
+    complement_sym = list(symbol)
+    if (complement_sym[bit_pos] == 1):
+        complement_sym[bit_pos] = 0
+    else:
+        complement_sym[bit_pos] = 1
+    return tuple(complement_sym)
+
+
+def test_mtbdd_nfa_projection(mtbdd_nfa1: MTBDD_NFA):  # NOQA
+
+    # Copy out the states (projection might be performed in place)
+    original_automaton = AutomatonSnapshot.create_snapshot(mtbdd_nfa1)
+
+    pnfa = mtbdd_nfa1.do_projection(1)
     assert pnfa
-    assert pnfa.states == nfa1.states
-    assert pnfa.final_states == nfa1.final_states
-    assert pnfa.initial_states == nfa1.initial_states
+    assert pnfa.states == original_automaton.states
+    assert pnfa.final_states == original_automaton.final_states
+    assert pnfa.initial_states == original_automaton.initial_states
 
-    # Size of the alphabet should not be changed.
-    assert len(pnfa.alphabet.symbols) == (len(nfa1.alphabet.symbols))
+    # expected_symbols_projection = {  # x was the first variable
+    #     (0, 0): ('*', 0),
+    #     (0, 1): ('*', 1),
+    #     (1, 0): ('*', 0),
+    #     (1, 1): ('*', 1),
+    # }
 
-    expected_symbols_projection = {  # x was the first variable
-        (0, 0): ('*', 0),
-        (0, 1): ('*', 1),
-        (1, 0): ('*', 0),
-        (1, 1): ('*', 1),
-    }
-
-    for o_src in nfa1.transition_fn:
-        for o_dest in nfa1.transition_fn[o_src]:
-            transition_symbols = nfa1.transition_fn[o_src][o_dest]
-            for original_symbol in transition_symbols:
-                assert expected_symbols_projection[original_symbol] in pnfa.transition_fn[o_src][o_dest]
+    for origin, original_symbol, destination in original_automaton.transitions:
+        assert destination in pnfa.get_transition_target(origin, original_symbol)
+        assert destination in pnfa.get_transition_target(origin, complement_nth_bit(original_symbol, 0))

@@ -35,30 +35,30 @@ def translate_variables_if_needed(variables, translations: Dict[str, str]):
     return variables
 
 
-def get_pressburger_human_readable(smt_pressburger, translations: Dict[str, str] = {}) -> str:
+def get_presburger_human_readable(smt_presburger, translations: Dict[str, str] = {}) -> str:
     '''We need to reshuffle the AST to get something human can read'''
 
-    if type(smt_pressburger) == list:
-        node_name = smt_pressburger[0]
+    if type(smt_presburger) == list:
+        node_name = smt_presburger[0]
         if node_name in ['<', '>', '<=', '>=', '=', '+', '*']:
-            lhs = get_pressburger_human_readable(smt_pressburger[1], translations)
-            rhs = get_pressburger_human_readable(smt_pressburger[2], translations)
+            lhs = get_presburger_human_readable(smt_presburger[1], translations)
+            rhs = get_presburger_human_readable(smt_presburger[2], translations)
             if node_name in ['+', '*']:
                 return f'{lhs}{node_name}{rhs}'
             return f'{lhs} {node_name} {rhs}'
         elif node_name == '-':
-            if len(smt_pressburger) == 2:
-                neg_expr = get_pressburger_human_readable(smt_pressburger[1], translations)
+            if len(smt_presburger) == 2:
+                neg_expr = get_presburger_human_readable(smt_presburger[1], translations)
                 return f'-{neg_expr}'
             else:
-                lhs = get_pressburger_human_readable(smt_pressburger[1], translations)
-                rhs = get_pressburger_human_readable(smt_pressburger[2], translations)
+                lhs = get_presburger_human_readable(smt_presburger[1], translations)
+                rhs = get_presburger_human_readable(smt_presburger[2], translations)
                 return f'{lhs}{node_name}{rhs}'
         else:
-            print(smt_pressburger)
+            print(smt_presburger)
             return "Err"
     else:
-        atom = smt_pressburger
+        atom = smt_presburger
         if atom in translations:
             return translations[atom]
         else:
@@ -96,4 +96,4 @@ def translate_smtformula_to_human_readable(smt_formula,
         subterm = translate_smtformula_to_human_readable(smt_formula[2], translated_variables)
         return f' {symbol}{binding}({subterm})'
     else:
-        return get_pressburger_human_readable(smt_formula, translated_variables)
+        return get_presburger_human_readable(smt_formula, translated_variables)

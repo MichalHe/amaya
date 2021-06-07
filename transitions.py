@@ -1,6 +1,11 @@
+from __future__ import annotations
+import collections
+from itertools import combinations
 from typing import (
     Set,
+    Callable,
     Dict,
+    Any,
     Tuple,
     Union,
     Mapping,
@@ -8,18 +13,19 @@ from typing import (
     List,
     Iterable,
     Generator,
-
-    TypeVar
+    TypeVar,
+    Generic
 )
 import functools
 import utils
+from dd.autoref import BDD
 
 Symbol = Tuple[Union[str, int], ...]
 # State = Union[str, int]
 State = TypeVar('State')
 T = TypeVar('T')
 Transitions = Dict[State, Dict[State, Set[Symbol]]]
-VariableNames = List[str]
+VariableNames = Tuple[str, ...]
 
 
 def unite_alphabets(alphabet1: VariableNames, alphabet2: VariableNames) -> VariableNames:
@@ -54,7 +60,7 @@ def get_indices_of_missing_variables(variables: VariableNames, variables_subset:
     return missing_variables_indices
 
 
-def extend_symbol_on_index(symbol: Tuple[int, ...], missing_index: int) -> Tuple[int]:
+def extend_symbol_on_index(symbol: Tuple[int, ...], missing_index: int) -> Tuple[Union[int, str], ...]:
     if missing_index >= len(symbol):
         return symbol + ('*', )
     elif missing_index == 0:
@@ -70,7 +76,9 @@ def extend_symbol_with_missing_indices(symbol: Tuple[int, ...], missing_indices:
     return patched_symbol
 
 
-def extend_transitions_to_new_alphabet_symbols(old_variables: VariableNames, new_variables: VariableNames, t: Transitions) -> Transitions:
+def extend_transitions_to_new_alphabet_symbols(old_variables: VariableNames,
+                                               new_variables: VariableNames,
+                                               t: Transitions) -> Transitions:
     missing_indices = get_indices_of_missing_variables(new_variables, old_variables)
     extended_transitions = make_transitions_copy(t)
 
@@ -167,7 +175,7 @@ def translate_transition_fn_states(t: Transitions[State], translation: Mapping[S
     return translated_transitions
 
 
-def calculate_variable_bit_position(variable_names: Iterable[str], var: str) -> Optional[int]:
+def calculate_variable_bit_position(variable_names: Iterable[T], var: T) -> Optional[int]:
     for pos, alphabet_var_name in enumerate(variable_names):
         if alphabet_var_name == var:
             return pos
@@ -209,7 +217,7 @@ def get_word_from_dfs_results(t: Transitions[State],
     return used_word
 
 
-def iterate_over_active_variables(all_variables: Tuple[str], active_variables: Set[str]):
+def iterate_over_active_variables(all_variables: Tuple[str, ...], active_variables: Set[str]):
     ordered_active_vars = list(sorted(active_variables))
     missing_variables_indices = get_indices_of_missing_variables(all_variables, ordered_active_vars)
 
@@ -272,3 +280,506 @@ def remove_all_transitions_that_contain_states(t: Transitions[State], states: Se
 
                     purged_transitions[origin][destination] = set(t[origin][destination])
     return purged_transitions
+
+
+def collect_all_outgoing_symbols_from_state(t: Transitions[State],
+                                            origin: State) -> List[Symbol]:
+    if origin not in t:
+        return []
+
+    out_symbols: List[Symbol] = []
+    for dest in t[origin]:
+        for symbol in t[origin][dest]:
+            out_symbols.append(symbol)
+    return out_symbols
+
+
+def constuct_bdd_from_transition_symbols(s: Set[Symbol], variable_names: List[str], bdd_manager: BDD) -> BDD:
+    if not s:
+        return None
+
+    def convert_symbol_to_formula(symbol: Symbol) -> str:
+        formula_parts = []
+        for i, bit in enumerate(symbol):
+            if bit == 0:
+                formula_parts.append(f'~{variable_names[i]}')
+            elif bit == 1:
+                formula_parts.append(f'{variable_names[i]}')
+
+        if not formula_parts:
+            return 'True'
+
+        return '&'.join(formula_parts)
+
+    exprs: List[BDD] = []
+
+    for symbol in s:
+        formula = convert_symbol_to_formula(symbol)
+        expr = bdd_manager.add_expr(formula)
+        exprs.append(expr)
+
+    return functools.reduce(lambda e0, e1: e0 | e1, exprs)
+
+
+def get_symbols_intersection(s0: List[Symbol], s1: List[Symbol],
+                             variable_names: Tuple[str],
+                             bdd_manager: BDD,
+                             compress_result: bool = False
+                             ) -> List[Symbol]:
+    bdd0 = constuct_bdd_from_transition_symbols(s0, variable_names, bdd_manager)
+    bdd1 = constuct_bdd_from_transition_symbols(s1, variable_names, bdd_manager)
+
+    if bdd0 is None or bdd1 is None:
+        return []
+
+    intersection = bdd0 & bdd1
+
+    symbols = []
+    if compress_result:
+        for model_eval in bdd_manager.pick_iter(intersection):
+            symbol = []
+            for vn in variable_names:
+                if vn in model_eval:
+                    symbol.append(int(model_eval[vn]))
+                else:
+                    symbol.append('*')
+
+            # symbol = tuple(map(lambda var_name: int(model_eval[var_name]), variable_names))
+            symbols.append(tuple(symbol))
+    else:
+        for model_eval in bdd_manager.pick_iter(intersection, care_vars=variable_names):
+            symbol = tuple(map(lambda var_name: int(model_eval[var_name]), variable_names))
+            symbols.append(symbol)
+
+    return symbols
+
+
+def get_bdd_transition_function(t: Transitions[State], var_names: List[str], bdd_manager: BDD) -> Dict[State, Dict[State, BDD]]:
+    bdd_t: Dict[State, Dict[State, BDD]] = {}
+
+    for origin in t:
+        bdd_t[origin] = {}
+        for dest in t[origin]:
+            bdd_t[origin][dest] = constuct_bdd_from_transition_symbols(t[origin][dest], var_names, bdd_manager)
+
+
+BDD_TransitionFn = Dict[State, Dict[State, BDD]]
+
+
+def construct_transition_fn_to_bddtfn(t: Transitions[State],
+                                      var_names: List[str],
+                                      bdd_manager: BDD) -> BDD_TransitionFn:
+    '''Constructs a sparse BDD based transition function for the given ordinary
+    (naive) transition function.'''
+    new_t: BDD_TransitionFn = {}
+    for source in t:
+        new_t[source] = {}
+        for dest in t[source]:
+            transition_bdd = constuct_bdd_from_transition_symbols(t[source][dest], var_names, bdd_manager)
+            new_t[source][dest] = transition_bdd
+    return new_t
+
+
+StateType = TypeVar('StateType')
+
+
+class SparseTransitionFunctionBase(Generic[StateType]):
+    def __init__(self):
+        self.data: Dict[Any, Dict[Any, Set[Symbol]]] = dict()
+
+    def get_symbols_between_states(self, origin, dest) -> Set:
+        if origin not in self.data:
+            return set()
+        if dest not in self.data[origin]:
+            return set()
+
+        return set(self.data[origin][dest])
+
+    def state_has_post(self, state) -> bool:
+        '''Checks whether there is some state reachable from given state.'''
+        return state in self.data
+
+    def is_in_state_post(self, origin, state) -> bool:
+        '''Checks whether the given state is a direct successor to origin (is in its post set)'''
+        if origin not in self.data:
+            return False
+        return (state in self.data[origin])
+
+    def get_states_with_post_containing(self, state) -> Set:
+        states = set()
+        for origin in self.data:
+            for dest in self.data[origin]:
+                if dest == state:
+                    states.add(origin)
+        return states
+
+    def get_state_post(self, state: int) -> List[int]:
+        if state not in self.data:
+            return []
+        return list(self.data[state].keys())
+
+
+class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
+    def __init__(self):
+        super().__init__()
+
+    def get_transition_target(self, source: StateType, symbol: Symbol) -> List[StateType]:
+        if source not in self.data:
+            return list()
+
+        out_states: Set[StateType] = set()
+        for dest in self.data[source]:
+            for t_symbol in self.data[source][dest]:
+                if symbols_intersect(t_symbol, symbol):
+                    out_states.add(dest)
+                    break  # Stop checking symbols, continue with next dest
+
+        return list(out_states)
+
+    def insert_transition(self, source: StateType, symbol: Symbol, dest: StateType):
+        if source not in self.data:
+            self.data[source] = {}
+
+        if dest not in self.data[source]:
+            self.data[source][dest] = set()  # Represent empty relation structure
+
+        self.data[source][dest].add(symbol)
+
+    def rename_states(self, mapping: Dict):
+        renamed_data: Dict = {}
+
+        for origin in self.data:
+            r_origin = mapping[origin]
+            renamed_data[r_origin] = {}
+
+            for dest in self.data[origin]:
+                r_dest = mapping[dest]
+                renamed_data[r_origin][r_dest] = self.data[origin][dest]
+
+        self.data = renamed_data
+
+    def copy(self) -> SparseSimpleTransitionFunction:
+        copy_data: Dict[StateType, Dict[StateType, Set]] = {}
+
+        for source in self.data:
+            copy_data[source] = {}
+            for dest in self.data[source]:
+                copy_data[source][dest] = set(self.data[source][dest])
+
+        copy: SparseSimpleTransitionFunction = SparseSimpleTransitionFunction()
+        copy.data = copy_data
+
+        return copy
+
+    @staticmethod
+    def union_of(t0: SparseSimpleTransitionFunction, t1: SparseSimpleTransitionFunction) -> SparseSimpleTransitionFunction:
+        union = t0.copy()
+
+        for source in t1.data:
+            if source not in union.data:
+                # We can copy the rest right away
+                union.data[source] = {}
+                for dest in t1.data[source]:
+                    union.data[source][dest] = t1.data[source][dest]
+            else:
+                # Source is present in union
+                for dest in t1.data[source]:
+                    if dest in union.data[source]:
+                        # We need to unite the BDDs -- we can get from source to dest either via BDD#0 **or** BDD#1
+                        union.data[source][dest] = union.data[source][dest].union(t1.data[source][dest])
+                    else:
+                        union.data[source][dest] = set(t1.data[source][dest])
+
+        return union
+
+    def extend_to_new_alphabet_symbols(self, new_variables, old_variables):
+        missing_indices = get_indices_of_missing_variables(new_variables, old_variables)
+
+        for origin in self.data:
+            for dest in self.data[origin]:
+                self.data[origin][dest] = set(
+                    map(
+                        lambda old_symbol: extend_symbol_with_missing_indices(
+                            old_symbol, missing_indices),  # type: ignore
+                        self.data[origin][dest]))
+
+    def complete_with_trap_state(self, alphabet,
+                                 used_variable_ids: List[int],
+                                 states: List,
+                                 trap_state: Any = 'TRAP') -> bool:
+        trap_state_present: bool = False
+
+        # This is basically the whole alphabet, with nonactive symbols compacted.
+        projected_alphabet = alphabet.gen_projection_symbols_onto_variables(used_variable_ids)
+        viable_symbols = set(map(lambda symbol: alphabet.cylindrify_symbol_of_projected_alphabet(used_variable_ids, symbol), projected_alphabet))
+
+        for origin in states:
+            out_symbols = set()
+            if origin in self.data:
+                for dest in self.data[origin]:
+                    out_symbols.update(self.data[origin][dest])
+
+            missing_symbols = viable_symbols - out_symbols
+
+            if missing_symbols and not trap_state_present:
+                universal_symbol = tuple(['*' for v in alphabet.variable_numbers])
+                self.insert_transition(trap_state, universal_symbol, trap_state)
+                trap_state_present = True
+
+            for missing_symbol in missing_symbols:
+                # WARN: Mutating dictionary while iterating over it.
+                self.insert_transition(origin, missing_symbol, trap_state)
+        return trap_state_present
+
+    def project_bit_away(self, bit_pos: int):
+        def do_projection_on_symbol(pos: int, symbol: Symbol) -> Symbol:
+            return symbol[:pos] + ('*', ) + symbol[pos + 1:]
+
+        symbol_projection_func = functools.partial(do_projection_on_symbol, bit_pos)
+        for origin in self.data:
+            for dest in self.data[origin]:
+                self.data[origin][dest] = set(map(symbol_projection_func, self.data[origin][dest]))
+
+    def iter(self) -> Generator[Tuple[StateType, Symbol, StateType], None, None]:
+        for origin in self.data:
+            for dest in self.data[origin]:
+                for sym in self.data[origin][dest]:
+                    yield (origin, sym, dest)
+
+    def remove_nonfinishing_states(self, states: Set, final_states: Set) -> Set:
+        '''BFS on rotated transitions'''
+        rotated_transitions = make_rotate_transition_function(self.data)
+
+        queue = collections.deque(final_states)
+        reachable_states = set()
+
+        while queue:
+            current_state = queue.popleft()
+            reachable_states.add(current_state)
+
+            # We might be processing a state that is terminal
+            if current_state not in rotated_transitions:
+                continue
+
+            for reachable_state in rotated_transitions[current_state]:
+                if reachable_state not in reachable_states:
+                    queue.append(reachable_state)
+
+        unreachable_states = states - reachable_states
+        if unreachable_states:
+            self.data = remove_all_transitions_that_contain_states(self.data, unreachable_states)
+
+        return reachable_states
+
+    def calculate_path_from_dfs_traversal_history(self, traversal_history, current_state, initial_states: Set):
+        return get_word_from_dfs_results(self.data,
+                                         traversal_history, current_state,
+                                         initial_states)
+
+
+class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
+    def __init__(self, manager: BDD, alphabet):
+        self.data: Dict[Any, Dict[Any, BDD]] = dict()
+        self.alphabet = alphabet
+        self.manager = manager
+
+        # We need those to construct correct cubes
+        self.vars_in_order = list(self.alphabet.variable_names)
+
+        # TODO(BDDs): Functions missing:
+        # - calculate path from dfs traversal history
+        # - remove non finishing states
+        # - project bit away
+        # - extend to new alphabet symbols?
+
+    def get_transition_target(self, source: StateType, symbol: Symbol) -> List[StateType]:
+        if source not in self.data:
+            return list()
+
+        out_states: Set[StateType] = set()
+
+        for dest in self.data[source]:
+            bdd_expr = self.data[source][dest]
+            cube = self.get_cube_from_symbol(symbol)
+            subst_expr = self.manager.let(cube, bdd_expr)
+
+            if not self.manager.to_expr(subst_expr) == 'FALSE':
+                out_states.add(dest)
+
+        return list(out_states)
+
+    def get_cube_from_symbol(self, symbol) -> Dict:
+        assert len(symbol) == len(self.alphabet.active_variables), 'Symbol bit count does not match the number of active variables'
+        assert len(symbol) == len(self.vars_in_order), 'Symbol bit count does not match the number of vars_in_order'
+
+        variable_names = self.vars_in_order
+        cube = dict()
+        for bit, var in zip(symbol, variable_names):
+            if bit == 0:
+                cube[var] = False
+            elif bit == 1:
+                cube[var] = True
+        return cube
+
+    def insert_transition(self, source: StateType, symbol: Symbol, dest: StateType):
+        if source not in self.data:
+            self.data[source] = {}
+
+        if dest not in self.data[source]:
+            self.data[source][dest] = self.manager.add_expr('FALSE')  # Represent empty relation structure
+
+        cube = self.get_cube_from_symbol(symbol)
+        new_transition_expr = self.manager.cube(cube)
+
+        self.data[source][dest] = self.manager.apply('or', self.data[source][dest], new_transition_expr)
+
+    def insert_transition_bdd(self, source: StateType, bdd: int, dest: StateType):
+        if source not in self.data:
+            self.data[source] = {}
+        self.data[source][dest] = bdd
+
+    def _write_transition_bdd(self, source: StateType, bdd: Any, dest: StateType):
+        if source not in self.data:
+            self.data[source] = {}
+        self.data[source][dest] = bdd
+
+    def rename_states(self, mapping: Dict):
+        renamed_data: Dict = {}
+
+        for origin in self.data:
+            r_origin = mapping[origin]
+            renamed_data[r_origin] = {}
+
+            for dest in self.data[origin]:
+                r_dest = mapping[dest]
+                renamed_data[r_origin][r_dest] = self.data[origin][dest]
+
+        self.data = renamed_data
+
+    def copy(self) -> SparseBDDTransitionFunction:
+        copy_data: Dict[StateType, Dict[StateType, BDD]] = {}
+
+        for source in self.data:
+            copy_data[source] = {}
+            for dest in self.data[source]:
+                copy_data[source][dest] = self.data[source][dest]
+
+        copy = SparseBDDTransitionFunction(self.manager, self.alphabet)  # type: SparseBDDTransitionFunction[Any]
+        copy.data = copy_data
+
+        return copy
+
+    @staticmethod
+    def union_of(t0: SparseBDDTransitionFunction, t1: SparseBDDTransitionFunction) -> SparseBDDTransitionFunction:
+        union = t0.copy()
+
+        for source in t1.data:
+            if source not in union.data:
+                # We can copy it right away
+                union.data[source] = {}
+                for dest in t1.data[source]:
+                    union.data[source][dest] = t1.data[source][dest]
+            else:
+                # Source is present in union
+                for dest in t1.data[source]:
+                    if dest in union.data[source]:
+                        # We need to unite the BDDs -- we can get from source to dest either via BDD#0 **or** BDD#1
+                        union.data[source][dest] = union.manager.apply('or', union.data[source][dest], t1.data[source][dest])
+                    else:
+                        union.data[source][dest] = t1.data[source][dest]
+
+        return union
+
+    def _iter_compact_models(self, bdd):
+        var_names = self.alphabet.variable_names
+        for model in self.manager.pick_iter(bdd):
+            symbol = []
+            for v_name in var_names:
+                bit = model.get(v_name, '*')
+                bit = int(bit) if type(bit) == bool else bit
+                symbol.append(bit)
+            yield tuple(symbol)
+
+    def iter(self) -> Generator[Tuple[StateType, Symbol, StateType], None, None]:
+        for source in self.data:
+            for dest in self.data[source]:
+                bdd = self.data[source][dest]
+                for symbol in self._iter_compact_models(bdd):
+                    yield (source, symbol, dest)
+
+    def complete_with_trap_state(self, alphabet, states: List, trap_state: Any = 'TRAP') -> bool:
+        trap_state_present: bool = False
+
+        for origin in states:
+            out_bdd = self.manager.add_expr('FALSE')
+            if origin in self.data:
+                for dest in self.data[origin]:
+                    out_bdd = self.manager.apply('or', out_bdd, self.data[origin][dest])
+
+            out_bdd_complement = self.manager.apply('not', out_bdd)
+            is_complement_empty = self.manager.to_expr(out_bdd_complement) == 'FALSE'
+
+            if not is_complement_empty and not trap_state_present:
+                universal_symbol = self.manager.add_expr('TRUE')
+                self._write_transition_bdd(trap_state, universal_symbol, trap_state)
+                trap_state_present = True
+
+            if not is_complement_empty:
+                # WARN: Mutating dictionary while iterating over it.
+                self._write_transition_bdd(origin, out_bdd_complement, trap_state)
+        return trap_state_present
+
+    def _apply_on_all_bdds(self, fn: Callable[[int], int]):
+        for s in self.data:
+            for dest in self.data[s]:
+                self.data[s][dest] = fn(self.data[s][dest])
+
+    def project_bit_away(self, bit_pos: int):
+        # TODO(BDDs) - how exactly are the alphabets manipulated -- active_variables??
+        var_name = self.alphabet.variable_names[bit_pos]
+        project_fn = functools.partial(self.manager.exist, [var_name])
+        self._apply_on_all_bdds(project_fn)
+        if var_name in self.alphabet.active_variables:
+            self.alphabet.active_variables.remove(var_name)
+
+            # When constructing a cube, do not include this variable.
+            self.vars_in_order.remove(var_name)
+
+    def get_minterm_system_from_states(self, states: List):
+        # Collect the raw delta sets
+        deltas = []
+        for state in states:
+            if state in self.data:
+                for dest in self.data[state]:
+                    deltas.append((self.data[state][dest], dest))
+
+        state_indices = list(range(len(deltas)))
+        system: Dict = {}
+
+        already_in_the_system__cache: Any = self.manager.add_expr('TRUE')   # TRUE \land X  = X
+        apply_cnt = 0  # Performance counter
+        for intersection_size in reversed(range(1, len(deltas) + 1)):
+            for state_combination in combinations(state_indices, intersection_size):
+                destination_state: List = []
+                bdd, dest = deltas[state_combination[0]]
+                destination_state.append(dest)
+
+                # Calculate the BDD for the intersection
+                for rest_comb_i in range(1, len(state_combination)):
+                    delta_bdd, delta_dest = deltas[state_combination[rest_comb_i]]
+                    bdd = self.manager.apply('and', bdd, delta_bdd)
+                    apply_cnt += 1
+                    destination_state.append(delta_dest)
+                destination_state_imm = tuple(destination_state)
+
+                # Subtract the rest
+                bdd = self.manager.apply('and', bdd, already_in_the_system__cache)
+                apply_cnt += 1
+
+                # Add to cache
+                already_in_the_system__cache = self.manager.apply('and', already_in_the_system__cache, self.manager.apply('not', bdd))
+                apply_cnt += 2
+
+                system[destination_state_imm] = bdd
+
+        return system

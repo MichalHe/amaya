@@ -3,7 +3,7 @@ from typing import (
     List,
     Tuple,
     Union,
-    Set
+    Set, Callable
 )
 from log import logger
 from utils import vector_dot
@@ -12,7 +12,6 @@ from automatons import (
     NFA,
     LSBF_Alphabet,
     AutomatonType,
-    AutomatonState
 )
 from relations_structures import Relation
 import math
@@ -54,8 +53,8 @@ def build_dfa_from_inequality(ineq: Relation) -> DFA:
         if currently_processed_state >= 0:
             dfa.add_final_state(currently_processed_state)
 
+        # @Optimize: iterate over act symbols projection
         for alphabet_symbol in alphabet.symbols:
-            # @Optimize: Precompute dot before graph traversal
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
@@ -142,43 +141,77 @@ def build_dfa_from_sharp_inequality(ineq: Relation) -> DFA:
     return dfa
 
 
-def build_nfa_from_inequality(ineq: Relation) -> NFA[NFA_AutomatonStateType]:
-    alphabet = LSBF_Alphabet.from_inequation(ineq)
-    nfa: NFA[NFA_AutomatonStateType] = NFA(
-        alphabet=alphabet,
-        automaton_type=AutomatonType.NFA,
-    )
+AutomatonConstructor = Callable[[LSBF_Alphabet, AutomatonType], NFA]
+
+
+def build_nfa_from_inequality(ineq: Relation,
+                              ineq_variables_ordered: List[Tuple[str, int]],
+                              alphabet: LSBF_Alphabet,
+                              automaton_constr: AutomatonConstructor) -> NFA[NFA_AutomatonStateType]:
+    '''Constructs a non-deterministic automaton for the inequality `ineq` (<=).
+    Params:
+        ineq - The inequality. The variables should be pre-sorted according to their IDs.
+        ineq_variables_ordered - An ordered list of the variables used in this
+                                 inequality with their ID (from exec. context)
+        alphabet - Alphabet containing *all* the variables present in the SMT tree.
+        automaton_constr - A factory function for constructing the automaton itself.
+    Returns:
+        The NFA encoding the inequality.
+    '''
+    nfa = automaton_constr(alphabet, AutomatonType.NFA)
+
     nfa.add_initial_state(ineq.absolute_part)
 
-    work_queue: List[int] = [ineq.absolute_part]
+    # Not every variable in the overall `alphabet` might be present in the
+    # inequality - we need to iterate over an alphabet projection to the used
+    # variables (the bitvectors used in automaton creation) and use the
+    # cylindrified version of those bitvectors to insert actual transitions.
+    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(ineq.variable_names))
 
+    # We have to postpone the addition of final state, since it has to have
+    # unique number and that we cannot tell until the end
+    f_transitions = []
+
+    work_queue: List[int] = [ineq.absolute_part]
     while work_queue:
         current_state = work_queue.pop()
         nfa.add_state(current_state)
 
-        for alphabet_symbol in alphabet.symbols:
+        for alphabet_symbol in projected_alphabet:
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             destination_state = math.floor(0.5 * (current_state - dot))
 
-            if not nfa.has_state_with_value(destination_state):
+            if not nfa.has_state_with_value(destination_state) and destination_state not in work_queue:
                 work_queue.append(destination_state)
 
-            nfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
+            nfa.update_transition_fn(current_state,
+                                     alphabet.cylindrify_symbol_of_projected_alphabet(ineq_variables_ordered, alphabet_symbol),
+                                     destination_state)
 
             # Check whether state is final
             if current_state + dot >= 0:
-                final_state = 'FINAL'
-                nfa.add_state(final_state)
-                nfa.add_final_state(final_state)
-                nfa.update_transition_fn(current_state, alphabet_symbol, final_state)
+                f_transitions.append((current_state, alphabet.cylindrify_symbol_of_projected_alphabet(ineq_variables_ordered, alphabet_symbol)))
 
+    # All states have been added, now determine the final state value
+    if f_transitions:
+        max_state = max(nfa.states)
+        final_state = max_state + 1
+        nfa.add_state(final_state)
+        nfa.add_final_state(final_state)
+        for origin, symbol in f_transitions:
+            nfa.update_transition_fn(origin, symbol, final_state)
+
+    nfa.used_variables = ineq_variables_ordered
     return nfa
 
 
-def build_nfa_from_equality(eq: Relation):
-    alphabet = LSBF_Alphabet.from_inequation(eq)
+def build_nfa_from_equality(eq: Relation,
+                            eq_variables_ordered: List[int],
+                            alphabet: LSBF_Alphabet,
+                            automaton_constr: AutomatonConstructor):
+    '''TODO'''
 
-    nfa: NFA[NFA_AutomatonStateType] = NFA(
+    nfa = automaton_constr(
         alphabet=alphabet,
         automaton_type=AutomatonType.NFA
     )
@@ -187,18 +220,26 @@ def build_nfa_from_equality(eq: Relation):
 
     states_to_explore: List[int] = [eq.absolute_part]
 
+    # We keep only the information about the origin state and transition symbol
+    # as the final state is only one
+    transitions_to_final_state: Set[Tuple[int, Tuple[int, ...]]] = set()
+
+    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(eq_variables_ordered))
+
     while states_to_explore:
-        e_state = states_to_explore.pop()
+        e_state = states_to_explore.pop()  # e_state = (currently) explored state
         nfa.add_state(e_state)
 
-        for symbol in alphabet.symbols:
+        for symbol in projected_alphabet:
             dot = vector_dot(symbol, eq.variable_coeficients)
             d_state = e_state - dot  # Discovered state
 
             # Process only even states
             if d_state % 2 == 0:
                 d_state = int(d_state / 2)
-                nfa.update_transition_fn(e_state, symbol, d_state)
+                nfa.update_transition_fn(e_state,
+                                         alphabet.cylindrify_symbol_of_projected_alphabet(eq_variables_ordered, symbol),
+                                         d_state)
 
                 # Check whether we already did process this state
                 if not nfa.has_state_with_value(d_state):
@@ -209,9 +250,18 @@ def build_nfa_from_equality(eq: Relation):
 
                 # Check whether current state should have transition to final
                 if e_state + dot == 0:
-                    nfa.add_state('FINAL')
-                    nfa.add_final_state('FINAL')
-                    nfa.update_transition_fn(e_state, symbol, 'FINAL')
+                    # Postpone the addition of the transition to final state
+                    # (we do not know the integer value of the state yet)
+                    transitions_to_final_state.add((e_state, alphabet.cylindrify_symbol_of_projected_alphabet(eq_variables_ordered, symbol)))
+
+    if transitions_to_final_state:
+        final_state = max(nfa.states) + 1
+        nfa.add_state(final_state)
+        nfa.add_final_state(final_state)
+        for origin, symbol in transitions_to_final_state:
+            nfa.update_transition_fn(origin, symbol, final_state)
+
+    nfa.used_variables = eq_variables_ordered
 
     return nfa
 
