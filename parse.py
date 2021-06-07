@@ -614,6 +614,9 @@ def check_result_matches(source_text: str,
 
     smt_info = get_smt_info(ast)
     asserts = get_asserts_from_ast(ast)
+
+    assert len(asserts) > 0, 'Cannot perform evaluation without any asserts present in the SMT source.'
+
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Detected {len(asserts)} assert statements from the source text.')
 
@@ -644,7 +647,7 @@ def check_result_matches(source_text: str,
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
     logger.info(f'Proceeding to assert tree evaluation (backend={eval_ctx.execution_config.backend_type.name})')
-    nfa = eval_assert_tree(asserts[0], eval_ctx)
+    nfa = run_evaluation_procedure(assert_tree[1], eval_ctx)
 
     should_be_sat = True  # Assume True, in case there is no info in the smt source
     if ':status' in smt_info:
@@ -789,7 +792,7 @@ def evaluate_let_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA
     binding: Dict[str, NFA] = {}
     for var_name, expr in binding_list:
         logger.debug(f'Building automaton for var {var_name} with expr: {expr}')
-        nfa = eval_smt_tree(expr, ctx)  # Indirect recursion, here we go
+        nfa = run_evaluation_procedure(expr, ctx)  # Indirect recursion, here we go
         binding[var_name] = nfa
 
     return binding
@@ -834,7 +837,7 @@ def get_automaton_for_operand(operand_value: Union[str, List],
         return nfa
     else:
         # The node must be evaluated first
-        nfa = eval_smt_tree(operand_value,
+        nfa = run_evaluation_procedure(operand_value,
                             ctx,
                             _debug_recursion_depth=_depth+1)
         return nfa
@@ -997,13 +1000,13 @@ def evaluate_let_expr(let_expr: List,
 
     # The we evaluate the term, in fact represents the value of the
     # whole `let` block
-    term_nfa = eval_smt_tree(expr_using_let_bindings, ctx, _depth + 1)
+    term_nfa = run_evaluation_procedure(expr_using_let_bindings, ctx, _depth + 1)
 
     ctx.pop_binding_context()
     return term_nfa
 
 
-def eval_smt_tree(root,  # NOQA
+def run_evaluation_procedure(root,  # NOQA
                   ctx: EvaluationContext,
                   _debug_recursion_depth=0,
                   ) -> NFA:
@@ -1013,7 +1016,6 @@ def eval_smt_tree(root,  # NOQA
         # This means that either we hit a SMT2 term (boolean variable) or
         # the tree is malformed, and therefore we cannot continue.
 
-        # TODO(psyco): This will be moved to get_nfa, replace this with a call to get_nfa.
         # Is the term a bool variable?
         is_bool_var = False
         maybe_variable_type = ctx.get_variable_type_if_defined(root)
@@ -1036,14 +1038,16 @@ def eval_smt_tree(root,  # NOQA
 
     node_name = root[0]
     if node_name in ['<', '>', '<=', '>=', '=']:
-        # We have found node which needs to be translated into NFA
+        # We have found a node which needs to be (directly) translated into NFA
+        # @Problem: This implementation does not distinguish between
+        # SMT equivalence of two boolean variables and presburger equation
         logger.info('Reached relation root, performing ITE expansion...')
 
         expanded_tree = expand_relation_on_ite(root)
 
         # If the relation was indeed expanded, the root will be 'or'
         if expanded_tree[0] == 'or':
-            return eval_smt_tree(expanded_tree, ctx, _debug_recursion_depth)
+            return run_evaluation_procedure(expanded_tree, ctx, _debug_recursion_depth)
         else:
             # The relation was no expanded
             # (maybe a second evaluation pass, after the first expansion)
@@ -1070,17 +1074,6 @@ def eval_smt_tree(root,  # NOQA
 
         evaluation_function = evaluation_functions[node_name]
         return evaluation_function(root, ctx, _debug_recursion_depth)
-
-
-def eval_assert_tree(assert_tree,
-                     ctx: EvaluationContext) -> NFA:
-    assert assert_tree[0] == 'assert'
-    # @Refactor: Replace the early stages with a call to preprocess_assert_tree
-    forall_cnt = replace_forall_with_exists(assert_tree)
-    logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
-    implications_cnt = expand_implications(assert_tree)
-    logger.info(f'Performed {implications_cnt} implications expansions in the AST.')
-    return eval_smt_tree(assert_tree[1], ctx)
 
 
 def expand_multivariable_bindings(assertion_tree):
