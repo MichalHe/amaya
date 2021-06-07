@@ -595,7 +595,19 @@ def preprocess_assert_tree(assert_tree):
 
 
 def check_result_matches(source_text: str,
-                         emit_introspect=lambda nfa, op: None) -> bool:
+                         emit_introspect: IntrospectHandle = lambda nfa, op: None) -> bool:
+    '''Verifies that the evaluation procedure produces correct results for
+    the formula in the given SMT2 source text.
+
+    Params:
+        source_text - The source text of the given formula.
+        emit_introspect - Introspection handle. Callback function that is
+                          called every time an automaton is produced during the
+                          evaluation.
+    Returns:
+        True if the results of the evaluation procedure matches the expected sat
+        value in the source_text (if missing the expected sat value is True).
+    '''
 
     tokens = lex(source_text)
     ast = build_syntax_tree(tokens)
@@ -603,7 +615,7 @@ def check_result_matches(source_text: str,
     smt_info = get_smt_info(ast)
     asserts = get_asserts_from_ast(ast)
     logger.info(f'Extracted smt-info: {smt_info}')
-    logger.info(f'Extracted {len(asserts)} from source text.')
+    logger.info(f'Detected {len(asserts)} assert statements from the source text.')
 
     eval_ctx = EvaluationContext(SolutionDomain.INTEGERS)
 
@@ -613,15 +625,19 @@ def check_result_matches(source_text: str,
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
     assert_tree = asserts[0]
-    replace_forall_with_exists(assert_tree)
-    expand_implications(assert_tree)
 
+    preprocess_assert_tree(assert_tree)
+
+    # We are interested only in the number of different variables found in the
+    # assert tree
     get_all_used_variables(asserts[0], eval_ctx)
 
-    variable_ids = list(range(1, eval_ctx.next_available_variable_id))  # Discard the name and type information, keep only IDS
-    logger.info(f'Extracted the following variables({len(variable_ids)}) ids: {variable_ids}')
+    # Generate consequent IDs to which the variable names will be bound at
+    # later stages
+    variable_ids = list(range(1, eval_ctx.next_available_variable_id))
+    logger.info(f'Identified {len(variable_ids)} different variables in the assertion tree. Creating the overall alphabet.')
     alphabet = LSBF_Alphabet.from_variable_ids(variable_ids)
-    logger.info(f'The created alphabet: {alphabet}')
+    logger.info(f'The created overall alphabet: {alphabet}')
 
     eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, BackendType.MTBDD, emit_introspect, alphabet=alphabet)
     for constant_symbol in constant_symbols:
@@ -630,7 +646,7 @@ def check_result_matches(source_text: str,
     logger.info(f'Proceeding to assert tree evaluation (backend={eval_ctx.execution_config.backend_type.name})')
     nfa = eval_assert_tree(asserts[0], eval_ctx)
 
-    should_be_sat = True  # Assume true, in case there is no info in the smt source
+    should_be_sat = True  # Assume True, in case there is no info in the smt source
     if ':status' in smt_info:
         if smt_info[':status'] == 'unsat':
             should_be_sat = False
