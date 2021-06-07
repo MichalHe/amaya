@@ -594,8 +594,9 @@ def preprocess_assert_tree(assert_tree):
     logger.info(f'Removed {double_negations_removed_cnt} negation pairs.')
 
 
-def check_result_matches(source_text: str,
-                         emit_introspect: IntrospectHandle = lambda nfa, op: None) -> bool:
+def perform_whole_evaluation_on_source_text(source_text: str,
+                                            emit_introspect: IntrospectHandle = lambda nfa, op: None
+                                            ) -> Tuple[NFA, Dict[str, str]]:
     '''Verifies that the evaluation procedure produces correct results for
     the formula in the given SMT2 source text.
 
@@ -605,8 +606,8 @@ def check_result_matches(source_text: str,
                           called every time an automaton is produced during the
                           evaluation.
     Returns:
-        True if the results of the evaluation procedure matches the expected sat
-        value in the source_text (if missing the expected sat value is True).
+        A tuple of the form (NFA, Dict) where NFA is the result of the evaluation of the first found assert tree, and
+        Dict is the smt-info collected when parsing.
     '''
 
     tokens = lex(source_text)
@@ -649,23 +650,7 @@ def check_result_matches(source_text: str,
     logger.info(f'Proceeding to assert tree evaluation (backend={eval_ctx.execution_config.backend_type.name})')
     nfa = run_evaluation_procedure(assert_tree[1], eval_ctx)
 
-    should_be_sat = True  # Assume True, in case there is no info in the smt source
-    if ':status' in smt_info:
-        if smt_info[':status'] == 'unsat':
-            should_be_sat = False
-
-    is_sat, example_word = nfa.is_sat()
-    sat_matches = is_sat == should_be_sat
-
-    if sat_matches:
-        if is_sat:
-            logger.debug(f'The result\'s SAT is OK (as expected) (SAT={is_sat}, example: {example_word})')
-        else:
-            logger.debug(f'The result\'s SAT is OK (as expected) (SAT={is_sat})')
-    else:
-        logger.warn(f'The automaton\'s SAT didn\'t match expected: actual={is_sat}, given word: {example_word}, expected={should_be_sat}')
-
-    return sat_matches
+    return (nfa, smt_info)
 
 
 def build_automaton_from_presburger_relation_ast(relation_root,
