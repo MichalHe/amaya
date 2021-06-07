@@ -58,7 +58,7 @@ python3 amaya.py benchmark --help
 #### Example - Running the TPTP benchmark
 The following command specifies a benchmark to be run as all smt2 files present in the `smt-files/tptp` folder (without recursive
 searching). The option `--backend naive` specifies that the transition functions should be stored as Python built-in sets of transition symbols
-(will not use MTBDDs). The option `--execute-times 10` specifies that every benchmark file should run 10 times. 
+(will not use MTBDDs). The option `--execute-times 10` specifies that every benchmark file should be run 10 times. 
 ```bash
 python3 amaya.py --backend naive benchmark --add-directory smt-files/tptp/ --execute-times 10
 ```
