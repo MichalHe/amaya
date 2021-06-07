@@ -98,7 +98,7 @@ class VariableInfo:
 
 
 @dataclass
-class ExecutionConfig:
+class EvaluationConfig:
     solution_domain: SolutionDomain
     backend_type: BackendType
 
@@ -125,7 +125,7 @@ class EvaluationContext:
         self.global_variables: Dict[str, VariableInfo] = {}
 
         # Execution settings
-        self.execution_config = ExecutionConfig(domain, backend)
+        self.execution_config = EvaluationConfig(domain, backend)
 
         self.logger = logging.getLogger('EvaluationContext')
         self.logger.setLevel(logging.DEBUG)
