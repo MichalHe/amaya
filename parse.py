@@ -221,7 +221,7 @@ class EvaluationContext:
                                       variable_type: VariableType = VariableType.UNSET):
         '''Creates and associates a new variable info entry in the current frame.
         If a variable of the given name already exists in the current frame an
-        exception is raised (cannot have duplicit exists?).
+        exception is raised (cannot have duplicitous exists?).
         .'''
         current_frame = self.variables_info_stack[-1]
         if variable_name not in current_frame:
@@ -231,7 +231,7 @@ class EvaluationContext:
                                                         type=variable_type)
         else:
             raise ValueError(
-                f'DUPLICIT EXISTS: Attempting to add a variable "{variable_name}" to the current frame, but it is already defined.')
+                f'DUPLICITOUS EXISTS: Attempting to add a variable "{variable_name}" to the current frame, but it is already defined.')
 
     def get_variable_type_if_defined(self, variable_name: str) -> Optional[VariableType]:
         '''Performs variable lookup in the variable frames (local -> enclosing -> global).
@@ -566,6 +566,32 @@ def get_asserts_from_ast(ast):
         if top_level_expr[0] == 'assert':
             _asserts.append(top_level_expr)
     return _asserts
+
+
+def preprocess_assert_tree(assert_tree):
+    '''Peforms preprocessing on the given assert tree. The following
+    proprocessing passes are executed (in the given order):
+        - Universal quantifiers are replaced with existential quantifiers.
+        - Implications are expanded: `A => B` <<-->> `~A or B`
+        - Consequent negation pairs are removed.
+
+    Params:
+        assert_tree - The SMT tree to be preprocessed. The preprocessing is
+                      performed in place.
+    '''
+    logger.info('Preprocessing the assert tree.')
+
+    logger.info('Replacing universal quantifiers with existential.')
+    universal_quantifier_cnt = replace_forall_with_exists(assert_tree)
+    logger.info(f'Replaced {universal_quantifier_cnt} universal quantifiers.')
+
+    logger.info('Performing implication expansions via `A => B` <<-->> `~A or B`')
+    implications_expanded = expand_implications(assert_tree)
+    logger.info(f'Expanded {implications_expanded} implications.')
+
+    logger.info('Removing double (consequent) negations.')
+    double_negations_removed_cnt = remove_multiple_negations(assert_tree)
+    logger.info(f'Removed {double_negations_removed_cnt} negation pairs.')
 
 
 def check_result_matches(source_text: str,
@@ -1033,6 +1059,7 @@ def eval_smt_tree(root,  # NOQA
 def eval_assert_tree(assert_tree,
                      ctx: EvaluationContext) -> NFA:
     assert assert_tree[0] == 'assert'
+    # @Refactor: Replace the early stages with a call to preprocess_assert_tree
     forall_cnt = replace_forall_with_exists(assert_tree)
     logger.info(f'Replaced {forall_cnt} forall nodes in the AST.')
     implications_cnt = expand_implications(assert_tree)
@@ -1071,7 +1098,7 @@ def replace_forall_with_exists(assertion_tree):
     Params:
         assertion_tree @mutable
     Returns:
-        The count of how many forall expansions occured.
+        The count of replaced universal quantifiers.
     '''
     node_replaced_const = 0
     if assertion_tree[0] == 'forall':
@@ -1102,6 +1129,14 @@ def replace_forall_with_exists(assertion_tree):
 
 
 def expand_implications(assertion_tree) -> int:
+    '''Expands implications inside the given assert tree with equivalent and
+    processable expression:
+        (`A => B` <<-->> `(~A) or B`)
+    Params:
+        assetion_tree - The assertion tree.
+    Returns:
+        Number of implications expanded.
+    '''
     root_node_name = assertion_tree[0]
     if root_node_name == '=>':
         left_statement = assertion_tree[1]
@@ -1134,8 +1169,13 @@ def expand_implications(assertion_tree) -> int:
 
 
 def remove_multiple_negations(assertion_tree) -> int:
-    '''In place removes multiple negations that follow consenquently in the
-    given SMT tree.'''
+    '''Removes duplicitous consequent negations given SMT tree.
+    Params:
+        assertion_tree - The assertion tree to remove duplicitous negations from.
+    Returns:
+        The number of removed consequent negation pairs.
+    @TODO: Refactor this - rename from `multiple negations` to `consequent negation pairs`
+    '''
 
     if type(assertion_tree) == list:
         root = assertion_tree[0]
