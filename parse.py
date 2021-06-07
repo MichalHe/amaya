@@ -101,17 +101,16 @@ class VariableInfo:
 class EvaluationConfig:
     solution_domain: SolutionDomain
     backend_type: BackendType
+    print_operation_runtime: bool = False
 
 
 class EvaluationContext:
     def __init__(self,
-                 domain: SolutionDomain,
-                 backend=BackendType.NAIVE,
+                 evaluation_config: EvaluationConfig,
                  emit_introspect=lambda nfa, operation: None,
                  alphabet: Optional[LSBF_Alphabet] = None  # From previous passes
                  ):
         self.binding_stack: List[Dict[str, NFA]] = []
-        self.domain = domain
         self.introspect_handle = emit_introspect
 
         # Evaluation stats
@@ -125,13 +124,7 @@ class EvaluationContext:
         self.global_variables: Dict[str, VariableInfo] = {}
 
         # Execution settings
-        self.execution_config = EvaluationConfig(domain, backend)
-
-        self.logger = logging.getLogger('EvaluationContext')
-        self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
+        self.execution_config = evaluation_config
 
         self.alphabet = alphabet
 
@@ -191,7 +184,8 @@ class EvaluationContext:
         runtime = time.time_ns() - start_ns
 
         stat = EvaluationStat(op, size1, size2, len(output.states), runtime)
-        logger.critical(f"Operation finished: {stat}")
+        if self.execution_config.print_operation_runtime:
+            logger.critical(f"Operation finished: {stat}")
         self.stats.append(stat)
 
     def get_all_currently_available_variables(self) -> List[Tuple[str, str]]:
@@ -311,7 +305,7 @@ class EvaluationContext:
         self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
 
     def get_automaton_class_for_current_backend(self) -> Callable:
-        if self.domain == BackendType.MTBDD:
+        if self.execution_config.solution_domain == BackendType.MTBDD:
             return MTBDD_NFA
         else:
             return NFA
@@ -595,6 +589,7 @@ def preprocess_assert_tree(assert_tree):
 
 
 def perform_whole_evaluation_on_source_text(source_text: str,
+                                            evaluation_config: EvaluationConfig,
                                             emit_introspect: IntrospectHandle = lambda nfa, op: None
                                             ) -> Tuple[NFA, Dict[str, str]]:
     '''Verifies that the evaluation procedure produces correct results for
@@ -643,7 +638,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     alphabet = LSBF_Alphabet.from_variable_ids(variable_ids)
     logger.info(f'The created overall alphabet: {alphabet}')
 
-    eval_ctx = EvaluationContext(SolutionDomain.INTEGERS, BackendType.MTBDD, emit_introspect, alphabet=alphabet)
+    eval_ctx = EvaluationContext(evaluation_config, emit_introspect, alphabet=alphabet)
     for constant_symbol in constant_symbols:
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
@@ -1203,8 +1198,27 @@ def remove_multiple_negations(assertion_tree) -> int:
     return 0
 
 
-def get_formula(_assert):
-    return _assert[1]
+def get_sat_value_from_smt_info(smt_info: Dict[str, str], default: Optional[bool] = True) -> Optional[Tuple[bool, str]]:
+    '''Parses the information collected from the smt-info blocks for the expected SAT value.
+    Params:
+        smt_info: The dictionary containing the parsed information from smt-info statements
+        default:  If the SAT information is not present, the default (fallback) value might be specified.
+    Returns:
+        A tuple of the form (bool, str) carrying the boolean representation of the expected SAT
+        along with the string represenatation.
+    '''
+    expected_sat: Optional[bool] = default
+
+    if ':status' in smt_info:
+        if smt_info[':status'] == 'unsat':
+            expected_sat = False
+        elif smt_info[':status'] == 'sat':
+            expected_sat = True
+
+    if expected_sat is None:
+        return None
+    expected_sat_str = 'sat' if expected_sat else 'unsat'
+    return (expected_sat, expected_sat_str)
 
 
 def get_smt_info(ast) -> Dict[str, Any]:
