@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes as ct
-from typing import Dict, Any, Tuple, Union, List, Iterable, Optional
+from typing import Dict, Any, Set, Tuple, Union, List, Iterable, Optional
 
 mtbdd_wrapper = ct.CDLL('./amaya-mtbdd.so', mode=1)
 mtbdd_wrapper.init_machinery()
@@ -140,6 +140,19 @@ mtbdd_wrapper.amaya_get_state_post_with_some_transition.argtypes = (
     ct.POINTER(ct.c_uint32)              # OUT The number of located states
 )
 mtbdd_wrapper.amaya_get_state_post_with_some_transition.restype = ct.POINTER(ct.c_int)
+
+mtbdd_wrapper.amaya_remove_states_from_transitions.argtypes = (
+    ct.POINTER(ct.c_ulong),
+    ct.c_uint32,
+    ct.POINTER(ct.c_int),
+    ct.c_uint32
+)
+mtbdd_wrapper.amaya_remove_states_from_transitions.restype = ct.POINTER(ct.c_ulong)
+
+# mtbdd_wrapper.amaya_print_dot.argtypes = (
+#     ct.c_ulong,
+#     ct.c_int32
+# )
 
 
 mtbdd_false = ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
@@ -374,7 +387,7 @@ class MTBDDTransitionFn():
 
     def get_state_pre(self, state: int, initial_states: Iterable[int]) -> List[int]:
         if not self.is_post_cache_valid:
-            self.post_cache = self._build_morph_map(initial_states)
+            self.post_cache = self.build_automaton_adjacency_matrix(initial_states)
 
         # Use the post cache to calculate state pre.
         state_pre = set()
@@ -384,7 +397,7 @@ class MTBDDTransitionFn():
                 state_pre.add(s)
         return list(state_pre)
 
-    def _build_morph_map(self, initial_states: Iterable[int]) -> Dict[int, List[int]]:
+    def build_automaton_adjacency_matrix(self, initial_states: Iterable[int]) -> Dict[int, Set[int]]:
         '''Builds the image of the transition function with the information
         about transition symbols left out.'''
 
@@ -392,7 +405,7 @@ class MTBDDTransitionFn():
         work_queue = list(initial_states)
         while work_queue:
             state = work_queue.pop(-1)
-            state_post = self.get_state_post(state)
+            state_post = set(self.get_state_post(state))
             if not state_post:
                 # state is terminal
                 continue
@@ -783,6 +796,48 @@ class MTBDDTransitionFn():
 
         mtbdd_wrapper.amaya_do_free(_out_states)
         return state_transition_symbol_pairs
+
+    @staticmethod
+    def remove_states_from_mtbdd_transitions(mtbdds: List[ct.c_ulong], removed_states: Iterable[int]) -> List[ct.c_ulong]:
+        '''Removes the specified states from given transition mtbdds.
+        Returns:
+            The list of transition mtbdds without the removed states, in the same order as given.
+        '''
+
+        _mtbdds = (ct.c_ulong * len(mtbdds))(*mtbdds)
+        _mtbdds_cnt = ct.c_uint32(len(mtbdds))
+        _removed_states = (ct.c_int * len(removed_states))(*removed_states)
+        _removed_states_cnt = ct.c_uint32(len(removed_states))
+
+        _patched_mtbdds = mtbdd_wrapper.amaya_remove_states_from_transitions(ct.cast(_mtbdds, ct.POINTER(ct.c_ulong)),
+                                                                             _mtbdds_cnt,
+                                                                             ct.cast(_removed_states, ct.POINTER(ct.c_int)),
+                                                                             _removed_states_cnt)
+        patched_mtbdds: List[ct.c_ulong] = list()
+        for i in range(len(mtbdds)):
+            patched_mtbdds.append(_patched_mtbdds[i])
+
+        mtbdd_wrapper.amaya_do_free(_patched_mtbdds)
+
+        return patched_mtbdds
+
+    def remove_states(self, removed_states: Iterable[int]):
+        # It is worth processing only those mtbdds that will be left after the
+        # removal.
+        transition_origins_after_removal = list(set(self.mtbdds.keys()) - set(removed_states))
+
+        transitions_mtbdds = []
+        for transition_origin in transition_origins_after_removal:
+            transitions_mtbdds.append(self.mtbdds[transition_origin])
+
+        patched_mtbdds = MTBDDTransitionFn.remove_states_from_mtbdd_transitions(transitions_mtbdds, removed_states)
+
+        new_mtbdds: Dict[int, ct.c_ulong] = {}
+        for state, patched_mtbdd in zip(transition_origins_after_removal, patched_mtbdds):
+            if patched_mtbdd == mtbdd_false:
+                continue
+            new_mtbdds[state] = patched_mtbdd
+        self.mtbdds = new_mtbdds
 
     def change_automaton_ids_for_leaves(self, new_id: int):
         mtbdd_roots_arr = (ct.c_ulong * len(self.mtbdds))()

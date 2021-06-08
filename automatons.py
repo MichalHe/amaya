@@ -101,10 +101,6 @@ class LSBF_Alphabet():
         this one away.'''
         alphabet_size = len(self.variable_numbers)
 
-        print(variables)
-        print(symbol)
-        print(self.variable_numbers)
-
         # Create a list of indices where we should put the values from the
         # provided symbol (rest will be '*')
         vi = 0  # Index of the next variable name in provided variables to be checked
@@ -747,16 +743,14 @@ class MTBDD_NFA(NFA):
         logger.debug('Is pruning enabled {0}'.format(self.fast_prunining_enabled))
         hightest_state = self.renumber_states(start_from=0)
         other.renumber_states(start_from=hightest_state)
-        logger.debug('Done')
+        logger.debug('Intersection state renumbering done.')
 
         prune_configuration = (False, [])
         if MTBDD_NFA.fast_prunining_enabled:
             if self.is_safe_to_quick_prune_intersection_states() and other.is_safe_to_quick_prune_intersection_states():
                 prune_configuration = (True, list(self.final_states.union(other.final_states)))
 
-        logger.debug('Before begin intersection.')
         MTBDDTransitionFn.begin_intersection(prune_configuration)
-        logger.debug('Before after intersection.')
 
         def set_cross(s1: Iterable[int], s2: Iterable[int]):
             for left_state in s1:
@@ -784,7 +778,7 @@ class MTBDD_NFA(NFA):
         while work_queue:
             cur_state = work_queue.pop(-1)
             cur_metastate = metastate_map[cur_state]
-            print(f'Processing metastate: {cur_metastate}')
+            logger.debug(f'MTBDD NFA: Processing metastate: {cur_metastate}, remaining in work queue: {len(work_queue)}')
 
             if cur_state in int_nfa.states:
                 continue  # Each state can be processed only once
@@ -823,6 +817,9 @@ class MTBDD_NFA(NFA):
         int_nfa.applied_operations_info = self.applied_operations_info + ['intersection']
 
         int_nfa.used_variables = sorted(set(self.used_variables + other.used_variables))
+
+        int_nfa.remove_nonfinishing_states()
+
         logger.debug('Exiting MTBDD NFA intersection procedure.')
         return int_nfa
 
@@ -969,11 +966,15 @@ class MTBDD_NFA(NFA):
         MTBDD_NFA.automaton_id_counter += 1
         return c
 
-    def do_projection(self, var: int):
+    def do_projection(self, var: int, skip_pad_closure: bool = False):
         logger.info(f'Performing MTBDD NFA projection on variable: {var}. Currently employed variables: {self.used_variables}')
         self.transition_fn.project_variable_away(var)
-        self.transition_fn.do_pad_closure(self.initial_states,
-                                          list(self.final_states))
+
+        logger.debug(f'Variable projected away, proceeding to padding closure. Should skip pad closure?: {skip_pad_closure}')
+        if not skip_pad_closure:
+            self.transition_fn.do_pad_closure(self.initial_states,
+                                              list(self.final_states))
+            logger.debug('Padding closure done.')
 
         self.used_variables.remove(var)
 
@@ -1061,6 +1062,7 @@ class MTBDD_NFA(NFA):
         return None
 
     def get_visualization_representation(self) -> AutomatonVisRepresentation:
+
         '''Returns a structure carrying all necessary information to visualize this automaton.'''
         # Most of the information is already present, the only thing remaining
         # is to collect the transition function stored within the mtbdds.
@@ -1087,6 +1089,42 @@ class MTBDD_NFA(NFA):
             transitions=vis_transitions,
             variable_names=self.alphabet.variable_numbers
         )
+
+    def remove_nonfinishing_states(self):
+        '''Removes states from which is not reachable any acceptable state.'''
+        logger.debug('Removing automaton nonfinishing states.')
+        mtbdd_transition_fn: MTBDDTransitionFn = self.transition_fn  # type: ignore
+        adjacency_matrix = mtbdd_transition_fn.build_automaton_adjacency_matrix(self.initial_states)
+
+        logger.debug('Adjacency matrix built from the MTBDD transition FN, reversing.')
+
+        reversed_adjacency_matrix: Dict[int, Set[int]] = defaultdict(set)
+        for origin_state in adjacency_matrix:
+            for destination_state in adjacency_matrix[origin_state]:
+                reversed_adjacency_matrix[destination_state].add(origin_state)
+
+        logger.debug('Reversed adjacency matrix built, identifying states that do not lead to an accepting state.')
+
+        work_queue = list(self.final_states)  # The final states themselves can always reach themselves
+        states_reaching_accepting_state: Set[int] = set()
+        while work_queue:
+            current_state = work_queue.pop(-1)
+            states_reaching_accepting_state.add(current_state)
+
+            # Take the PRE of current state and add it to the work queue
+            for pre_state in reversed_adjacency_matrix[current_state]:
+                # Note that if there is a self loop on current state it will
+                # not be added as it already is in the processed states set
+                if pre_state not in states_reaching_accepting_state and pre_state not in work_queue:
+                    work_queue.append(pre_state)
+
+        states_removed = self.states - states_reaching_accepting_state
+
+        logger.debug('Removing nonfinishing states from the MTBDD transitions.')
+        logger.debug(f'Removed {len(states_removed)} out of {len(self.states)}.')
+
+        self.transition_fn.remove_states(states_removed)
+        self.states = states_reaching_accepting_state
 
 
 @dataclass
