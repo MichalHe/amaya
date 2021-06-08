@@ -7,7 +7,7 @@ from ast_relations import (
 )
 
 from automatons import NFA, AutomatonType, MTBDD_NFA, LSBF_Alphabet
-from log import logger, formatter
+from log import logger
 from logging import INFO
 from dataclasses import dataclass
 import time
@@ -23,8 +23,6 @@ from typing import (
     Optional
 )
 from enum import IntEnum, Enum
-import logging
-import sys
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
@@ -159,7 +157,7 @@ class EvaluationContext:
             self.insert_let_binding(var_name, nfa)
 
     def pop_binding_context(self):
-        popped_ctx = self.binding_stack.pop(-1)
+        self.binding_stack.pop(-1)
 
     def emit_evaluation_introspection_info(self, nfa: NFA, operation: ParsingOperation):
         self.introspect_handle(nfa, operation)
@@ -299,8 +297,9 @@ class EvaluationContext:
         return assigned_ids
 
     def add_global_variable(self, var_name: str, var_type: VariableType = VariableType.UNSET):
-        var_id = self._generate_new_variable_id()
-        self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
+        if var_name not in self.global_variables:
+            var_id = self._generate_new_variable_id()
+            self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
 
     def get_automaton_class_for_current_backend(self) -> Union[Type[NFA], Type[MTBDD_NFA]]:
         if self.execution_config.backend_type == BackendType.MTBDD:
@@ -422,7 +421,7 @@ def is_tree_presburger_equality(tree, ctx: EvaluationContext) -> bool:
         maybe_right_literal_var = try_retrieve_variable_if_literal(tree[2])
 
         if maybe_left_literal_var is None or maybe_right_literal_var is None:
-            return False
+            return True
 
         return not (is_literal_from_let_or_boolean_var(maybe_left_literal_var) and is_literal_from_let_or_boolean_var(maybe_right_literal_var))
 
@@ -446,7 +445,7 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
             return set()
         else:
             info = ctx.get_variable_info(tree)
-            return {(info.name, info.id, info.type)}
+            return set([(info.name, info.id, info.type)])
 
     root = tree[0]
     if root in ['<', '<=', '>=', '>', '=']:
@@ -821,8 +820,8 @@ def get_automaton_for_operand(operand_value: Union[str, List],
     else:
         # The node must be evaluated first
         nfa = run_evaluation_procedure(operand_value,
-                            ctx,
-                            _debug_recursion_depth=_depth+1)
+                                       ctx,
+                                       _debug_recursion_depth=_depth+1)
         return nfa
 
 
