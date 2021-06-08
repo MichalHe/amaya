@@ -144,7 +144,6 @@ class EvaluationContext:
 
     def new_let_binding_context(self):
         '''Creates a new binding frame/context.'''
-        self.logger.debug('Entering a new binding context.')
         self.binding_stack.append(dict())
 
     def insert_let_binding(self, var_name: str, nfa: NFA):
@@ -160,7 +159,6 @@ class EvaluationContext:
 
     def pop_binding_context(self):
         popped_ctx = self.binding_stack.pop(-1)
-        self.logger.debug(f'Popping the current let binding context. Contents: {popped_ctx}')
 
     def emit_evaluation_introspection_info(self, nfa: NFA, operation: ParsingOperation):
         self.introspect_handle(nfa, operation)
@@ -271,7 +269,6 @@ class EvaluationContext:
         if maybe_variable is not None:
             return maybe_variable
 
-        self.logger.debug(f'Querying information for variable (variable_name="{variable_name}") which is unbound, creating global variable entry.')
         variable_id = self._generate_new_variable_id()
         new_variable_info = VariableInfo(id=variable_id,
                                          name=variable_name,
@@ -305,7 +302,7 @@ class EvaluationContext:
         self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
 
     def get_automaton_class_for_current_backend(self) -> Callable:
-        if self.execution_config.solution_domain == BackendType.MTBDD:
+        if self.execution_config.backend_type == BackendType.MTBDD:
             return MTBDD_NFA
         else:
             return NFA
@@ -505,7 +502,7 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
             variables_inside_let_bindings = variables_inside_let_bindings.union(get_all_used_variables(variable_tree, ctx))
         term_vars = get_all_used_variables(tree[2], ctx)
         ctx.pop_binding_context()
-        return term_vars.union(vars)
+        return term_vars.union(variables_inside_let_bindings)
     else:
         raise ValueError(f'Unhandled branch when exploring the SMT tree. {tree}')
 
@@ -616,7 +613,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Detected {len(asserts)} assert statements from the source text.')
 
-    eval_ctx = EvaluationContext(SolutionDomain.INTEGERS)
+    eval_ctx = EvaluationContext(EvaluationConfig(SolutionDomain.INTEGERS, BackendType.NAIVE))
 
     function_symbols = get_declared_function_symbols(ast)
     constant_symbols = list(filter(lambda function_symbol: function_symbol.arity == 0, function_symbols))

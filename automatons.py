@@ -603,6 +603,7 @@ class NFA(Generic[AutomatonState]):
         nfa.update_transition_fn(0, cylindrified_symbol, 1)  # Var = True --> accepting state
         nfa.update_transition_fn(1, cylindrified_symbol, 1)
 
+        nfa.extra_info = {}
         nfa.extra_info['bool_var_value'] = var_value
 
         return nfa
@@ -636,11 +637,12 @@ class NFA(Generic[AutomatonState]):
 class MTBDD_NFA(NFA):
     automaton_id_counter = 0
     # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
-    fast_prunining_enabled = False
+    fast_prunining_enabled = True
 
     def __init__(self,
                  alphabet: LSBF_Alphabet,
-                 automaton_type: AutomatonType):
+                 automaton_type: AutomatonType,
+                 used_variables: List[int] = []):
         logger.debug('Initializing an MTBDD NFA Automaton.')
         self.alphabet = alphabet
         self.automaton_type = automaton_type
@@ -650,6 +652,7 @@ class MTBDD_NFA(NFA):
         self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_numbers, MTBDD_NFA.automaton_id_counter)
         self.trapstate = None
         self.applied_operations_info = []
+        self.used_variables = used_variables
         MTBDD_NFA.automaton_id_counter += 1
 
     def add_state(self, state: int):
@@ -705,6 +708,7 @@ class MTBDD_NFA(NFA):
         return self.transition_fn.get_state_post(state)
 
     def union(self, other: MTBDD_NFA) -> MTBDD_NFA:
+        logger.debug('Entering MTBDD NFA union procedure.')
         first_unreached_state = self.renumber_states(start_from=0)
 
         other.renumber_states(start_from=first_unreached_state)
@@ -722,6 +726,7 @@ class MTBDD_NFA(NFA):
 
         self.automaton_type = AutomatonType.NFA
 
+        logger.debug('Exiting MTBDD NFA union procedure.')
         return self
 
     def is_safe_to_quick_prune_intersection_states(self) -> bool:
@@ -729,18 +734,25 @@ class MTBDD_NFA(NFA):
         return no_determinization
 
     def intersection(self, other: MTBDD_NFA, metastate_map: Optional[Dict[int, Tuple[int, int]]] = None):  # NOQA
+        logger.debug('Entering MTBDD NFA intersection procedure.')
         if metastate_map is None:
             metastate_map = dict()
 
+        logger.debug(f'Beginning to renumber states. Self state count: {len(self.states)} {len(other.states)}')
+        logger.debug('Is safe pruning possible? self={0} other{1}'.format(self.is_safe_to_quick_prune_intersection_states(), other.is_safe_to_quick_prune_intersection_states()))
+        logger.debug('Is pruning enabled {0}'.format(self.fast_prunining_enabled))
         hightest_state = self.renumber_states(start_from=0)
         other.renumber_states(start_from=hightest_state)
+        logger.debug('Done')
 
         prune_configuration = (False, [])
         if MTBDD_NFA.fast_prunining_enabled:
             if self.is_safe_to_quick_prune_intersection_states() and other.is_safe_to_quick_prune_intersection_states():
                 prune_configuration = (True, list(self.final_states.union(other.final_states)))
 
+        logger.debug('Before begin intersection.')
         MTBDDTransitionFn.begin_intersection(prune_configuration)
+        logger.debug('Before after intersection.')
 
         def set_cross(s1: Iterable[int], s2: Iterable[int]):
             for left_state in s1:
@@ -768,6 +780,7 @@ class MTBDD_NFA(NFA):
         while work_queue:
             cur_state = work_queue.pop(-1)
             cur_metastate = metastate_map[cur_state]
+            print(f'Processing metastate: {cur_metastate}')
 
             if cur_state in int_nfa.states:
                 continue  # Each state can be processed only once
@@ -806,6 +819,7 @@ class MTBDD_NFA(NFA):
         int_nfa.applied_operations_info = self.applied_operations_info + ['intersection']
 
         int_nfa.used_variables = sorted(set(self.used_variables + other.used_variables))
+        logger.debug('Exiting MTBDD NFA intersection procedure.')
         return int_nfa
 
     def perform_pad_closure(self):
@@ -888,6 +902,7 @@ class MTBDD_NFA(NFA):
 
         dfa.applied_operations_info = self.applied_operations_info + ['determinization']
         dfa.used_variables = list(self.used_variables)
+        logger.debug('Exiting MTBDD NFA determinization procedure.')
         return dfa
 
     def complement(self) -> MTBDD_NFA:

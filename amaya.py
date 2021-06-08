@@ -226,6 +226,7 @@ def run_in_getsat_mode(args):
 
     with open(args.input_file) as input_file:
         input_text = input_file.read()
+        logger.info(f'Executing evaluation procedure with configuration: {evaluation_config}')
         nfa, smt_info = parse.perform_whole_evaluation_on_source_text(input_text, evaluation_config, handle_automaton_created_fn)
 
         expected_sat = True
