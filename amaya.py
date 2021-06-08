@@ -235,7 +235,7 @@ def run_in_getsat_mode(args):
                 expected_sat = False
             logger.info(f'Retrieved expected SAT value from the smt-info statements: expected_sat={expected_sat}')
         else:
-            logger.warn('The given file is missing the smt-info statement specifying the expected SAT value (`:status` field), assuming expected_sat=True.')
+            logger.warning('The given file is missing the smt-info statement specifying the expected SAT value (`:status` field), assuming expected_sat=True.')
 
         actual_sat, model = nfa.is_sat()
         logger.info(f'The SAT value of the result automaton: actual_sat={actual_sat}')
