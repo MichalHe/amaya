@@ -101,6 +101,10 @@ class LSBF_Alphabet():
         this one away.'''
         alphabet_size = len(self.variable_numbers)
 
+        print(variables)
+        print(symbol)
+        print(self.variable_numbers)
+
         # Create a list of indices where we should put the values from the
         # provided symbol (rest will be '*')
         vi = 0  # Index of the next variable name in provided variables to be checked
@@ -980,16 +984,16 @@ class MTBDD_NFA(NFA):
 
             if model is None:
                 logger.info('Returning trivial rejecting automaton.')
-                return MTBDD_NFA.new_trivial_rejecting(self.alphabet)
+                return MTBDD_NFA.trivial_nonaccepting(self.alphabet)
             else:
                 logger.info('Returning trivial accepting automaton.')
-                return MTBDD_NFA.new_trivial_accepting(self.alphabet)
+                return MTBDD_NFA.trivial_accepting(self.alphabet)
 
         self.applied_operations_info.append('projection')
         return self
 
     @staticmethod
-    def new_trivial_rejecting(alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+    def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> MTBDD_NFA:
         '''Creates a new NFA backed by MTBDDs that contains only one state (that is initial
         and not final) and has loop to self over all alphabet symbols.
 
@@ -1008,7 +1012,7 @@ class MTBDD_NFA(NFA):
         return nfa
 
     @staticmethod
-    def new_trivial_accepting(alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+    def trivial_accepting(alphabet: LSBF_Alphabet) -> MTBDD_NFA:
         '''Creates a new NFA backed by MTBDDs that contains only one state (that is initial
         and and **final**) and has loop to self over all alphabet symbols.
 
@@ -1017,7 +1021,7 @@ class MTBDD_NFA(NFA):
         Returns:
             The created (trivial) mtbdd automaton.
         '''
-        nfa = MTBDD_NFA.new_trivial_rejecting(alphabet)
+        nfa = MTBDD_NFA.trivial_nonaccepting(alphabet)
         nfa.add_final_state(0)  # Just toggle the finality of the rejecting state
         return nfa
 
