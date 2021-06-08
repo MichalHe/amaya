@@ -16,6 +16,7 @@ from typing import (
     Set,
     Tuple,
     Any,
+    Type,
     Union,
     Dict,
     Callable,
@@ -301,7 +302,7 @@ class EvaluationContext:
         var_id = self._generate_new_variable_id()
         self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
 
-    def get_automaton_class_for_current_backend(self) -> Callable:
+    def get_automaton_class_for_current_backend(self) -> Union[Type[NFA], Type[MTBDD_NFA]]:
         if self.execution_config.backend_type == BackendType.MTBDD:
             return MTBDD_NFA
         else:
@@ -678,6 +679,11 @@ def build_automaton_from_presburger_relation_ast(relation_root,
 
     logger.debug(f'Building an automaton for: {relation_root}')
     relation = extract_relation(relation_root)
+    if relation.is_always_satisfied():
+        assert ctx.alphabet, 'The context must have alphabet already created in the second stage of evaluation'
+        logger.info(f'Encountered relation that is always true: {relation_root}, returning trivial accepting automaton.')
+        return ctx.get_automaton_class_for_current_backend().trivial_accepting(ctx.alphabet)
+
     operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(
         relation.operation,
         (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, None))  # For the '<' provide no function, as there is no direct conversion (yet?)

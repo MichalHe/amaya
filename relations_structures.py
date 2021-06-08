@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import (
+    Callable,
     List,
     Dict
 )
@@ -12,6 +13,35 @@ class Relation:
     variable_coeficients: List[int]
     absolute_part: int
     operation: str
+
+    def are_all_coeficients_zero(self) -> bool:
+        '''Returns true if all relation variable coeficients are zero.'''
+        are_all_coefs_zero = True
+        for coef in self.variable_coeficients:
+            if coef != 0:
+                are_all_coefs_zero = False
+                break
+        return are_all_coefs_zero
+
+    def is_always_satisfied(self) -> bool:
+        '''Returns true if all the variable cooeficients are zero and
+        the relation is satisfied.'''
+        are_all_coefs_zero = self.are_all_coeficients_zero()
+
+        if are_all_coefs_zero:
+            # \\vec{coefs} \cdot \\vec{variables}   (left hand side) is always zero
+            absolute_part_conditions: Dict[str, Callable[[int], bool]] = {
+                '<': lambda absolute_part: absolute_part > 0,
+                '<=': lambda absolute_part: absolute_part >= 0,
+                '=': lambda absolute_part: absolute_part == 0,
+                '>': lambda absolute_part: absolute_part < 0,
+                '>=': lambda absolute_part: absolute_part <= 0,
+            }
+
+            absolute_part_condition = absolute_part_conditions[self.operation]
+            return absolute_part_condition(self.absolute_part)
+        else:
+            return False
 
 
 @dataclass

@@ -305,5 +305,9 @@ def try_retrieve_variable_if_literal(ast) -> Optional[str]:
     if type(ast) == list:
         if ast[0] == 'not':
             return try_retrieve_variable_if_literal(ast[1])
+        else:
+            # We have some node that is not a negation - that means we do not have a literal,
+            # which is only bare variable with some negation prefix
+            return None 
     else:
         return ast
