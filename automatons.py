@@ -423,7 +423,7 @@ class NFA(Generic[AutomatonState]):
 
         self.transition_fn.rename_states(state_name_translation)
 
-    def do_projection(self, variable_id: int) -> Optional[NFA]:
+    def do_projection(self, variable_id: int, skip_pad_closure: bool = False) -> Optional[NFA]:
         resulting_alphabet_var_count = len(self.used_variables) - 1
 
         if resulting_alphabet_var_count == 0:
@@ -637,7 +637,7 @@ class NFA(Generic[AutomatonState]):
 class MTBDD_NFA(NFA):
     automaton_id_counter = 0
     # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
-    fast_prunining_enabled = True
+    fast_prunining_enabled = False
 
     def __init__(self,
                  alphabet: LSBF_Alphabet,
@@ -739,8 +739,9 @@ class MTBDD_NFA(NFA):
             metastate_map = dict()
 
         logger.debug(f'Beginning to renumber states. Self state count: {len(self.states)} {len(other.states)}')
-        logger.debug('Is safe pruning possible? self={0} other{1}'.format(self.is_safe_to_quick_prune_intersection_states(), other.is_safe_to_quick_prune_intersection_states()))
         logger.debug('Is pruning enabled {0}'.format(self.fast_prunining_enabled))
+        if self.fast_prunining_enabled:
+            logger.debug('Is early safe pruning possible? self={0} other={1}'.format(self.is_safe_to_quick_prune_intersection_states(), other.is_safe_to_quick_prune_intersection_states()))
         hightest_state = self.renumber_states(start_from=0)
         other.renumber_states(start_from=hightest_state)
         logger.debug('Intersection state renumbering done.')
@@ -940,9 +941,11 @@ class MTBDD_NFA(NFA):
         # trapstate afterwards
         logger.debug('MTBDD NFA Adding trapstate...')
 
+        logger.debug('Populating transition function with empty mtbdd where an origin state is missing.')
         for state in self.states:
             if state not in self.transition_fn.mtbdds:
                 self.transition_fn.mtbdds[state] = mtbdd_false
+        logger.debug('Done.')
 
         trapstate = max(self.states) + 1
         was_trapstate_added = self.transition_fn.complete_transitions_with_trapstate(trapstate)
@@ -975,6 +978,8 @@ class MTBDD_NFA(NFA):
             self.transition_fn.do_pad_closure(self.initial_states,
                                               list(self.final_states))
             logger.debug('Padding closure done.')
+        else:
+            logger.debug('Skipping padding closure.')
 
         self.used_variables.remove(var)
 
