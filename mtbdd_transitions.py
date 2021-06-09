@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ctypes as ct
 from typing import Dict, Any, Set, Tuple, Union, List, Iterable, Optional
+from collections import defaultdict
 
 mtbdd_wrapper = ct.CDLL('./amaya-mtbdd.so', mode=1)
 mtbdd_wrapper.init_machinery()
@@ -416,18 +417,31 @@ class MTBDDTransitionFn():
                     work_queue.append(new_state)
         return morph_map
 
+    @staticmethod
+    def reverse_adjacency_matrix(adjacency_matrix: Dict[int, Set[int]]) -> Dict[int, Set[int]]:
+        reversed_adjacency_matrix: Dict[int, Set[int]] = defaultdict(set)
+        for origin_state in adjacency_matrix:
+            for destination_state in adjacency_matrix[origin_state]:
+                reversed_adjacency_matrix[destination_state].add(origin_state)
+        return reversed_adjacency_matrix
+
     def do_pad_closure(self, initial_states: Iterable[int], final_states: List[int]):
         '''Performs padding closure on the underlying automatic structure.'''
         # Initialize the working queue with all states, that have some final
         # state in their Post
-        final_states_pre_set = set()
+        adjacency_matrix = self.build_automaton_adjacency_matrix(initial_states)
+        reversed_adjacency_matrix = MTBDDTransitionFn.reverse_adjacency_matrix(adjacency_matrix)
+
+        # We dont wanna start with final states directly, instead start with their
+        # predecesors
+        final_states_predecesors: Set[int] = set()
         for fs in final_states:
-            final_states_pre_set.update(self.get_state_pre(fs, initial_states=initial_states))
-        work_queue = list(final_states_pre_set)
+            final_states_predecesors.update(reversed_adjacency_matrix[fs])
+        work_queue = list(final_states_predecesors)
 
         while work_queue:
             state = work_queue.pop()
-            state_pre_list = self.get_state_pre(state, initial_states=initial_states)
+            state_pre_list = reversed_adjacency_matrix[state]
             for pre_state in state_pre_list:
                 # print(f'Applying PC on: {pre_state} ---> {state}')
                 had_pc_effect = self._do_pad_closure_single(pre_state, state, final_states)
