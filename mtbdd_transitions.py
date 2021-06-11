@@ -3,15 +3,17 @@ import ctypes as ct
 from typing import Dict, Any, Set, Tuple, Union, List, Iterable, Optional
 from collections import defaultdict
 
-mtbdd_wrapper = ct.CDLL('./amaya-mtbdd.so', mode=1)
+mtbdd_wrapper = ct.CDLL('./amaya-mtbdd.so')
 mtbdd_wrapper.init_machinery()
+
+c_side_state_type = ct.c_int64
 
 mtbdd_wrapper.amaya_mtbdd_build_single_terminal.argtypes = (
     ct.c_uint32,             # Automaton ID
     ct.POINTER(ct.c_uint8),  # Transitions symbols [symbol0_bit0, ... symbol0_bitN, symbol1_bit0 ...]
     ct.c_uint32,             # Symbol count
     ct.c_uint32,             # Variable count
-    ct.POINTER(ct.c_int),    # Terminal testination set
+    ct.POINTER(c_side_state_type),  # Terminal testination set
     ct.c_uint32              # Destination set size
 )
 mtbdd_wrapper.amaya_mtbdd_build_single_terminal.restype = ct.c_ulong  # MTBDD
@@ -22,11 +24,11 @@ mtbdd_wrapper.amaya_mtbdd_get_transition_target.argtypes = (
     ct.c_uint32,
     ct.POINTER(ct.c_uint32)
 )
-mtbdd_wrapper.amaya_mtbdd_get_transition_target.restype = ct.POINTER(ct.c_int)
+mtbdd_wrapper.amaya_mtbdd_get_transition_target.restype = ct.POINTER(c_side_state_type)
 mtbdd_wrapper.amaya_mtbdd_rename_states.argtypes = (
     ct.POINTER(ct.c_ulong),  # MTBDD roots
     ct.c_uint32,             # root_count
-    ct.POINTER(ct.c_int),    # Mappings [old_name1, new_name1, ...]
+    ct.POINTER(c_side_state_type),  # Mappings [old_name1, new_name1, ...]
     ct.c_uint32,             # Mapping size
 )
 
@@ -42,7 +44,7 @@ mtbdd_wrapper.amaya_mtbdd_get_leaves.argtypes = (
     ct.POINTER(ct.c_uint32),                # Leaf count
     ct.POINTER(ct.POINTER(ct.c_voidp))      # Leaf transition destination sets, void***
 )
-mtbdd_wrapper.amaya_mtbdd_get_leaves.restype = ct.POINTER(ct.c_int)  # Pointer to array containing the states
+mtbdd_wrapper.amaya_mtbdd_get_leaves.restype = ct.POINTER(c_side_state_type)  # Pointer to array containing the states
 
 mtbdd_wrapper.amaya_unite_mtbdds.argtypes = (
     ct.c_ulong,  # MTBDD a
@@ -55,25 +57,25 @@ mtbdd_wrapper.amaya_mtbdd_get_state_post.argtypes = (
     ct.c_ulong,  # MTBDD m
     ct.POINTER(ct.c_uint32),  # MTBDD result array size
 )
-mtbdd_wrapper.amaya_mtbdd_get_state_post.restype = ct.POINTER(ct.c_int)
+mtbdd_wrapper.amaya_mtbdd_get_state_post.restype = ct.POINTER(c_side_state_type)
 
 mtbdd_wrapper.amaya_mtbdd_do_pad_closure.argtypes = (
-    ct.c_int,    # Left state
-    ct.c_ulong,  # MTBDD left
-    ct.c_int,    # Right state
-    ct.c_ulong,  # MTBDD right
-    ct.POINTER(ct.c_int),  # Array with final states.
-    ct.c_uint32  # Number of final states
+    c_side_state_type,                  # Left state
+    ct.c_ulong,                         # MTBDD left
+    c_side_state_type,                  # Right state
+    ct.c_ulong,                         # MTBDD right
+    ct.POINTER(c_side_state_type),      # Array with final states.
+    ct.c_uint32                         # Number of final states
 )
 mtbdd_wrapper.amaya_mtbdd_do_pad_closure.restype = ct.c_bool
 
 mtbdd_wrapper.amaya_mtbdd_get_transitions.argtypes = (
-    ct.c_ulong,                           # MTBDD root
-    ct.POINTER(ct.c_uint32),              # Array with variables.
-    ct.c_uint32,                          # Size of array with variables
-    ct.POINTER(ct.c_uint32),              # OUT, number of transitions
-    ct.POINTER(ct.POINTER(ct.c_int)),     # OUT Pointer to array containing destinations states
-    ct.POINTER(ct.POINTER(ct.c_uint32)),  # OUT Pointer to array containing sizes of serialized destinations states
+    ct.c_ulong,                                     # MTBDD root
+    ct.POINTER(ct.c_uint32),                        # Array with variables.
+    ct.c_uint32,                                    # Size of array with variables
+    ct.POINTER(ct.c_uint32),                        # OUT, number of transitions
+    ct.POINTER(ct.POINTER(c_side_state_type)),      # OUT Pointer to array containing destinations states
+    ct.POINTER(ct.POINTER(ct.c_uint32)),            # OUT Pointer to array containing sizes of serialized destinations states
 )
 mtbdd_wrapper.amaya_mtbdd_get_transitions.restype = ct.POINTER(ct.c_uint8)
 
@@ -88,28 +90,28 @@ mtbdd_wrapper.amaya_mtbdd_intersection.argtypes = (
     ct.c_ulong,     # MTBDD 2
     ct.c_uint32,    # automaton id
 
-    ct.POINTER(ct.POINTER(ct.c_int)),   # New discoveries made during intersection
-    ct.POINTER(ct.c_uint32),            # New discoveries size.
+    ct.POINTER(ct.POINTER(c_side_state_type)),   # New discoveries made during intersection
+    ct.POINTER(ct.c_uint32),                     # New discoveries size.
 )
 mtbdd_wrapper.amaya_mtbdd_intersection.restype = ct.c_ulong
 
 mtbdd_wrapper.amaya_replace_leaf_contents_with.argtypes = (
-    ct.c_voidp,                 # Leaf pointer
-    ct.POINTER(ct.c_int),       # New contents
-    ct.c_uint32                 # Content length
+    ct.c_voidp,                          # Leaf pointer
+    ct.POINTER(c_side_state_type),       # New contents
+    ct.c_uint32                          # Content length
 )
 
 mtbdd_wrapper.amaya_begin_intersection.argtypes = (
-    ct.c_bool,
-    ct.POINTER(ct.c_int),
-    ct.c_uint32
+    ct.c_bool,                      # Is early pruning ON?
+    ct.POINTER(c_side_state_type),  # Final states
+    ct.c_uint32                     # Final states cnt
 )
 mtbdd_wrapper.amaya_end_intersection.argtypes = ()
 
 mtbdd_wrapper.amaya_update_intersection_state.argtypes = (
-    ct.POINTER(ct.c_int),     # Metastates [m0_0, m0_1, m1_0, m1_1 ...]
-    ct.POINTER(ct.c_int),     # Metastate names
-    ct.c_uint32,              # automaton id
+    ct.POINTER(c_side_state_type),     # Metastates [m0_0, m0_1, m1_0, m1_1 ...]
+    ct.POINTER(c_side_state_type),     # Metastate names
+    ct.c_uint32,                       # automaton id
 )
 
 mtbdd_wrapper.amaya_set_debugging.argtypes = (ct.c_bool, )
@@ -117,17 +119,17 @@ mtbdd_wrapper.amaya_set_debugging.argtypes = (ct.c_bool, )
 mtbdd_wrapper.amaya_rename_metastates_to_int.argtypes = (
     ct.POINTER(ct.c_ulong),   # The mtbdd roots that were located during determinization
     ct.c_uint32,              # The number of mtbdd roots
-    ct.c_int,                 # The number from which the numbering will start
+    c_side_state_type,        # The number from which the numbering will start
     ct.c_uint32,              # The ID of the resulting automaton
     ct.POINTER(ct.POINTER(ct.c_uint32)),  # OUT Metastates sizes
     ct.POINTER(ct.c_uint32)   # OUT Metastates count
 )
-mtbdd_wrapper.amaya_rename_metastates_to_int.restype = ct.POINTER(ct.c_int)
+mtbdd_wrapper.amaya_rename_metastates_to_int.restype = ct.POINTER(c_side_state_type)
 
 mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.argtypes = (
     ct.c_ulong,                 # The MTBDD
     ct.c_uint32,                # Automaton ID
-    ct.c_int,                   # The trapstate ID
+    c_side_state_type,          # The trapstate ID
     ct.POINTER(ct.c_bool)       # OUT - Information about whether the operator did add a transition to a trapstate somewhere
 )
 
@@ -140,12 +142,12 @@ mtbdd_wrapper.amaya_get_state_post_with_some_transition.argtypes = (
     ct.POINTER(ct.POINTER(ct.c_uint8)),  # OUT Symbols for the reachable states
     ct.POINTER(ct.c_uint32)              # OUT The number of located states
 )
-mtbdd_wrapper.amaya_get_state_post_with_some_transition.restype = ct.POINTER(ct.c_int)
+mtbdd_wrapper.amaya_get_state_post_with_some_transition.restype = ct.POINTER(c_side_state_type)
 
 mtbdd_wrapper.amaya_remove_states_from_transitions.argtypes = (
     ct.POINTER(ct.c_ulong),
     ct.c_uint32,
-    ct.POINTER(ct.c_int),
+    ct.POINTER(c_side_state_type),
     ct.c_uint32
 )
 mtbdd_wrapper.amaya_remove_states_from_transitions.restype = ct.POINTER(ct.c_ulong)
@@ -208,7 +210,7 @@ class MTBDDTransitionFn():
         cube_size, cube = self.convert_symbol_to_mtbdd_cube(symbol)
 
         # Destination:
-        dest_state = (ct.c_uint32 * 1)()
+        dest_state = (c_side_state_type * 1)()
         dest_state[0] = dest
 
         # Construct cube from destination state
@@ -217,9 +219,10 @@ class MTBDDTransitionFn():
             ct.cast(cube, ct.POINTER(ct.c_uint8)),      # Transition symbols, 2d array
             ct.c_uint32(1),                             # Transitions symbols count
             cube_size,                                  # Variables count
-            ct.cast(dest_state, ct.POINTER(ct.c_int)),  # Set of the terminal states
+            ct.cast(dest_state, ct.POINTER(c_side_state_type)),  # Set of the terminal states
             ct.c_uint32(1),                             # Destination set size
         )
+        # @DeleteMe
         resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(mtbdd_new, current_mtbdd, self.automaton_id)
         self.mtbdds[source] = resulting_mtbdd
 
@@ -277,14 +280,14 @@ class MTBDDTransitionFn():
         Requires all referenced states to be present in the mapping.
         '''
         flat_mapping_size = 2*len(mappings)
-        arr = (ct.c_int * flat_mapping_size)()
+        arr = (c_side_state_type * flat_mapping_size)()
 
         for i, mapping in enumerate(mappings.items()):
             old, new = mapping
-            arr[2*i] = ct.c_int(old)
-            arr[2*i + 1] = ct.c_int(new)
+            arr[2*i] = c_side_state_type(old)
+            arr[2*i + 1] = c_side_state_type(new)
 
-        mapping_ptr = ct.cast(arr, ct.POINTER(ct.c_int))
+        mapping_ptr = ct.cast(arr, ct.POINTER(c_side_state_type))
         mapping_size = ct.c_uint32(len(mappings))
 
         mtbdd_roots = (ct.c_ulong * len(self.mtbdds))()
@@ -455,14 +458,14 @@ class MTBDDTransitionFn():
         left_mtbdd = self.mtbdds.get(left_state, None)
         right_mtbdd = self.mtbdds.get(right_state, None)
 
-        c_left_state = ct.c_int(left_state)
-        c_right_state = ct.c_int(right_state)
+        c_left_state = c_side_state_type(left_state)
+        c_right_state = c_side_state_type(right_state)
 
         if left_mtbdd is None or right_mtbdd is None:
             return  # We need a pair of mtbdds to perform padding closure.
 
         # Convert the set into C array
-        final_states_arr = (ct.c_int * len(final_states))(*list(final_states))
+        final_states_arr = (c_side_state_type * len(final_states))(*list(final_states))
         final_states_cnt = ct.c_uint32(len(final_states))
 
         was_modified = mtbdd_wrapper.amaya_mtbdd_do_pad_closure(
@@ -490,7 +493,7 @@ class MTBDDTransitionFn():
 
         _vars = (ct.c_uint32 * len(variables))(*variables)
 
-        transition_dest_states = ct.POINTER(ct.c_int)()
+        transition_dest_states = ct.POINTER(c_side_state_type)()
         transition_dest_states_sizes = ct.POINTER(ct.c_uint32)()
         transition_count = ct.c_uint32()
 
@@ -600,7 +603,7 @@ class MTBDDTransitionFn():
                                 generated_metastates: Optional[Dict[int, Tuple[int, int]]] = None) -> MTBDD:
         '''Computes the intersection MTBDD for given MTBDDs'''
 
-        discovered_states_arr = ct.POINTER(ct.c_int)()
+        discovered_states_arr = ct.POINTER(c_side_state_type)()
         discovered_states_cnt = ct.c_uint32()
 
         intersect_mtbdd = mtbdd_wrapper.amaya_mtbdd_intersection(
@@ -650,13 +653,13 @@ class MTBDDTransitionFn():
     @staticmethod
     def replace_leaf_contents_with(leaf_ptr, contents: List[int]):
         contents_size = ct.c_uint32(len(contents))
-        contents_arr = (ct.c_int * len(contents))()
+        contents_arr = (c_side_state_type * len(contents))()
         for i, x in enumerate(contents):
-            contents_arr[i] = ct.c_int(x)
+            contents_arr[i] = c_side_state_type(x)
 
         mtbdd_wrapper.amaya_replace_leaf_contents_with(
             leaf_ptr,
-            ct.cast(contents_arr, ct.POINTER(ct.c_int)),
+            ct.cast(contents_arr, ct.POINTER(c_side_state_type)),
             contents_size
         )
 
@@ -677,30 +680,30 @@ class MTBDDTransitionFn():
         '''
         should_prune, states = prune
         _should_prune = ct.c_bool(should_prune)
-        _states = (ct.c_int * len(states))(*states)
+        _states = (c_side_state_type * len(states))(*states)
         _states_cnt = ct.c_uint32(len(states))
         mtbdd_wrapper.amaya_begin_intersection(
             _should_prune,
-            ct.cast(_states, ct.POINTER(ct.c_int)),
+            ct.cast(_states, ct.POINTER(c_side_state_type)),
             _states_cnt)
 
     @staticmethod
     def update_intersection_state(state_update: Dict[int, Tuple[int, int]]):
         size = len(state_update)
 
-        metastates_arr = (ct.c_int * (2*size))()
-        metastates_names = (ct.c_int * size)()
+        metastates_arr = (c_side_state_type * (2*size))()
+        metastates_names = (c_side_state_type * size)()
         cnt = ct.c_uint32(size)
 
         for i, mapping in enumerate(state_update.items()):
             state, metastate = mapping
-            metastates_arr[2*i] = ct.c_int(metastate[0])
-            metastates_arr[2*i + 1] = ct.c_int(metastate[1])
-            metastates_names[i] = ct.c_int(state)
+            metastates_arr[2*i] = c_side_state_type(metastate[0])
+            metastates_arr[2*i + 1] = c_side_state_type(metastate[1])
+            metastates_names[i] = c_side_state_type(state)
 
         mtbdd_wrapper.amaya_update_intersection_state(
-            ct.cast(metastates_arr, ct.POINTER(ct.c_int)),
-            ct.cast(metastates_names, ct.POINTER(ct.c_int)),
+            ct.cast(metastates_arr, ct.POINTER(c_side_state_type)),
+            ct.cast(metastates_names, ct.POINTER(c_side_state_type)),
             cnt
         )
 
@@ -717,7 +720,7 @@ class MTBDDTransitionFn():
             in_mtbdds[i] = mtbdd
         in_mtbdd_cnt = ct.c_uint32(len(mtbdds))
         in_res_automaton_id = ct.c_uint32(resulting_automaton_id)
-        in_start_numbering_from = ct.c_int(start_numbering_from)
+        in_start_numbering_from = c_side_state_type(start_numbering_from)
 
         out_metastates_sizes = ct.POINTER(ct.c_uint32)()
         out_metastates_cnt = ct.c_uint32()
@@ -761,7 +764,7 @@ class MTBDDTransitionFn():
         did indeed modify the mtbdd somehow.
         '''
         _aid = ct.c_uint32(automaton_id)
-        _trapstate = ct.c_int(trapstate_id)
+        _trapstate = c_side_state_type(trapstate_id)
         _had_effect = ct.c_bool()
 
         mtbdd = mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate(mtbdd, _aid, _trapstate, ct.byref(_had_effect))
@@ -820,12 +823,12 @@ class MTBDDTransitionFn():
 
         _mtbdds = (ct.c_ulong * len(mtbdds))(*mtbdds)
         _mtbdds_cnt = ct.c_uint32(len(mtbdds))
-        _removed_states = (ct.c_int * len(removed_states))(*removed_states)
+        _removed_states = (c_side_state_type * len(removed_states))(*removed_states)
         _removed_states_cnt = ct.c_uint32(len(removed_states))
 
         _patched_mtbdds = mtbdd_wrapper.amaya_remove_states_from_transitions(ct.cast(_mtbdds, ct.POINTER(ct.c_ulong)),
                                                                              _mtbdds_cnt,
-                                                                             ct.cast(_removed_states, ct.POINTER(ct.c_int)),
+                                                                             ct.cast(_removed_states, ct.POINTER(c_side_state_type)),
                                                                              _removed_states_cnt)
         patched_mtbdds: List[ct.c_ulong] = list()
         for i in range(len(mtbdds)):
