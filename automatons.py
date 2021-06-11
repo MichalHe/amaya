@@ -265,8 +265,6 @@ class NFA(Generic[AutomatonState]):
         if self.alphabet != other.alphabet:
             assert False
 
-        logger.debug(f'Calculating intercestion with alphabet size: {len(self.alphabet.variable_names)}')
-
         self_renamed_highest_state, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
 
@@ -277,6 +275,12 @@ class NFA(Generic[AutomatonState]):
 
         used_variable_ids = sorted(set(self.used_variables + other.used_variables))
         projected_alphabet = list(self.alphabet.gen_projection_symbols_onto_variables(used_variable_ids))
+
+        logger.debug('Calculating intersection with used_variables: self={0} other={1} result={2}'.format(
+            self.used_variables,
+            other.used_variables,
+            used_variable_ids
+        ))
 
         # Add all the initial states to the to-be-processed queue
         work_queue = carthesian_product(self_renamed.initial_states,
@@ -739,7 +743,7 @@ class MTBDD_NFA(NFA):
             metastate_map = dict()
 
         logger.debug(f'Beginning to renumber states. Self state count: {len(self.states)} {len(other.states)}')
-        logger.debug('Is pruning enabled {0}'.format(self.fast_prunining_enabled))
+        logger.debug('Is pruning enabled? {0}'.format(self.fast_prunining_enabled))
         if self.fast_prunining_enabled:
             logger.debug('Is early safe pruning possible? self={0} other={1}'.format(self.is_safe_to_quick_prune_intersection_states(), other.is_safe_to_quick_prune_intersection_states()))
         hightest_state = self.renumber_states(start_from=0)
