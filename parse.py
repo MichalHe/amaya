@@ -528,8 +528,25 @@ def get_declared_function_symbols(top_level_smt_statements: List) -> List[Functi
 
 def lex(source: str) -> List[str]:
     source = strip_comments(source)
-    source = source.replace('(', ' ( ').replace(')', ' ) ')
-    tokens = source.split()
+    source = source.replace('(', ' ( ').replace(')', ' ) ').replace('|', ' | ')
+    _tokens = source.split()
+
+    inside_large_text = False
+    large_text = ''
+    tokens = []
+    for token in _tokens:
+        if token == '|':
+            if inside_large_text:
+                inside_large_text = False
+                tokens.append(large_text)
+                large_text = ''
+            else:
+                inside_large_text = True
+        else:
+            if inside_large_text:
+                large_text += token
+            else:
+                tokens.append(token)
     return tokens
 
 
@@ -559,6 +576,64 @@ def get_asserts_from_ast(ast):
     return _asserts
 
 
+def replace_modulo_operators_with_exists(ast):  # NOQA
+
+    def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> int:
+        if type(ast) != list:
+            return 0
+        node_name = ast[0]
+        if node_name == 'mod':
+            # (mod A B)  <<-->>  (- A (* Mod_Var B))
+            B = ast[2]
+            ast[0] = '-'
+            ast[2] = ['*', f'Mod_Var_{already_replaced[0]}', B]
+            already_replaced[0] += 1
+            return 1 + replace_modulo_operators_in_expr(ast[1], already_replaced) + replace_modulo_operators_in_expr(ast[2], already_replaced)
+
+        if node_name in ['*', '+', '-']:
+            if node_name == '-' and len(ast) == 2:
+                return replace_modulo_operators_in_expr(ast[1], already_replaced)
+
+            return replace_modulo_operators_in_expr(ast[1], already_replaced) + replace_modulo_operators_in_expr(ast[2], already_replaced)
+        return 0
+
+    if type(ast) != list:
+        return
+
+    node_name = ast[0]
+
+    if node_name in ['<', '<=', '=', '>=', '>']:
+        modulo_count = replace_modulo_operators_in_expr(ast[1]) + replace_modulo_operators_in_expr(ast[2])
+        logger.debug(f'Identified {modulo_count} different modulo operators in {ast}')
+
+        if modulo_count == 0:
+            return
+
+        # Perform the exist expansion:
+        # (= (mod A B) C)   <<-->>   (exists ((M Int)) (= (- A (* B M) C)
+        exists_binding_list = [[f'Mod_Var_{i}', 'Int'] for i in range(modulo_count)]
+        expanded_relation = ast[:]
+        ast[0] = 'exists'
+        ast[1] = exists_binding_list
+        ast[2] = expanded_relation
+    elif node_name in ['exists']:
+        replace_modulo_operators_with_exists(ast[2])
+    elif node_name in ['not']:
+        replace_modulo_operators_with_exists(ast[1])
+    elif node_name in ['let']:
+        for _, variable_expr in ast[1]:
+            replace_modulo_operators_with_exists(variable_expr)
+            print(f'>>> after expansion: {variable_expr}')
+        replace_modulo_operators_with_exists(ast[2])
+    elif node_name in ['and', 'or']:
+        for subtree in ast[1:]:
+            replace_modulo_operators_with_exists(subtree)
+    elif node_name in ['assert']:
+        replace_modulo_operators_with_exists(ast[1])
+    else:
+        raise ValueError(f'Dont know how to replace modulo in: {ast}')
+
+
 def preprocess_assert_tree(assert_tree):
     '''Peforms preprocessing on the given assert tree. The following
     proprocessing passes are executed (in the given order):
@@ -583,6 +658,12 @@ def preprocess_assert_tree(assert_tree):
     logger.info('Removing double (consequent) negations.')
     double_negations_removed_cnt = remove_multiple_negations(assert_tree)
     logger.info(f'Removed {double_negations_removed_cnt} negation pairs.')
+
+    logger.info('Replacing modulo operators with exists')
+    print(assert_tree)
+    print()
+    replace_modulo_operators_with_exists(assert_tree)
+    print(assert_tree)
 
 
 def perform_whole_evaluation_on_source_text(source_text: str,
@@ -743,7 +824,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
         automaton = automaton_building_function(*automaton_building_function_args)
         ctx.emit_evaluation_introspection_info(automaton, operation)
 
-    emit_evaluation_progress_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)})', depth)
+    emit_evaluation_progress_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)}, automaton_type={automaton.automaton_type})', depth)
 
     # Finalization - increment variable ussage counter and bind variable ID to a name in the alphabet (lazy binding)
     # as the variable IDs could not be determined beforehand.
@@ -805,6 +886,7 @@ def get_automaton_for_operand(operand_value: Union[str, List],
             # the boolean be considered False, it would be encoded
             # ['not', 'var_name'], which is equivalent to the complement of the
             # automaton.
+            variable_info.ussage_count += 1
             return build_automaton_for_boolean_variable(str(operand_value), True, ctx)
         else:
             logger.debug(f'The variable {operand_value} is not boolean, searching `let` bindings.')
@@ -844,7 +926,7 @@ def evaluate_binary_conjunction_expr(expr: List,
         reduction_result = reduction_fn(reduction_result, next_operand_automaton)
         ctx.stats_operation_ends(reduction_result)
 
-        emit_evaluation_progress_info(f' >> {reduction_operation}(lhs, rhs) (result size: {len(reduction_result.states)})', _depth)
+        emit_evaluation_progress_info(f' >> {reduction_operation}(lhs, rhs) (result size: {len(reduction_result.states)}, automaton_type={reduction_result.automaton_type})', _depth)
         ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
 
     return reduction_result
@@ -934,18 +1016,33 @@ def evaluate_exists_expr(exists_expr: List,
     nfa = get_automaton_for_operand(exists_expr[2], ctx, _depth)
 
     vars_info = ctx.get_variables_info_for_current_frame()
+
+    # We need to establish an order of individual projections applied, so that
+    # we can tell when we are applying the last projection - after which we
+    # will apply only one padding closure instead of after every projection
+    projected_var_ids: List[int] = list()
     for var_name in variable_bindings:
-        if vars_info[var_name].ussage_count == 0:
-            # We are attemtping to project away a variable that is nowhere not
-            # used in the tree nderneath - since an optimalization that removes
-            # those kinds of variables from the alphabet is performed the
-            # projection woul fail.
+        current_var_info = vars_info[var_name]
+        if current_var_info.ussage_count == 0:
             logger.info(f'Skipping projecting away a variable "{var_name}" - the variable is not used anywhere in the tree underneath.')
             logger.debug(f'{exists_expr}')
-            continue
-        var_id = vars_info[var_name].id
+        else:
+            projected_var_ids.append(current_var_info.id)
+
+    if not projected_var_ids:
+        # No projection will occur
+        return nfa
+
+    logger.debug('Established projection order: {projected_var_ids}')
+
+    last_var_id: int = projected_var_ids[-1]
+
+    for var_id in projected_var_ids:
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
-        projection_result = nfa.do_projection(var_id)
+
+        # Do not skip only after the last projection
+        skip_pad_closure = False if var_id == last_var_id else True
+        projection_result = nfa.do_projection(var_id, skip_pad_closure=skip_pad_closure)
         assert projection_result
         nfa = projection_result
         ctx.stats_operation_ends(nfa)
@@ -1023,6 +1120,22 @@ def run_evaluation_procedure(root,  # NOQA
         # We have found a node which needs to be (directly) translated into NFA
         # @Problem: This implementation does not distinguish between
         # SMT equivalence of two boolean variables and presburger equation
+        if node_name == '=' and not is_tree_presburger_equality(root, ctx):
+            # Perform boolean equivalence expansion:
+            # A = B  <<-->> (A & B) | (~A & ~B)
+            logger.debug(f'Encountered boolean equivalence expression: {root} ')
+            b = root.pop(-1)
+            a = root.pop(-1)
+            root[0] = 'or'
+            root.append(['and', a, b])
+            root.append(['and', ['not', a], ['not', b]])
+
+            # remove_multiple_negations(root)
+
+            logger.debug(f'Expression expanded into: {root}')
+
+            return run_evaluation_procedure(root, ctx, _debug_recursion_depth)
+
         logger.info('Reached relation root, performing ITE expansion...')
 
         expanded_tree = expand_relation_on_ite(root)
@@ -1041,7 +1154,7 @@ def run_evaluation_procedure(root,  # NOQA
             ctx.stats_operation_ends(result)
             return result
     else:
-        emit_evaluation_progress_info(f'eval_smt_tree({root})', _debug_recursion_depth)
+        emit_evaluation_progress_info(f'eval_smt_tree({root}), node_name={node_name}', _debug_recursion_depth)
         # Current node is a NFA operation
         evaluation_functions = {
             'and': evaluate_and_expr,
@@ -1186,8 +1299,11 @@ def remove_multiple_negations(assertion_tree) -> int:
                     assertion_tree.pop(-1)
                     assertion_tree.pop(-1)
 
-                    for node_under_double_negation_elem in negated_expr_tree[1]:
-                        assertion_tree.append(node_under_double_negation_elem)
+                    if type(negated_expr_tree[1]) == list:
+                        for node_under_double_negation_elem in negated_expr_tree[1]:
+                            assertion_tree.append(node_under_double_negation_elem)
+                    else:
+                        assertion_tree.append(negated_expr_tree[1])
 
                     return 1 + remove_multiple_negations(assertion_tree)
         else:

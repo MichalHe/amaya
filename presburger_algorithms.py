@@ -175,6 +175,7 @@ def build_nfa_from_inequality(ineq: Relation,
     work_queue: List[int] = [ineq.absolute_part]
     while work_queue:
         current_state = work_queue.pop()
+        logger.debug(f'Processing state {current_state}, remaining in work queue: {len(work_queue)}')
         nfa.add_state(current_state)
 
         for alphabet_symbol in projected_alphabet:

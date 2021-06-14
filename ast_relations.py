@@ -197,10 +197,11 @@ def get_ite_info(ast) -> Set[str]:
         ite_false_info = get_ite_info(ite_false_tree)
 
         return set([ite_variable]).union(ite_true_info).union(ite_false_info)
-    elif root in ['+',  '*', '<=', '>=', '>', '<', '=']:
+    elif root in ['+',  '*', '<=', '>=', '>', '<', '=', 'mod']:
         return get_ite_info(ast[1]).union(get_ite_info(ast[2]))
     elif root in ['-']:
         if len(root) == 3:
+            print(ast)
             return get_ite_info(ast[1]).union(get_ite_info(ast[2]))
         else:
             return get_ite_info(ast[1])
@@ -308,6 +309,6 @@ def try_retrieve_variable_if_literal(ast) -> Optional[str]:
         else:
             # We have some node that is not a negation - that means we do not have a literal,
             # which is only bare variable with some negation prefix
-            return None 
+            return None
     else:
         return ast
