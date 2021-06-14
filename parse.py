@@ -29,6 +29,9 @@ PRETTY_PRINT_INDENT = ' ' * 2
 logger.setLevel(INFO)
 
 
+AbstractSyntaxTree = List[Union[str, 'AbstractSyntaxTree']]
+
+
 class SolutionDomain(IntEnum):
     NATURALS = 0
     INTEGERS = 1
@@ -66,6 +69,15 @@ class VariableType(IntEnum):
             'Int': VariableType.INT,
         }
         return m[type_str]
+
+
+@dataclass
+class NodeEncounteredHandlerStatus:
+    should_reevaluate_result: bool
+    is_result_atomic: bool
+
+
+NodeEncounteredHandler = Callable[[AbstractSyntaxTree, bool, Dict], NodeEncounteredHandlerStatus]
 
 
 @dataclass
@@ -576,39 +588,29 @@ def get_asserts_from_ast(ast):
     return _asserts
 
 
-def replace_modulo_operators_with_exists(ast):  # NOQA
-
-    def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> int:
-        if type(ast) != list:
-            return 0
-        node_name = ast[0]
-        if node_name == 'mod':
-            # (mod A B)  <<-->>  (- A (* Mod_Var B))
-            B = ast[2]
-            ast[0] = '-'
-            ast[2] = ['*', f'Mod_Var_{already_replaced[0]}', B]
-            already_replaced[0] += 1
-            return 1 + replace_modulo_operators_in_expr(ast[1], already_replaced) + replace_modulo_operators_in_expr(ast[2], already_replaced)
-
-        if node_name in ['*', '+', '-']:
-            if node_name == '-' and len(ast) == 2:
-                return replace_modulo_operators_in_expr(ast[1], already_replaced)
-
-            return replace_modulo_operators_in_expr(ast[1], already_replaced) + replace_modulo_operators_in_expr(ast[2], already_replaced)
-        return 0
-
+def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> int:
     if type(ast) != list:
-        return
-
+        return 0
     node_name = ast[0]
+    if node_name == 'mod':
+        # (mod A B)  <<-->>  (- A (* Mod_Var B))
+        B = ast[2]
+        ast[0] = '-'
+        ast[2] = ['*', f'Mod_Var_{already_replaced[0]}', B]
+        already_replaced[0] += 1
+        return 1 + replace_modulo_operators_in_expr(ast[1], already_replaced) + replace_modulo_operators_in_expr(ast[2], already_replaced)
 
-    if node_name in ['<', '<=', '=', '>=', '>']:
-        modulo_count = replace_modulo_operators_in_expr(ast[1]) + replace_modulo_operators_in_expr(ast[2])
-        logger.debug(f'Identified {modulo_count} different modulo operators in {ast}')
+    if node_name in ['*', '+', '-']:
+        if node_name == '-' and len(ast) == 2:
+            return replace_modulo_operators_in_expr(ast[1], already_replaced)
 
-        if modulo_count == 0:
-            return
+        return replace_modulo_operators_in_expr(ast[1], already_replaced) + replace_modulo_operators_in_expr(ast[2], already_replaced)
+    return 0
 
+
+def replace_modulo_with_exists_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+    modulo_count = replace_modulo_operators_in_expr(ast[1]) + replace_modulo_operators_in_expr(ast[2])
+    if modulo_count > 0:
         # Perform the exist expansion:
         # (= (mod A B) C)   <<-->>   (exists ((M Int)) (= (- A (* B M) C)
         exists_binding_list = [[f'Mod_Var_{i}', 'Int'] for i in range(modulo_count)]
@@ -616,54 +618,189 @@ def replace_modulo_operators_with_exists(ast):  # NOQA
         ast[0] = 'exists'
         ast[1] = exists_binding_list
         ast[2] = expanded_relation
-    elif node_name in ['exists']:
-        replace_modulo_operators_with_exists(ast[2])
-    elif node_name in ['not']:
-        replace_modulo_operators_with_exists(ast[1])
-    elif node_name in ['let']:
-        for _, variable_expr in ast[1]:
-            replace_modulo_operators_with_exists(variable_expr)
-            print(f'>>> after expansion: {variable_expr}')
-        replace_modulo_operators_with_exists(ast[2])
-    elif node_name in ['and', 'or']:
-        for subtree in ast[1:]:
-            replace_modulo_operators_with_exists(subtree)
-    elif node_name in ['assert']:
-        replace_modulo_operators_with_exists(ast[1])
+
+        ctx['modulos_replaced_cnt'] += 1
+
+        return NodeEncounteredHandlerStatus(True, False)
+    return NodeEncounteredHandlerStatus(False, False)
+
+
+def expand_implications_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+    # Expand with: A => B  <<-->> ~A or B
+    A = ast[1]
+    B = ast[2]
+
+    ast[0] = 'or'
+    ast[1] = ['not', A]
+    ast[2] = B
+
+    ctx['implications_expanded_cnt'] += 1
+
+    return NodeEncounteredHandlerStatus(True, False)
+
+
+def remove_double_negations_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+    subtree = ast[1]
+    if type(subtree) == list and subtree[0] == 'not':
+        expr_under_double_negation = subtree[1]
+
+        # Empty the current AST root node
+        ast.pop(-1)
+        ast.pop(-1)
+
+        if type(expr_under_double_negation) == list:
+            # Under the double nagation lies a tree, copy the contents of its
+            # root node to the current one, effectively replacing the current
+            # root with the root of the tree under double negation.
+            is_result_atomic = False
+            for node_under_double_negation_elem in expr_under_double_negation:
+                ast.append(node_under_double_negation_elem)
+        else:
+            # There is a literal under the double negation, just copy it.
+            is_result_atomic = True
+            ast.append(expr_under_double_negation)
+
+        ctx['negation_pairs_removed_cnt'] += 1
+
+        return NodeEncounteredHandlerStatus(True, is_result_atomic)
+
+    return NodeEncounteredHandlerStatus(False, False)
+
+
+def replace_forall_with_exists_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+    _, binders, stmt = ast
+
+    ast[0] = 'not'
+    ast[1] = ['exists', binders, ['not', stmt]]
+    ast.pop(-1)  # Remove the original stmt from [forall, binders, stmt] -> [not, [exists, [not, stmt]]]
+
+    ctx['forall_replaced_cnt'] += 1
+
+    return NodeEncounteredHandlerStatus(True, False)
+
+
+def ite_expansion_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+    _, bool_expr, if_branch, else_branch = ast
+
+    ast[0] = 'or'
+    ast[1] = ['and', bool_expr, if_branch]
+    ast[2] = ['and', ['not', bool_expr], else_branch]
+
+    ctx['ite_expansions_cnt'] += 1
+
+    return NodeEncounteredHandlerStatus(True, False)
+
+
+def transform_ast(ast: Union[str, AbstractSyntaxTree],  # NOQA
+                  ctx: Dict,
+                  node_encountered_handlers: Dict[str, NodeEncounteredHandler],
+                  parent_backlink: Optional[Tuple[AbstractSyntaxTree, int]] = None,
+                  is_tree_reevaluation_pass: bool = False):
+
+    if type(ast) != list:
+        return
+
+    node_name = ast[0]
+
+    # Descriptions of node structure - specifies where will we descend
+    node_descriptions = {
+        'assert': [1],
+        'not': [1],
+        'ite': [1, 2, 3],
+        '=>': [1, 2],
+        '<=': [1, 2],
+        '<': [1, 2],
+        '=': [1, 2],
+        '>=': [1, 2],
+        '>': [1, 2],
+        '+': [1, 2],
+        '*': [1, 2],
+        'mod': [1, 2],
+        'exists': [2],
+        'forall': [2],
+    }
+
+    if node_name in node_encountered_handlers:
+        handler = node_encountered_handlers[node_name]
+        handler_status = handler(ast, is_tree_reevaluation_pass, ctx)
+        reevaluation_root = ast
+        if handler_status.is_result_atomic:
+            # Replace the reference to a subtree in the parent node with
+            # the atomic result
+            parent_node, i = parent_backlink
+            parent_node[i] = ast[0]
+            reevaluation_root = parent_node[i]
+
+        # Re-walk the current node.
+        if handler_status.should_reevaluate_result:
+            transform_ast(reevaluation_root,
+                          ctx,
+                          node_encountered_handlers,
+                          parent_backlink=parent_backlink,
+                          is_tree_reevaluation_pass=True)
+            # We don't want to continue with the evaluation - the tree underneath
+            # has been changed and will be solved in the recursive call.
+            return
+
+    if node_name == 'let':
+        for i, binding in enumerate(ast[1]):
+            _, let_binding_subtree = binding
+            transform_ast(let_binding_subtree, ctx, node_encountered_handlers, parent_backlink=(ast[1], i))
+        transform_ast(ast[2], ctx, node_encountered_handlers, parent_backlink=(ast, 2))
+    elif node_name in ['and', 'or', '-']:
+        # - can be both unary and binary
+        for i, operand_tree in enumerate(ast[1:]):
+            transform_ast(operand_tree, ctx, node_encountered_handlers, parent_backlink=(ast, i+1))
     else:
-        raise ValueError(f'Dont know how to replace modulo in: {ast}')
+        assert node_name in node_descriptions, f'Don\'t know how to descent into {node_name} ({ast})'
+        descend_into_subtrees = node_descriptions[node_name]
+        for subtree_index in descend_into_subtrees:
+            transform_ast(ast[subtree_index], ctx, node_encountered_handlers, parent_backlink=(ast, subtree_index))
 
 
 def preprocess_assert_tree(assert_tree):
-    '''Peforms preprocessing on the given assert tree. The following
-    proprocessing passes are executed (in the given order):
+    '''Peforms preprocessing on the given assert tree. The following proprocessing
+    operations are performed:
         - Universal quantifiers are replaced with existential quantifiers.
         - Implications are expanded: `A => B` <<-->> `~A or B`
         - Consequent negation pairs are removed.
+        - Modulo operator in Presburger relations are replaced/expressed via
+        exists
 
     Params:
         assert_tree - The SMT tree to be preprocessed. The preprocessing is
                       performed in place.
     '''
-    logger.info('Preprocessing the assert tree.')
+    logger.info('Entering the first preprocessing pass: `ite` expansion, `forall` removal, modulo operator expansion.')
 
-    logger.info('Replacing universal quantifiers with existential.')
-    universal_quantifier_cnt = replace_forall_with_exists(assert_tree)
-    logger.info(f'Replaced {universal_quantifier_cnt} universal quantifiers.')
+    first_pass_transformations = {
+        'forall': replace_forall_with_exists_handler,
+        'modulo': replace_modulo_with_exists_handler,
+        'ite': ite_expansion_handler
+    }
 
-    logger.info('Performing implication expansions via `A => B` <<-->> `~A or B`')
-    implications_expanded = expand_implications(assert_tree)
-    logger.info(f'Expanded {implications_expanded} implications.')
+    first_pass_context = {
+        'forall_replaced_cnt': 0,
+        'modulos_replaced_cnt': 0,
+        'ite_expansions_cnt': 0
+    }
+    transform_ast(assert_tree, first_pass_context, first_pass_transformations)
 
-    logger.info('Removing double (consequent) negations.')
-    double_negations_removed_cnt = remove_multiple_negations(assert_tree)
-    logger.info(f'Removed {double_negations_removed_cnt} negation pairs.')
+    logger.info('First pass stats: ')
+    logger.info(f'Replaced {first_pass_context["forall_replaced_cnt"]} forall quantifiers with exists.')
+    logger.info(f'Transformed {first_pass_context["modulos_replaced_cnt"]} modulo expressions into \\exists formulas.')
+    logger.info(f'Expanded {first_pass_context["ite_expansions_cnt"]} ite expressions.')
 
-    logger.info('Replacing modulo operators with exists')
-    print(assert_tree)
-    print()
-    replace_modulo_operators_with_exists(assert_tree)
-    print(assert_tree)
+
+    logger.info('Entering the second preprocessing pass: double negation removal.')
+    second_pass_transformations = {
+        'not': remove_double_negations_handler
+    }
+    second_pass_context = {
+        'negation_pairs_removed_cnt': 0,
+    }
+    transform_ast(assert_tree, second_pass_context, second_pass_transformations)
+    logger.info(f'Removed {second_pass_context["negation_pairs_removed_cnt"]} negation pairs.')
 
 
 def perform_whole_evaluation_on_source_text(source_text: str,
@@ -1193,127 +1330,6 @@ def expand_multivariable_bindings(assertion_tree):
 
     if assertion_tree[0] in ['exists', 'not', 'forall', 'assert']:
         expand_multivariable_bindings(assertion_tree[-1])
-
-
-def replace_forall_with_exists(assertion_tree):
-    '''
-    The forall quantifiers (nodes) are replaced by not-exists-not inplace,
-    mutating assertion tree.
-    Params:
-        assertion_tree @mutable
-    Returns:
-        The count of replaced universal quantifiers.
-    '''
-    node_replaced_const = 0
-    if assertion_tree[0] == 'forall':
-        _, binders, stmt = assertion_tree
-
-        not_stmt = ['not', stmt]
-        exists = ['exists', binders, not_stmt]
-
-        assertion_tree[0] = 'not'
-        assertion_tree[1] = exists
-        assertion_tree.pop(-1)  # Remove the original stmt from [forall, binders, stmt] -> [not, [exists, [not, stmt]]]
-        node_replaced_const = 1
-
-    if assertion_tree[0] in ['exists', 'not', 'forall', 'assert']:
-        return node_replaced_const + replace_forall_with_exists(assertion_tree[-1])
-    if assertion_tree[0] in ['let']:
-        expansion_acc = node_replaced_const
-
-        binding_list = assertion_tree[1]
-        for var, expr in binding_list:
-            expansion_acc += replace_forall_with_exists(expr)
-
-        term = assertion_tree[2]
-        expansion_acc += replace_forall_with_exists(term)
-        return expansion_acc
-    else:
-        return node_replaced_const  # Bottom of the recursion
-
-
-def expand_implications(assertion_tree) -> int:
-    '''Expands implications inside the given assert tree with equivalent and
-    processable expression:
-        (`A => B` <<-->> `(~A) or B`)
-    Params:
-        assetion_tree - The assertion tree.
-    Returns:
-        Number of implications expanded.
-    '''
-    root_node_name = assertion_tree[0]
-    if root_node_name == '=>':
-        left_statement = assertion_tree[1]
-        right_statement = assertion_tree[2]
-
-        left_negated = ['not', left_statement]
-        assertion_tree[0] = 'or'
-        assertion_tree[1] = left_negated
-        assertion_tree[2] = right_statement
-
-        implications_expanded = 1
-        # Implications might be used somewhere down the tree
-        implications_expanded += expand_implications(assertion_tree[1])
-        implications_expanded += expand_implications(assertion_tree[2])
-
-        return implications_expanded
-    else:
-        if root_node_name in ['and', 'or', '=']:
-            # Since and,or,= are n-ary, we need to descend into all of their
-            # subterms
-            implications_expanded = 0
-            for term_i in range(1, len(assertion_tree)):
-                implications_expanded += expand_implications(assertion_tree[term_i])
-            return implications_expanded
-        elif root_node_name in ['forall', 'exists', 'not', 'assert']:
-            # Those contain only one formula - descend into it
-            return expand_implications(assertion_tree[-1])
-        else:
-            return 0
-
-
-def remove_multiple_negations(assertion_tree) -> int:
-    '''Removes duplicitous consequent negations given SMT tree.
-    Params:
-        assertion_tree - The assertion tree to remove duplicitous negations from.
-    Returns:
-        The number of removed consequent negation pairs.
-    @TODO: Refactor this - rename from `multiple negations` to `consequent negation pairs`
-    '''
-
-    if type(assertion_tree) == list:
-        root = assertion_tree[0]
-        if root == 'not':
-            assert len(assertion_tree) == 2
-            negated_expr_tree = assertion_tree[1]
-            if type(negated_expr_tree) == list:
-                negated_expr_tree_root = negated_expr_tree[0]
-                if negated_expr_tree_root == 'not':
-                    assert len(negated_expr_tree) == 2
-
-                    # We have detected the double negation, leave only one.
-                    # Copy the references (contents) of the node bellow the
-                    # double negation to the current tree - equal removing them
-
-                    # Pop both - the current node is empty
-                    assertion_tree.pop(-1)
-                    assertion_tree.pop(-1)
-
-                    if type(negated_expr_tree[1]) == list:
-                        for node_under_double_negation_elem in negated_expr_tree[1]:
-                            assertion_tree.append(node_under_double_negation_elem)
-                    else:
-                        assertion_tree.append(negated_expr_tree[1])
-
-                    return 1 + remove_multiple_negations(assertion_tree)
-        else:
-            # The current node is n-ary and is not a negation, recurse to every
-            # subtree
-            total_removed_negations = 0
-            for subtree in assertion_tree[1:]:
-                total_removed_negations += remove_multiple_negations(subtree)
-            return total_removed_negations
-    return 0
 
 
 def get_sat_value_from_smt_info(smt_info: Dict[str, str], default: Optional[bool] = True) -> Optional[Tuple[bool, str]]:
