@@ -25,12 +25,14 @@ mtbdd_wrapper.amaya_mtbdd_get_transition_target.argtypes = (
     ct.POINTER(ct.c_uint32)
 )
 mtbdd_wrapper.amaya_mtbdd_get_transition_target.restype = ct.POINTER(c_side_state_type)
+
 mtbdd_wrapper.amaya_mtbdd_rename_states.argtypes = (
     ct.POINTER(ct.c_ulong),  # MTBDD roots
     ct.c_uint32,             # root_count
     ct.POINTER(c_side_state_type),  # Mappings [old_name1, new_name1, ...]
     ct.c_uint32,             # Mapping size
 )
+mtbdd_wrapper.amaya_mtbdd_rename_states.restype = ct.POINTER(ct.c_ulong)
 
 mtbdd_wrapper.amaya_project_variables_away.argtypes = (
     ct.c_ulong,
@@ -295,7 +297,7 @@ class MTBDDTransitionFn():
             mtbdd_roots[i] = self.mtbdds[origin_state]
         root_cnt = ct.c_uint32(len(self.mtbdds))
 
-        mtbdd_wrapper.amaya_mtbdd_rename_states(
+        renamed_mtbdds = mtbdd_wrapper.amaya_mtbdd_rename_states(
             ct.cast(mtbdd_roots, ct.POINTER(ct.c_ulong)),
             root_cnt,
             mapping_ptr,
@@ -304,8 +306,9 @@ class MTBDDTransitionFn():
 
         # We still need to replace the actual origin states within self.mtbdds
         new_mtbdds = dict()
-        for state, mtbdd in self.mtbdds.items():
-            new_mtbdds[mappings[state]] = mtbdd
+        for i, state_old_mtbdd_pair in enumerate(self.mtbdds.items()):
+            state, _ = state_old_mtbdd_pair
+            new_mtbdds[mappings[state]] = renamed_mtbdds[i]
         self.mtbdds = new_mtbdds
 
     def project_variable_away(self, variable: int):
