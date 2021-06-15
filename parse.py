@@ -939,12 +939,14 @@ def preprocess_assert_tree(assert_tree):
         '=': preprocess_relations_handler,
         '>': preprocess_relations_handler,
         '<': preprocess_relations_handler,
+        '=>': expand_implications_handler,
     }
 
     second_pass_context = {
         'forall_replaced_cnt': 0,
         'modulos_replaced_cnt': 0,
-        'ite_expansions_cnt': 0
+        'ite_expansions_cnt': 0,
+        'implications_expanded_cnt': 0
     }
     transform_ast(assert_tree, second_pass_context, second_pass_transformations)
 
@@ -952,6 +954,7 @@ def preprocess_assert_tree(assert_tree):
     logger.info(f'Replaced {second_pass_context["forall_replaced_cnt"]} forall quantifiers with exists.')
     logger.info(f'Transformed {second_pass_context["modulos_replaced_cnt"]} modulo expressions into \\exists formulas.')
     logger.info(f'Expanded {second_pass_context["ite_expansions_cnt"]} ite expressions outside of atomic Presburfer formulas.')
+    logger.info(f'Expanded {second_pass_context["implications_expanded_cnt"]} implications.')
 
     logger.info('Entering the third preprocessing pass: double negation removal.')
     third_pass_transformations = {
