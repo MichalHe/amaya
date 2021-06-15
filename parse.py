@@ -682,6 +682,13 @@ def replace_forall_with_exists_handler(ast: AbstractSyntaxTree, is_reeval: bool,
 def ite_expansion_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     _, bool_expr, if_branch, else_branch = ast
 
+    presbureger_relation_roots = ['<=', '<', '=', '>', '>=']
+    for prr in presbureger_relation_roots:
+        if prr in ctx['history']:
+            # We don't want to perform expansions inside atomic relations -
+            # the expansions must be performed in a different fashion.
+            return NodeEncounteredHandlerStatus(False, False)
+
     ast[0] = 'or'
     ast[1] = ['and', bool_expr, if_branch]
     ast[2] = ['and', ['not', bool_expr], else_branch]
@@ -696,11 +703,15 @@ def transform_ast(ast: Union[str, AbstractSyntaxTree],  # NOQA
                   node_encountered_handlers: Dict[str, NodeEncounteredHandler],
                   parent_backlink: Optional[Tuple[AbstractSyntaxTree, int]] = None,
                   is_tree_reevaluation_pass: bool = False):
+    if 'history' not in ctx:
+        ctx['history'] = list()
 
     if type(ast) != list:
         return
 
     node_name = ast[0]
+
+    ctx['history'].append(node_name)
 
     # Descriptions of node structure - specifies where will we descend
     node_descriptions = {
@@ -740,6 +751,7 @@ def transform_ast(ast: Union[str, AbstractSyntaxTree],  # NOQA
                           is_tree_reevaluation_pass=True)
             # We don't want to continue with the evaluation - the tree underneath
             # has been changed and will be solved in the recursive call.
+            ctx['history'].pop(-1)
             return
 
     if node_name == 'let':
@@ -756,6 +768,8 @@ def transform_ast(ast: Union[str, AbstractSyntaxTree],  # NOQA
         descend_into_subtrees = node_descriptions[node_name]
         for subtree_index in descend_into_subtrees:
             transform_ast(ast[subtree_index], ctx, node_encountered_handlers, parent_backlink=(ast, subtree_index))
+
+    ctx['history'].pop(-1)
 
 
 def preprocess_assert_tree(assert_tree):
@@ -789,7 +803,7 @@ def preprocess_assert_tree(assert_tree):
     logger.info('First pass stats: ')
     logger.info(f'Replaced {first_pass_context["forall_replaced_cnt"]} forall quantifiers with exists.')
     logger.info(f'Transformed {first_pass_context["modulos_replaced_cnt"]} modulo expressions into \\exists formulas.')
-    logger.info(f'Expanded {first_pass_context["ite_expansions_cnt"]} ite expressions.')
+    logger.info(f'Expanded {first_pass_context["ite_expansions_cnt"]} ite expressions outside of atomic Presburfer formulas.')
 
 
     logger.info('Entering the second preprocessing pass: double negation removal.')
