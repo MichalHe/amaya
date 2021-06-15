@@ -854,6 +854,63 @@ def transform_ast(ast: AST_Node,  # NOQA
     ctx['history'].pop(-1)
 
 
+def fold_in_required_let_bindings(ast: AST_Node,
+                                  bindings_stack: List[Dict[str, AST_Node]],
+                                  path: List[Tuple[AST_Node, int]]) -> int:
+    if type(ast) != list:
+        for bindings in reversed(bindings_stack):
+            if ast in bindings:
+                parent, position_in_parent = path[-1]
+                parent[position_in_parent] = bindings[ast]
+
+                return 1
+        return 0
+
+    node_name = ast[0]
+    folds_performed: int = 0
+    if node_name == 'let':
+        # First try to fold in variables from previous let expressions.
+        binding_list = ast[1]
+        for i, binding in enumerate(binding_list):
+            _, binding_ast = binding
+            path.append((ast, i))
+            folds_performed += fold_in_required_let_bindings(binding_ast, bindings_stack, path)
+            path.pop(-1)
+
+        # Identify bindings that stand for a literal, or an arithmetic
+        # expression - those must be folded in
+        bindings_list_without_folded: List[List[AST_Leaf, AST_NaryNode]] = []
+        bindings_stack.append({})
+        for let_var_name, binding_ast in ast[1]:
+            if type(binding_ast) == list and binding_ast[0] in ['-', '+', '*', 'mod']:
+                # The current binding must be folded in oder to be able to
+                # evaluate the tree
+                bindings_stack[-1][let_var_name] = binding_ast
+            else:
+                bindings_list_without_folded.append([let_var_name, binding_ast])
+
+        # Continue folding down the line.
+        path.append((ast, 2))
+        folds_performed += fold_in_required_let_bindings(ast[2], bindings_stack, path)
+        path.pop(-1)
+
+        # Check whether some binding in the `let` was left
+        if not bindings_list_without_folded:
+            # No bingings were left, remove the `let` node alltogether.
+            assert path
+            parent, position_in_parent = path[-1]
+            parent[position_in_parent] = ast[2]
+
+        bindings_stack.pop(-1)
+        return folds_performed
+    else:
+        for subtree, parent_backlink in ast_iter_subtrees(ast):
+            path.append(parent_backlink)
+            folds_performed += fold_in_required_let_bindings(subtree, bindings_stack, path)
+            path.pop(-1)
+        return folds_performed
+
+
 def preprocess_assert_tree(assert_tree):
     '''Peforms preprocessing on the given assert tree. The following proprocessing
     operations are performed:
@@ -867,9 +924,13 @@ def preprocess_assert_tree(assert_tree):
         assert_tree - The SMT tree to be preprocessed. The preprocessing is
                       performed in place.
     '''
-    logger.info('Entering the first preprocessing pass: `ite` expansion, `forall` removal, modulo operator expansion.')
+    logger.info('Entering the first preprocessing pass: Folding in arithmetic expressions.')
+    folds_performed = fold_in_required_let_bindings(assert_tree, [], [])
+    logger.info(f'Performed {folds_performed} folds.')
 
-    first_pass_transformations = {
+    logger.info('Entering the second preprocessing pass: `ite` expansion, `forall` removal, modulo operator expansion.')
+
+    second_pass_transformations = {
         'forall': replace_forall_with_exists_handler,
         'modulo': replace_modulo_with_exists_handler,
         'ite': ite_expansion_handler,
@@ -880,27 +941,27 @@ def preprocess_assert_tree(assert_tree):
         '<': preprocess_relations_handler,
     }
 
-    first_pass_context = {
+    second_pass_context = {
         'forall_replaced_cnt': 0,
         'modulos_replaced_cnt': 0,
         'ite_expansions_cnt': 0
     }
-    transform_ast(assert_tree, first_pass_context, first_pass_transformations)
+    transform_ast(assert_tree, second_pass_context, second_pass_transformations)
 
     logger.info('First pass stats: ')
-    logger.info(f'Replaced {first_pass_context["forall_replaced_cnt"]} forall quantifiers with exists.')
-    logger.info(f'Transformed {first_pass_context["modulos_replaced_cnt"]} modulo expressions into \\exists formulas.')
-    logger.info(f'Expanded {first_pass_context["ite_expansions_cnt"]} ite expressions outside of atomic Presburfer formulas.')
+    logger.info(f'Replaced {second_pass_context["forall_replaced_cnt"]} forall quantifiers with exists.')
+    logger.info(f'Transformed {second_pass_context["modulos_replaced_cnt"]} modulo expressions into \\exists formulas.')
+    logger.info(f'Expanded {second_pass_context["ite_expansions_cnt"]} ite expressions outside of atomic Presburfer formulas.')
 
-    logger.info('Entering the second preprocessing pass: double negation removal.')
-    second_pass_transformations = {
+    logger.info('Entering the third preprocessing pass: double negation removal.')
+    third_pass_transformations = {
         'not': remove_double_negations_handler
     }
-    second_pass_context = {
+    third_pass_context = {
         'negation_pairs_removed_cnt': 0,
     }
-    transform_ast(assert_tree, second_pass_context, second_pass_transformations)
-    logger.info(f'Removed {second_pass_context["negation_pairs_removed_cnt"]} negation pairs.')
+    transform_ast(assert_tree, third_pass_context, third_pass_transformations)
+    logger.info(f'Removed {third_pass_context["negation_pairs_removed_cnt"]} negation pairs.')
 
 
 def perform_whole_evaluation_on_source_text(source_text: str,
