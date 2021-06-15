@@ -20,7 +20,8 @@ from typing import (
     Union,
     Dict,
     Callable,
-    Optional
+    Optional,
+    Generator
 )
 from enum import IntEnum, Enum
 
@@ -29,7 +30,9 @@ PRETTY_PRINT_INDENT = ' ' * 2
 logger.setLevel(INFO)
 
 
-AbstractSyntaxTree = List[Union[str, 'AbstractSyntaxTree']]
+AST_Leaf = str
+AST_NaryNode = List[Union[AST_Leaf, 'AST_NaryNode']]
+AST_Node = Union[AST_Leaf, AST_NaryNode]
 
 
 class SolutionDomain(IntEnum):
@@ -77,7 +80,7 @@ class NodeEncounteredHandlerStatus:
     is_result_atomic: bool
 
 
-NodeEncounteredHandler = Callable[[AbstractSyntaxTree, bool, Dict], NodeEncounteredHandlerStatus]
+NodeEncounteredHandler = Callable[[AST_NaryNode, bool, Dict], NodeEncounteredHandlerStatus]
 
 
 @dataclass
@@ -608,7 +611,7 @@ def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> 
     return 0
 
 
-def replace_modulo_with_exists_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     modulo_count = replace_modulo_operators_in_expr(ast[1]) + replace_modulo_operators_in_expr(ast[2])
     if modulo_count > 0:
         # Perform the exist expansion:
@@ -625,7 +628,7 @@ def replace_modulo_with_exists_handler(ast: AbstractSyntaxTree, is_reeval: bool,
     return NodeEncounteredHandlerStatus(False, False)
 
 
-def expand_implications_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     # Expand with: A => B  <<-->> ~A or B
     A = ast[1]
     B = ast[2]
@@ -639,7 +642,7 @@ def expand_implications_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: D
     return NodeEncounteredHandlerStatus(True, False)
 
 
-def remove_double_negations_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+def remove_double_negations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     subtree = ast[1]
     if type(subtree) == list and subtree[0] == 'not':
         expr_under_double_negation = subtree[1]
@@ -667,7 +670,7 @@ def remove_double_negations_handler(ast: AbstractSyntaxTree, is_reeval: bool, ct
     return NodeEncounteredHandlerStatus(False, False)
 
 
-def replace_forall_with_exists_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+def replace_forall_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     _, binders, stmt = ast
 
     ast[0] = 'not'
@@ -679,7 +682,7 @@ def replace_forall_with_exists_handler(ast: AbstractSyntaxTree, is_reeval: bool,
     return NodeEncounteredHandlerStatus(True, False)
 
 
-def ite_expansion_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+def ite_expansion_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     _, bool_expr, if_branch, else_branch = ast
 
     presbureger_relation_roots = ['<=', '<', '=', '>', '>=']
@@ -698,22 +701,12 @@ def ite_expansion_handler(ast: AbstractSyntaxTree, is_reeval: bool, ctx: Dict) -
     return NodeEncounteredHandlerStatus(True, False)
 
 
-def transform_ast(ast: Union[str, AbstractSyntaxTree],  # NOQA
-                  ctx: Dict,
-                  node_encountered_handlers: Dict[str, NodeEncounteredHandler],
-                  parent_backlink: Optional[Tuple[AbstractSyntaxTree, int]] = None,
-                  is_tree_reevaluation_pass: bool = False):
-    if 'history' not in ctx:
-        ctx['history'] = list()
+def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AST_NaryNode, int]], None, None]:
+    if type(root_node) != list:
+        return root_node
 
-    if type(ast) != list:
-        return
+    node_name = root_node[0]
 
-    node_name = ast[0]
-
-    ctx['history'].append(node_name)
-
-    # Descriptions of node structure - specifies where will we descend
     node_descriptions = {
         'assert': [1],
         'not': [1],
@@ -730,6 +723,38 @@ def transform_ast(ast: Union[str, AbstractSyntaxTree],  # NOQA
         'exists': [2],
         'forall': [2],
     }
+
+    if node_name == 'let':
+        for i, binding in enumerate(root_node[1]):
+            _, let_binding_subtree = binding
+            yield (let_binding_subtree, (root_node[1], i))
+        yield (root_node[2], (root_node, 2))
+    elif node_name in ['and', 'or', '-']:
+        # - can be both unary and binary
+        for i, operand_tree in enumerate(root_node[1:]):
+            yield (operand_tree, (root_node, i + 1))
+    else:
+        assert node_name in node_descriptions, f'Don\'t know how to descent into {node_name} ({root_node})'
+        descend_into_subtrees = node_descriptions[node_name]
+        for subtree_index in descend_into_subtrees:
+            yield (root_node[subtree_index], (root_node, subtree_index))
+
+
+def transform_ast(ast: AST_Node,  # NOQA
+                  ctx: Dict,
+                  node_encountered_handlers: Dict[str, NodeEncounteredHandler],
+                  parent_backlink: Optional[Tuple[AST_NaryNode, int]] = None,
+                  is_tree_reevaluation_pass: bool = False):
+
+    if 'history' not in ctx:
+        ctx['history'] = list()
+
+    if type(ast) != list:
+        return
+
+    node_name = ast[0]
+
+    ctx['history'].append(node_name)
 
     if node_name in node_encountered_handlers:
         handler = node_encountered_handlers[node_name]
@@ -754,20 +779,8 @@ def transform_ast(ast: Union[str, AbstractSyntaxTree],  # NOQA
             ctx['history'].pop(-1)
             return
 
-    if node_name == 'let':
-        for i, binding in enumerate(ast[1]):
-            _, let_binding_subtree = binding
-            transform_ast(let_binding_subtree, ctx, node_encountered_handlers, parent_backlink=(ast[1], i))
-        transform_ast(ast[2], ctx, node_encountered_handlers, parent_backlink=(ast, 2))
-    elif node_name in ['and', 'or', '-']:
-        # - can be both unary and binary
-        for i, operand_tree in enumerate(ast[1:]):
-            transform_ast(operand_tree, ctx, node_encountered_handlers, parent_backlink=(ast, i+1))
-    else:
-        assert node_name in node_descriptions, f'Don\'t know how to descent into {node_name} ({ast})'
-        descend_into_subtrees = node_descriptions[node_name]
-        for subtree_index in descend_into_subtrees:
-            transform_ast(ast[subtree_index], ctx, node_encountered_handlers, parent_backlink=(ast, subtree_index))
+    for subtree, backlink in ast_iter_subtrees(ast):
+        transform_ast(subtree, ctx, node_encountered_handlers, parent_backlink=backlink)
 
     ctx['history'].pop(-1)
 
@@ -804,7 +817,6 @@ def preprocess_assert_tree(assert_tree):
     logger.info(f'Replaced {first_pass_context["forall_replaced_cnt"]} forall quantifiers with exists.')
     logger.info(f'Transformed {first_pass_context["modulos_replaced_cnt"]} modulo expressions into \\exists formulas.')
     logger.info(f'Expanded {first_pass_context["ite_expansions_cnt"]} ite expressions outside of atomic Presburfer formulas.')
-
 
     logger.info('Entering the second preprocessing pass: double negation removal.')
     second_pass_transformations = {
