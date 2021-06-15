@@ -181,8 +181,10 @@ def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Rel
     return normalized_expr
 
 
-def get_ite_info(ast) -> Set[str]:
-    '''Returns the set of boolean variables found in the ITE expressions in the given AST.'''
+def collect_ite_control_variables(ast) -> Set[str]:
+    '''Returns the set of boolean variables found in the ITE expressions in the given AST.
+    DEPRECATED'''
+
     if type(ast) != list:
         return set()
 
@@ -193,18 +195,18 @@ def get_ite_info(ast) -> Set[str]:
         ite_true_tree = ast[2]
         ite_false_tree = ast[3]
 
-        ite_true_info = get_ite_info(ite_true_tree)
-        ite_false_info = get_ite_info(ite_false_tree)
+        ite_true_info = collect_ite_control_variables(ite_true_tree)
+        ite_false_info = collect_ite_control_variables(ite_false_tree)
 
         return set([ite_variable]).union(ite_true_info).union(ite_false_info)
     elif root in ['+',  '*', '<=', '>=', '>', '<', '=', 'mod']:
-        return get_ite_info(ast[1]).union(get_ite_info(ast[2]))
+        return collect_ite_control_variables(ast[1]).union(collect_ite_control_variables(ast[2]))
     elif root in ['-']:
         if len(root) == 3:
-            print(ast)
-            return get_ite_info(ast[1]).union(get_ite_info(ast[2]))
+            return collect_ite_control_variables(ast[1]).union(collect_ite_control_variables(ast[2]))
         else:
-            return get_ite_info(ast[1])
+            return collect_ite_control_variables(ast[1])
+    return set()
 
 
 def evaluate_ite_for_var_assignment(ast, assignment: Dict[str, bool]):
@@ -257,9 +259,11 @@ def gen_conjunction_expr_from_bool_vars(bool_assignment: Dict[str, bool]):
 
 
 def expand_relation_on_ite(ast):
-    '''Converts the AST containing ITE expressions into an equivalent disjunction.'''
+    '''Converts the AST containing ITE expressions into an equivalent disjunction.
+    DEPRECATED
+    '''
     # (>= sub sub)
-    ite_ctl_variables = get_ite_info(ast)
+    ite_ctl_variables = collect_ite_control_variables(ast)
     ctl_var_count = len(ite_ctl_variables)
 
     logger.info(

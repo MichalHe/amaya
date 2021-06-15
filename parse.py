@@ -24,6 +24,7 @@ from typing import (
     Generator
 )
 from enum import IntEnum, Enum
+from utils import number_to_bit_tuple
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
@@ -628,6 +629,66 @@ def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
     return NodeEncounteredHandlerStatus(False, False)
 
 
+def collect_ite_control_variables(ast) -> Set[str]:
+    '''Returns the set of boolean variables found in the ITE expressions in the given AST.'''
+    if type(ast) != list:
+        return set()
+
+    root = ast[0]
+    if root == 'ite':
+        assert len(ast) == 4
+        ite_variable = ast[1]
+        ite_true_tree = ast[2]
+        ite_false_tree = ast[3]
+
+        ite_true_info = collect_ite_control_variables(ite_true_tree)
+        ite_false_info = collect_ite_control_variables(ite_false_tree)
+
+        return set([ite_variable]).union(ite_true_info).union(ite_false_info)
+    elif root in ['+',  '*', '<=', '>=', '>', '<', '=', 'mod']:
+        return collect_ite_control_variables(ast[1]).union(collect_ite_control_variables(ast[2]))
+    elif root in ['-']:
+        if len(root) == 3:
+            return collect_ite_control_variables(ast[1]).union(collect_ite_control_variables(ast[2]))
+        else:
+            return collect_ite_control_variables(ast[1])
+    return set()
+
+
+def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode, ctx: Dict) -> NodeEncounteredHandlerStatus:
+    from ast_relations import evaluate_ite_for_var_assignment
+    ite_control_variables = collect_ite_control_variables(relation_root)
+
+    if not ite_control_variables:
+        # There are no control variables, no modification to the AST needs to be performed.
+        return NodeEncounteredHandlerStatus(False, False)
+
+    # Generate the expanded ite-expression
+    expanded_expr = ['or']
+    for i in range(2**len(ite_control_variables)):
+        control_variables_bit_values = number_to_bit_tuple(i, len(ite_control_variables))
+        # Convert the bit values into corresponing formulas:
+        # (A=0, B=0, C=1) --> ~A, ~B, C
+        variable_literals = [variable if variable_bit else ['not', variable] for variable, variable_bit in zip(ite_control_variables, control_variables_bit_values)]
+
+        variable_truth_assignment = dict(zip(ite_control_variables, map(bool, control_variables_bit_values)))
+
+        conjuction = ['and', *variable_literals, evaluate_ite_for_var_assignment(relation_root, variable_truth_assignment)]
+        expanded_expr.append(conjuction)
+
+    # replace the contents of `relation_root` with the results.
+    relation_root.pop(-1)
+    relation_root.pop(-1)
+    relation_root.pop(-1)
+
+    for node in expanded_expr:
+        relation_root.append(node)
+
+    ctx['ite_expansions_cnt'] += len(ite_control_variables)
+
+    return NodeEncounteredHandlerStatus(True, False)
+
+
 def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     # Expand with: A => B  <<-->> ~A or B
     A = ast[1]
@@ -640,6 +701,14 @@ def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -
     ctx['implications_expanded_cnt'] += 1
 
     return NodeEncounteredHandlerStatus(True, False)
+
+
+def preprocess_relations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+    modulo_expansion_status = replace_modulo_with_exists_handler(ast, is_reeval, ctx)
+    ite_expansions_status = expand_ite_expressions_inside_presburger_relation(ast, ctx)
+
+    return NodeEncounteredHandlerStatus(modulo_expansion_status.should_reevaluate_result or ite_expansions_status.should_reevaluate_result,
+                                        False)
 
 
 def remove_double_negations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
@@ -803,7 +872,12 @@ def preprocess_assert_tree(assert_tree):
     first_pass_transformations = {
         'forall': replace_forall_with_exists_handler,
         'modulo': replace_modulo_with_exists_handler,
-        'ite': ite_expansion_handler
+        'ite': ite_expansion_handler,
+        '>=': preprocess_relations_handler,
+        '<=': preprocess_relations_handler,
+        '=': preprocess_relations_handler,
+        '>': preprocess_relations_handler,
+        '<': preprocess_relations_handler,
     }
 
     first_pass_context = {
@@ -1305,6 +1379,7 @@ def run_evaluation_procedure(root,  # NOQA
 
         # If the relation was indeed expanded, the root will be 'or'
         if expanded_tree[0] == 'or':
+            assert False
             return run_evaluation_procedure(expanded_tree, ctx, _debug_recursion_depth)
         else:
             # The relation was no expanded
