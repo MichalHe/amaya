@@ -780,10 +780,12 @@ class MTBDD_NFA(NFA):
         assert int_nfa.transition_fn.automaton_id not in \
             [self.transition_fn.automaton_id, other.transition_fn.automaton_id]
 
+        work_set = set(work_queue)
         while work_queue:
             cur_state = work_queue.pop(-1)
+            work_set.remove(cur_state)
             cur_metastate = metastate_map[cur_state]
-            logger.debug(f'MTBDD NFA: Processing metastate: {cur_metastate}, remaining in work queue: {len(work_queue)}')
+            logger.debug(f'MTBDD NFA Intersection: Processing metastate: {cur_metastate}, remaining in work queue: {len(work_queue)}')
 
             if cur_state in int_nfa.states:
                 continue  # Each state can be processed only once
@@ -813,8 +815,9 @@ class MTBDD_NFA(NFA):
                 gen_state, gen_metastate = gm
                 metastate_map[gen_state] = gen_metastate
 
-                if gen_state not in work_queue:
+                if gen_state not in work_set:
                     work_queue.append(gen_state)
+                    work_set.add(gen_state)
 
             int_nfa.transition_fn.mtbdds[cur_state] = cur_int_mtbdd
 
@@ -845,6 +848,7 @@ class MTBDD_NFA(NFA):
         logger.debug('Performing MTBDD NFA determinization.')
 
         work_queue = [tuple(self.initial_states)]
+        work_set = set(work_queue)
         dfa = MTBDD_NFA(self.alphabet, AutomatonType.DFA)
 
         states = set()
@@ -855,7 +859,9 @@ class MTBDD_NFA(NFA):
         mtbdds = {}
 
         while work_queue:
+            logger.debug(f'Determinization: The number of states remaining in the work queue: {len(work_queue)}')
             c_metastate = work_queue.pop(-1)
+            work_set.remove(c_metastate)
 
             # @Optimize: This is true only for the initial states
             #            Other states are reachable from other and are remapped
@@ -865,7 +871,6 @@ class MTBDD_NFA(NFA):
                 final_states.add(c_metastate)
 
             c_metastate_union_mtbdd = self.transition_fn.get_union_mtbdd_for_states(c_metastate, self.transition_fn.automaton_id)
-            MTBDDTransitionFn.write_mtbdd_dot_to_file(c_metastate_union_mtbdd, '/tmp/amaya.dot')
 
             if c_metastate_union_mtbdd is None:
                 continue
@@ -875,9 +880,9 @@ class MTBDD_NFA(NFA):
             for r_metastate in reachable_metastates:
                 r_metastate = tuple(r_metastate)
 
-                # @Optimize: this is a linear search on work_queue.
-                if not (r_metastate in states or r_metastate in work_queue):
+                if r_metastate not in states and r_metastate not in work_set:
                     work_queue.append(r_metastate)
+                    work_set.add(r_metastate)
 
         # We have explored the entire structure - time to mangle the generated
         # metastates into integers, so that the automaton has the correct form.
@@ -1115,17 +1120,21 @@ class MTBDD_NFA(NFA):
         logger.debug('Reversed adjacency matrix built, identifying states that do not lead to an accepting state.')
 
         work_queue = list(self.final_states)  # The final states themselves can always reach themselves
+        work_set = set(work_queue)
         states_reaching_accepting_state: Set[int] = set()
         while work_queue:
             current_state = work_queue.pop(-1)
+            logger.debug(f'Nonfinishing states removal: The number of states in the work queue: {len(work_queue)}')
+            work_set.remove(current_state)
             states_reaching_accepting_state.add(current_state)
 
             # Take the PRE of current state and add it to the work queue
             for pre_state in reversed_adjacency_matrix[current_state]:
                 # Note that if there is a self loop on current state it will
                 # not be added as it already is in the processed states set
-                if pre_state not in states_reaching_accepting_state and pre_state not in work_queue:
+                if pre_state not in states_reaching_accepting_state and pre_state not in work_set:
                     work_queue.append(pre_state)
+                    work_set.add(pre_state)
 
         states_removed = self.states - states_reaching_accepting_state
 

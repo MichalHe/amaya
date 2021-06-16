@@ -173,8 +173,10 @@ def build_nfa_from_inequality(ineq: Relation,
     f_transitions = []
 
     work_queue: List[int] = [ineq.absolute_part]
+    work_set: Set[int] = set(work_queue)
     while work_queue:
         current_state = work_queue.pop()
+        work_set.remove(current_state)
         logger.debug(f'Processing state {current_state}, remaining in work queue: {len(work_queue)}')
         nfa.add_state(current_state)
 
@@ -182,8 +184,9 @@ def build_nfa_from_inequality(ineq: Relation,
             dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
             destination_state = math.floor(0.5 * (current_state - dot))
 
-            if not nfa.has_state_with_value(destination_state) and destination_state not in work_queue:
+            if not nfa.has_state_with_value(destination_state) and destination_state not in work_set:
                 work_queue.append(destination_state)
+                work_set.add(destination_state)
 
             nfa.update_transition_fn(current_state,
                                      alphabet.cylindrify_symbol_of_projected_alphabet(ineq_variables_ordered, alphabet_symbol),

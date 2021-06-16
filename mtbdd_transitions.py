@@ -2,6 +2,7 @@ from __future__ import annotations
 import ctypes as ct
 from typing import Dict, Any, Set, Tuple, Union, List, Iterable, Optional
 from collections import defaultdict
+from log import logger
 
 mtbdd_wrapper = ct.CDLL('./amaya-mtbdd.so')
 mtbdd_wrapper.init_machinery()
@@ -407,20 +408,26 @@ class MTBDDTransitionFn():
     def build_automaton_adjacency_matrix(self, initial_states: Iterable[int]) -> Dict[int, Set[int]]:
         '''Builds the image of the transition function with the information
         about transition symbols left out.'''
-
         morph_map = {}
         work_queue = list(initial_states)
+        work_set = set(work_queue)
+        logger.debug('Building adjacency matrix for the automaton.')
         while work_queue:
+            logger.debug(f'Build adjacency matrix: The number of states remaining in the work queue: {len(work_queue)}')
             state = work_queue.pop(-1)
-            state_post = set(self.get_state_post(state))
+            work_set.remove(state)
+
+            state_post = self.get_state_post(state)
             if not state_post:
                 # state is terminal
                 continue
-            morph_map[state] = state_post
+            morph_map[state] = set(state_post)
             for new_state in state_post:
                 # Check whether the state is not scheduled/processed already
-                if new_state not in work_queue and new_state not in morph_map:
+                if new_state not in work_set and new_state not in morph_map:
                     work_queue.append(new_state)
+                    work_set.add(new_state)
+
         return morph_map
 
     @staticmethod
@@ -444,17 +451,21 @@ class MTBDDTransitionFn():
         for fs in final_states:
             final_states_predecesors.update(reversed_adjacency_matrix[fs])
         work_queue = list(final_states_predecesors)
+        work_set = set(work_queue)
 
         while work_queue:
+            logger.debug(f'Padding closure: remaining in work queue: {len(work_queue)}')
             state = work_queue.pop()
+            work_set.remove(state)
             state_pre_list = reversed_adjacency_matrix[state]
             for pre_state in state_pre_list:
                 # print(f'Applying PC on: {pre_state} ---> {state}')
                 had_pc_effect = self._do_pad_closure_single(pre_state, state, final_states)
 
                 if had_pc_effect:
-                    if pre_state not in work_queue:
+                    if pre_state not in work_set:
                         work_queue.append(pre_state)
+                        work_set.add(pre_state)
 
     def _do_pad_closure_single(self, left_state: int, right_state: int, final_states: List[int]) -> bool:
         '''(left_state) --A--> (right_state) --B--> final_states'''
