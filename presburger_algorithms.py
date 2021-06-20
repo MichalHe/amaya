@@ -230,8 +230,12 @@ def build_nfa_from_equality(eq: Relation,
 
     projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(eq_variables_ordered))
 
+    work_set = set(states_to_explore)
     while states_to_explore:
+        logger.debug(f'Build NFA from equality: Remaining states in the work queue: {len(states_to_explore)}')
         e_state = states_to_explore.pop()  # e_state = (currently) explored state
+        work_set.remove(e_state)
+
         nfa.add_state(e_state)
 
         for symbol in projected_alphabet:
@@ -249,8 +253,9 @@ def build_nfa_from_equality(eq: Relation,
                 if not nfa.has_state_with_value(d_state):
                     # State might be reachable from multiple locations, this
                     # discovery does not have to be the first one
-                    if d_state not in states_to_explore:
+                    if d_state not in work_set:
                         states_to_explore.append(d_state)
+                        work_set.add(d_state)
 
                 # Check whether current state should have transition to final
                 if e_state + dot == 0:
