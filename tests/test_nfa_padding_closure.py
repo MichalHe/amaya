@@ -1,8 +1,7 @@
 import pytest
 import automatons as fsms
-import transitions as trans
 import relations_structures as rs
-import pressburger_algorithms as p_algos
+import presburger_algorithms as p_algos
 from typing import Callable
 
 
