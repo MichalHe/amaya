@@ -811,6 +811,9 @@ class MTBDD_NFA(NFA):
                 generated_metastates=generated_metastates  # Get generated metastates
             )
 
+            # Prevent the created MTBDD from getting GCd
+            MTBDDTransitionFn.inc_mtbdd_ref(cur_int_mtbdd)
+
             for gm in generated_metastates.items():
                 gen_state, gen_metastate = gm
                 metastate_map[gen_state] = gen_metastate
@@ -872,6 +875,8 @@ class MTBDD_NFA(NFA):
 
             c_metastate_union_mtbdd = self.transition_fn.get_union_mtbdd_for_states(c_metastate, self.transition_fn.automaton_id)
 
+            # The mtbdd has already ref count increased, do not increase it
+
             if c_metastate_union_mtbdd is None:
                 continue
             mtbdds[c_metastate] = c_metastate_union_mtbdd
@@ -887,9 +892,14 @@ class MTBDD_NFA(NFA):
         # We have explored the entire structure - time to mangle the generated
         # metastates into integers, so that the automaton has the correct form.
         automaton_id = dfa.transition_fn.automaton_id
-        metastate2int_map = MTBDDTransitionFn.rename_metastates_after_determinization(mtbdds.values(), automaton_id)
-        max_state = max(metastate2int_map.values())
+        metastates, _mtbdds = zip(*mtbdds.items())
+        patched_mtbdds, metastate2int_map = MTBDDTransitionFn.rename_metastates_after_determinization(_mtbdds, automaton_id)
 
+        # The patched mtbdds have already ref count incremented, no need to
+        # increment the ref counter. The old mtbdds will be decremented when
+        # MTBDDTransitionFn will be GC'd by python garbage collection.
+
+        max_state = max(metastate2int_map.values())
         for state in states:
             # Initial states might never get discovered - we need to remap them
             # manually, because they will not be present in any of the mtbdd
@@ -905,9 +915,9 @@ class MTBDD_NFA(NFA):
         for i_state in initial_states:
             dfa.add_initial_state(metastate2int_map[i_state])
 
-        for metastate, mtbdd in mtbdds.items():
+        for metastate, patched_mtbdd in zip(metastates, patched_mtbdds):
             state = metastate2int_map[metastate]
-            dfa.transition_fn.mtbdds[state] = mtbdd
+            dfa.transition_fn.mtbdds[state] = patched_mtbdd
 
         dfa.add_trap_state()
 
