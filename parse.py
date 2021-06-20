@@ -592,38 +592,53 @@ def get_asserts_from_ast(ast):
     return _asserts
 
 
-def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> int:
+def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> List[AST_NaryNode]:
     if type(ast) != list:
-        return 0
+        return []
     node_name = ast[0]
     if node_name == 'mod':
         # (mod A B)  <<-->>  (- A (* Mod_Var B))
+        assert ast[2].isdecimal(), 'The second operand in the `modulo` operator should be a constant!'
+
         B = ast[2]
         ast[0] = '-'
         ast[2] = ['*', f'Mod_Var_{already_replaced[0]}', B]
         already_replaced[0] += 1
-        return 1 + replace_modulo_operators_in_expr(ast[1], already_replaced) + replace_modulo_operators_in_expr(ast[2], already_replaced)
+        return [ast[:]] + \
+            replace_modulo_operators_in_expr(ast[1], already_replaced) + \
+            replace_modulo_operators_in_expr(ast[2], already_replaced)
 
     if node_name in ['*', '+', '-']:
         if node_name == '-' and len(ast) == 2:
             return replace_modulo_operators_in_expr(ast[1], already_replaced)
 
         return replace_modulo_operators_in_expr(ast[1], already_replaced) + replace_modulo_operators_in_expr(ast[2], already_replaced)
-    return 0
+    return []
 
 
 def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
-    modulo_count = replace_modulo_operators_in_expr(ast[1]) + replace_modulo_operators_in_expr(ast[2])
+    print(ast)
+    modulo_exprs = replace_modulo_operators_in_expr(ast[1]) + replace_modulo_operators_in_expr(ast[2])
+    modulo_count = len(modulo_exprs)
     if modulo_count > 0:
         # Perform the exist expansion:
         # (= (mod A B) C)   <<-->>   (exists ((M Int)) (= (- A (* B M) C)
         exists_binding_list = [[f'Mod_Var_{i}', 'Int'] for i in range(modulo_count)]
         expanded_relation = ast[:]
+
+        reminders_greater_than_zero = [['<=', 0, mod_expr] for mod_expr in modulo_exprs]
+        reminders_smaller_than_constant = [['<=', mod_expr, str(int(mod_expr[2][2]) - 1)] for mod_expr in modulo_exprs]
+
         ast[0] = 'exists'
         ast[1] = exists_binding_list
-        ast[2] = expanded_relation
+        ast[2] = ['and',
+                  expanded_relation,
+                  *reminders_greater_than_zero,
+                  *reminders_smaller_than_constant
+                  ]
+        print(ast)
 
-        ctx['modulos_replaced_cnt'] += 1
+        ctx['modulos_replaced_cnt'] += modulo_count
 
         return NodeEncounteredHandlerStatus(True, False)
     return NodeEncounteredHandlerStatus(False, False)
@@ -1205,6 +1220,7 @@ def get_automaton_for_operand(operand_value: Union[str, List],
         nfa = run_evaluation_procedure(operand_value,
                                        ctx,
                                        _debug_recursion_depth=_depth+1)
+
         return nfa
 
 
