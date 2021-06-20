@@ -62,15 +62,21 @@ mtbdd_wrapper.amaya_mtbdd_get_state_post.argtypes = (
 )
 mtbdd_wrapper.amaya_mtbdd_get_state_post.restype = ct.POINTER(c_side_state_type)
 
+
+mtbdd_wrapper.amaya_begin_pad_closure.argtypes = (
+    ct.POINTER(c_side_state_type),      # Array with final states.
+    ct.c_uint32                         # Number of final states
+)
+
+mtbdd_wrapper.amaya_end_pad_closure.argtypes = ()
+
 mtbdd_wrapper.amaya_mtbdd_do_pad_closure.argtypes = (
     c_side_state_type,                  # Left state
     ct.c_ulong,                         # MTBDD left
     c_side_state_type,                  # Right state
     ct.c_ulong,                         # MTBDD right
-    ct.POINTER(c_side_state_type),      # Array with final states.
-    ct.c_uint32                         # Number of final states
 )
-mtbdd_wrapper.amaya_mtbdd_do_pad_closure.restype = ct.c_bool
+mtbdd_wrapper.amaya_mtbdd_do_pad_closure.restype = ct.c_ulong  # New mtbdd
 
 mtbdd_wrapper.amaya_mtbdd_get_transitions.argtypes = (
     ct.c_ulong,                                     # MTBDD root
@@ -124,10 +130,11 @@ mtbdd_wrapper.amaya_rename_metastates_to_int.argtypes = (
     ct.c_uint32,              # The number of mtbdd roots
     c_side_state_type,        # The number from which the numbering will start
     ct.c_uint32,              # The ID of the resulting automaton
-    ct.POINTER(ct.POINTER(ct.c_uint32)),  # OUT Metastates sizes
-    ct.POINTER(ct.c_uint32)   # OUT Metastates count
+    ct.POINTER(ct.POINTER(c_side_state_type)),  # OUT: Metastates serialized
+    ct.POINTER(ct.POINTER(ct.c_uint64)),        # OUT: Metastates sizes
+    ct.POINTER(ct.c_uint64)                     # OUT: Metastates count
 )
-mtbdd_wrapper.amaya_rename_metastates_to_int.restype = ct.POINTER(c_side_state_type)
+mtbdd_wrapper.amaya_rename_metastates_to_int.restype = ct.POINTER(ct.c_ulong)
 
 mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.argtypes = (
     ct.c_ulong,                 # The MTBDD
@@ -154,6 +161,16 @@ mtbdd_wrapper.amaya_remove_states_from_transitions.argtypes = (
     ct.c_uint32
 )
 mtbdd_wrapper.amaya_remove_states_from_transitions.restype = ct.POINTER(ct.c_ulong)
+
+mtbdd_wrapper.amaya_mtbdd_ref.argtypes = (
+    ct.c_ulong,
+)
+
+mtbdd_wrapper.amaya_mtbdd_deref.argtypes = (
+    ct.c_ulong,
+)
+
+mtbdd_wrapper.amaya_sylvan_gc.argtypes = ()
 
 # mtbdd_wrapper.amaya_print_dot.argtypes = (
 #     ct.c_ulong,
@@ -225,8 +242,17 @@ class MTBDDTransitionFn():
             ct.cast(dest_state, ct.POINTER(c_side_state_type)),  # Set of the terminal states
             ct.c_uint32(1),                             # Destination set size
         )
-        # @DeleteMe
+
+        mtbdd_wrapper.amaya_mtbdd_ref(mtbdd_new)
         resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(mtbdd_new, current_mtbdd, self.automaton_id)
+
+        # Perform referece counting updates
+        # Keep only the newly created mtbdd, drop the sigle-terminal one and
+        # the old transition mtbdd
+        self.inc_mtbdd_ref(resulting_mtbdd)
+        self.dec_mtbdd_ref_unsafe(mtbdd_new)
+        self.dec_mtbdd_ref(current_mtbdd)
+
         self.mtbdds[source] = resulting_mtbdd
 
     @staticmethod
@@ -242,7 +268,8 @@ class MTBDDTransitionFn():
 
         output_f.close()  # The C side does not close the file descriptor
 
-    def convert_symbol_to_mtbdd_cube(self, symbol: Symbol):
+    @staticmethod
+    def convert_symbol_to_mtbdd_cube(symbol: Symbol):
         cube = (ct.c_uint8 * len(symbol) * 1)()
         for i, bit in enumerate(symbol):
             if bit == '*':
@@ -260,12 +287,20 @@ class MTBDDTransitionFn():
             return set()
         mtbdd = self.mtbdds[source]
 
-        cs, c = self.convert_symbol_to_mtbdd_cube(symbol)
+        return MTBDDTransitionFn.call_get_transition_target(mtbdd, symbol)
+
+    @staticmethod
+    def call_get_transition_target(mtbdd: ct.c_ulong,
+                                   symbol: Tuple[Union[str, int], ...]) -> Set[int]:
+        '''Performs a call to the C side retrieving the set of states that are reachable
+        in given mtbdd via the provided symbol'''
+
+        cs, c = MTBDDTransitionFn.convert_symbol_to_mtbdd_cube(symbol)
         result_size = ct.c_uint32(0)
         result = mtbdd_wrapper.amaya_mtbdd_get_transition_target(
             mtbdd,
-            ct.cast(c, ct.POINTER(ct.c_uint8)),      # Cube
-            cs,     # Cube size
+            ct.cast(c, ct.POINTER(ct.c_uint8)),     # Cube
+            cs,                                     # Cube size
             ct.byref(result_size)
         )
 
@@ -298,18 +333,23 @@ class MTBDDTransitionFn():
             mtbdd_roots[i] = self.mtbdds[origin_state]
         root_cnt = ct.c_uint32(len(self.mtbdds))
 
+        logger.debug('Performing call to C backend for renaming.')
         renamed_mtbdds = mtbdd_wrapper.amaya_mtbdd_rename_states(
             ct.cast(mtbdd_roots, ct.POINTER(ct.c_ulong)),
             root_cnt,
             mapping_ptr,
             mapping_size
         )
+        logger.debug('Done.')
+
+        # The renamed mtbdds do already have their refs increased to 1
 
         # We still need to replace the actual origin states within self.mtbdds
         new_mtbdds = dict()
         for i, state_old_mtbdd_pair in enumerate(self.mtbdds.items()):
-            state, _ = state_old_mtbdd_pair
+            state, old_mtbdd = state_old_mtbdd_pair
             new_mtbdds[mappings[state]] = renamed_mtbdds[i]
+            self.dec_mtbdd_ref(old_mtbdd)  # The old ones are not used anymore
         self.mtbdds = new_mtbdds
 
     def project_variable_away(self, variable: int):
@@ -328,6 +368,8 @@ class MTBDDTransitionFn():
                 variables,
                 ct.c_uint32(1)
             )
+            self.inc_mtbdd_ref_unsafe(new_mtbdd)
+            self.dec_mtbdd_ref(mtbdd)
             self.mtbdds[state] = new_mtbdd
 
     @staticmethod
@@ -373,10 +415,20 @@ class MTBDDTransitionFn():
             if state not in self.mtbdds:
                 continue
             mtbdd = self.mtbdds[state]
-            resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(
+            new_resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(
                 mtbdd,
                 resulting_mtbdd,
                 resulting_automaton_id)
+
+            # In the early stages of this algorithm, a mtbdd_false with some
+            # non-false mtbdd is united, returning the original mtbdd.
+            # This tried to decrement ref to mtbdd_false (which is not done)
+            # and then increments refs to the state transition mtbdd (so that
+            # resulting count is 2). Then its decremented back to 1.
+            MTBDDTransitionFn.dec_mtbdd_ref(resulting_mtbdd)
+            MTBDDTransitionFn.inc_mtbdd_ref_unsafe(new_resulting_mtbdd)
+            resulting_mtbdd = new_resulting_mtbdd
+
         if resulting_mtbdd == mtbdd_false:
             return None
         return resulting_mtbdd
@@ -385,6 +437,12 @@ class MTBDDTransitionFn():
         mtbdd = self.mtbdds.get(state, None)
         if mtbdd is None:
             return []
+        return MTBDDTransitionFn.call_get_state_post(mtbdd)
+
+    @staticmethod
+    def call_get_state_post(mtbdd: ct.c_ulong) -> List[int]:
+        '''Performs call to the C side, retrieving all states that are somehow reachable
+        from the state that has the outgoing transitions encoded in given MTBDD.'''
         result_size = ct.c_uint32()
         state_post_arr = mtbdd_wrapper.amaya_mtbdd_get_state_post(mtbdd, ct.byref(result_size))
 
@@ -439,7 +497,11 @@ class MTBDDTransitionFn():
         return reversed_adjacency_matrix
 
     def do_pad_closure(self, initial_states: Iterable[int], final_states: List[int]):
-        '''Performs padding closure on the underlying automatic structure.'''
+        '''Performs padding closure on the underlying automatic structure.
+
+        The operation is performed in-situ and no new MTBDDs are created, therefor
+        no reference manipulation is required.
+        '''
         # Initialize the working queue with all states, that have some final
         # state in their Post
         adjacency_matrix = self.build_automaton_adjacency_matrix(initial_states)
@@ -450,22 +512,49 @@ class MTBDDTransitionFn():
         final_states_predecesors: Set[int] = set()
         for fs in final_states:
             final_states_predecesors.update(reversed_adjacency_matrix[fs])
+
         work_queue = list(final_states_predecesors)
         work_set = set(work_queue)
 
+        stat_operations_skipped = 0
+        stat_closures_succeeded_cnt = 0
+
+        MTBDDTransitionFn.call_begin_pad_closure(final_states)
+
         while work_queue:
             logger.debug(f'Padding closure: remaining in work queue: {len(work_queue)}')
+
             state = work_queue.pop()
             work_set.remove(state)
+
             state_pre_list = reversed_adjacency_matrix[state]
             for pre_state in state_pre_list:
-                # print(f'Applying PC on: {pre_state} ---> {state}')
-                had_pc_effect = self._do_pad_closure_single(pre_state, state, final_states)
 
-                if had_pc_effect:
+                # Skip if no MTBDDs
+                if pre_state not in self.mtbdds or state not in self.mtbdds:
+                    stat_operations_skipped += 1
+                    continue
+
+                left_mtbdd = self.mtbdds[pre_state]
+                right_mtbdd = self.mtbdds[state]
+
+                patched_left_mtbdd = MTBDDTransitionFn.call_do_pad_closure(pre_state, left_mtbdd,
+                                                                           state, right_mtbdd)
+
+                if patched_left_mtbdd != left_mtbdd:  # The pad closure did have effect.
+                    # Replace the old left mtbdd with the patched (reference
+                    # counting)
+                    MTBDDTransitionFn.inc_mtbdd_ref_unsafe(patched_left_mtbdd)
+                    MTBDDTransitionFn.dec_mtbdd_ref_unsafe(left_mtbdd)
+                    self.mtbdds[pre_state] = patched_left_mtbdd
+
+                    stat_closures_succeeded_cnt += 1  # @DeleteMe
+
                     if pre_state not in work_set:
                         work_queue.append(pre_state)
                         work_set.add(pre_state)
+
+        MTBDDTransitionFn.call_end_pad_closure()
 
     def _do_pad_closure_single(self, left_state: int, right_state: int, final_states: List[int]) -> bool:
         '''(left_state) --A--> (right_state) --B--> final_states'''
@@ -492,6 +581,36 @@ class MTBDDTransitionFn():
         )
 
         return bool(was_modified)
+
+    @staticmethod
+    def call_begin_pad_closure(final_states: List[int]):
+        '''Performs the call to the C side which initializes structures used when performing pad closure.'''
+
+        final_states_arr = (c_side_state_type * len(final_states))(*list(final_states))
+        final_states_cnt = ct.c_uint32(len(final_states))
+
+        mtbdd_wrapper.amaya_begin_pad_closure(final_states_arr, final_states_cnt)
+
+    @staticmethod
+    def call_do_pad_closure(left_state: int,
+                            left_mtbdd: ct.c_ulong,
+                            right_state: int,
+                            right_mtbdd: ct.c_ulong) -> ct.c_ulong:
+        '''Wrapper around the C backend performing pad closure between two given mtbdds.'''
+
+        resulting_mtbdd = mtbdd_wrapper.amaya_mtbdd_do_pad_closure(
+            c_side_state_type(left_state),
+            left_mtbdd,
+            c_side_state_type(right_state),
+            right_mtbdd
+        )
+        return resulting_mtbdd
+
+    @staticmethod
+    def call_end_pad_closure():
+        '''Performs the call to the C side so that the memory used during pad
+        closure can be freed and other maintenance tasks performed.'''
+        mtbdd_wrapper.amaya_end_pad_closure()
 
     def iter_single_state(self, state: int, variables: Optional[List[int]] = None):
         '''Iterates over all transitions that originate in the given `state`.
@@ -645,7 +764,11 @@ class MTBDDTransitionFn():
                  mtfn1: MTBDDTransitionFn,
                  new_automaton_id: int) -> MTBDDTransitionFn:
         '''Creates a new MTBDD transition function that contains transitions
-        from both transition functions.'''
+        from both transition functions.
+
+        Since a new MTBDDTransitionFn is created all refs for the contained mtbdds
+        are incremented.
+        '''
 
         assert mtfn0.alphabet_variables == mtfn1.alphabet_variables, \
             'MTBBDs require to have the same set of variables.'
@@ -659,6 +782,10 @@ class MTBDDTransitionFn():
 
         union_tfn = MTBDDTransitionFn(mtfn0.alphabet_variables, new_automaton_id)
         union_tfn.mtbdds = resulting_mtbdds
+
+        # Perform the refs increment
+        for mtbdd in union_tfn.mtbdds.values():
+            mtbdd_wrapper.amaya_mtbdd_ref(mtbdd)
 
         # We need to propagate the new automaton down to mtbdd leaves
         union_tfn.change_automaton_ids_for_leaves(new_automaton_id)
@@ -728,7 +855,8 @@ class MTBDDTransitionFn():
     @staticmethod
     def rename_metastates_after_determinization(mtbdds: Iterable[MTBDD],
                                                 resulting_automaton_id: int,
-                                                start_numbering_from: int = 0) -> Dict[Tuple[int, ...], int]:
+                                                start_numbering_from: int = 0) -> Tuple[List[ct.c_ulong], Dict[Tuple[int, ...], int]]:
+        '''This operation is performed without creating any new mtbdds, in situ.'''
         in_mtbdds = (ct.c_ulong * len(mtbdds))()
         for i, mtbdd in enumerate(mtbdds):
             in_mtbdds[i] = mtbdd
@@ -736,20 +864,24 @@ class MTBDDTransitionFn():
         in_res_automaton_id = ct.c_uint32(resulting_automaton_id)
         in_start_numbering_from = c_side_state_type(start_numbering_from)
 
-        out_metastates_sizes = ct.POINTER(ct.c_uint32)()
-        out_metastates_cnt = ct.c_uint32()
+        out_metastates_serialized = ct.POINTER(c_side_state_type)()
+        out_metastates_sizes = ct.POINTER(ct.c_uint64)()
+        out_metastates_cnt = ct.c_uint64()
 
-        out_metastates_serialized = mtbdd_wrapper.amaya_rename_metastates_to_int(
+        out_patched_mtbdds = mtbdd_wrapper.amaya_rename_metastates_to_int(
             ct.cast(in_mtbdds, ct.POINTER(ct.c_ulong)),
             in_mtbdd_cnt,
             in_start_numbering_from,
             in_res_automaton_id,
+            ct.byref(out_metastates_serialized),
             ct.byref(out_metastates_sizes),
             ct.byref(out_metastates_cnt),
         )
+
         mapping = {}
         metastates_cnt = out_metastates_cnt.value
         metastates_serialized_i = 0
+
         _start_from = start_numbering_from
         for i in range(metastates_cnt):
             metastate = []
@@ -764,7 +896,13 @@ class MTBDDTransitionFn():
         mtbdd_wrapper.amaya_do_free(out_metastates_serialized)
         mtbdd_wrapper.amaya_do_free(out_metastates_sizes)
 
-        return mapping
+        patched_mtbdds = []
+        for i in range(len(mtbdds)):
+            patched_mtbdds.append(out_patched_mtbdds[i])
+
+        mtbdd_wrapper.amaya_do_free(out_patched_mtbdds)
+
+        return (patched_mtbdds, mapping)
 
     @staticmethod
     def complete_mtbdd_with_trapstate(mtbdd: ct.c_long, automaton_id: int, trapstate_id: int) -> Tuple[ct.c_long, bool]:
@@ -861,13 +999,22 @@ class MTBDDTransitionFn():
         for transition_origin in transition_origins_after_removal:
             transitions_mtbdds.append(self.mtbdds[transition_origin])
 
+        # The mtbdds created in remove_states_from_mtbdd_transitions come with
+        # their reference incremented, no need to protect them here.
         patched_mtbdds = MTBDDTransitionFn.remove_states_from_mtbdd_transitions(transitions_mtbdds, removed_states)
 
         new_mtbdds: Dict[int, ct.c_ulong] = {}
         for state, patched_mtbdd in zip(transition_origins_after_removal, patched_mtbdds):
             if patched_mtbdd == mtbdd_false:
                 continue
+            self.inc_mtbdd_ref_unsafe(patched_mtbdd)  # The old mtbdd sould be discarded
             new_mtbdds[state] = patched_mtbdd
+
+        for removed_state in set(removed_states):
+            if removed_state in self.mtbdds:
+                self.dec_mtbdd_ref_unsafe(self.mtbdds[removed_state])
+                del self.mtbdds[removed_state]
+
         self.mtbdds = new_mtbdds
 
     def change_automaton_ids_for_leaves(self, new_id: int):
@@ -889,10 +1036,48 @@ class MTBDDTransitionFn():
         was_trapstate_added = False
         for origin, mtbdd in self.mtbdds.items():
             completed_mtbdd, had_effect = self.complete_mtbdd_with_trapstate(mtbdd, self.automaton_id, trapstate)
+            mtbdd_wrapper.amaya_mtbdd_ref(completed_mtbdd)
             was_trapstate_added = was_trapstate_added or had_effect
             completed_mtbdds[origin] = completed_mtbdd
+
+        # Drop the references to all old mtbdds, keep only the
+        # completed/patched ones
+        for old_mtbdd in self.mtbdds.values():
+            mtbdd_wrapper.amaya_mtbdd_deref(old_mtbdd)
+
         self.mtbdds = completed_mtbdds
         return was_trapstate_added
+
+    def __del__(self):
+        # Release all mtbdds stored
+        for state, mtbdd in self.mtbdds.items():
+            self.dec_mtbdd_ref(mtbdd)
+
+    @staticmethod
+    def inc_mtbdd_ref(dd: int):
+        if dd != mtbdd_false:
+            mtbdd_wrapper.amaya_mtbdd_ref(dd)
+
+    @staticmethod
+    def dec_mtbdd_ref(dd: int):
+        if dd != mtbdd_false:
+            mtbdd_wrapper.amaya_mtbdd_deref(dd)
+
+    @staticmethod
+    def inc_mtbdd_ref_unsafe(dd: int):
+        mtbdd_wrapper.amaya_mtbdd_ref(dd)
+
+    @staticmethod
+    def dec_mtbdd_ref_unsafe(dd: int):
+        mtbdd_wrapper.amaya_mtbdd_deref(dd)
+
+    @staticmethod
+    def schedule_sylvan_gc():
+        mtbdd_wrapper.amaya_sylvan_gc()
+
+    @staticmethod
+    def participate_in_gc():
+        mtbdd_wrapper.amaya_sylvan_try_performing_gc()
 
 
 if __name__ == '__main__':
