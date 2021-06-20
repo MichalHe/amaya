@@ -88,12 +88,6 @@ mtbdd_wrapper.amaya_mtbdd_get_transitions.argtypes = (
 )
 mtbdd_wrapper.amaya_mtbdd_get_transitions.restype = ct.POINTER(ct.c_uint8)
 
-mtbdd_wrapper.amaya_mtbdd_change_automaton_id_for_leaves.argtypes = (
-    ct.POINTER(ct.c_ulong),               # Array of mtbdd roots.
-    ct.c_uint32,                          # Roots cnt.
-    ct.c_uint32                           # New automaton ID.
-)
-
 mtbdd_wrapper.amaya_mtbdd_intersection.argtypes = (
     ct.c_ulong,     # MTBDD 1
     ct.c_ulong,     # MTBDD 2
@@ -788,7 +782,6 @@ class MTBDDTransitionFn():
             mtbdd_wrapper.amaya_mtbdd_ref(mtbdd)
 
         # We need to propagate the new automaton down to mtbdd leaves
-        union_tfn.change_automaton_ids_for_leaves(new_automaton_id)
         return union_tfn
 
     @staticmethod
@@ -1016,17 +1009,6 @@ class MTBDDTransitionFn():
                 del self.mtbdds[removed_state]
 
         self.mtbdds = new_mtbdds
-
-    def change_automaton_ids_for_leaves(self, new_id: int):
-        mtbdd_roots_arr = (ct.c_ulong * len(self.mtbdds))()
-        for i, mtbdd in enumerate(self.mtbdds.values()):
-            mtbdd_roots_arr[i] = mtbdd
-        root_cnt = ct.c_uint32(len(self.mtbdds))
-        mtbdd_wrapper.amaya_mtbdd_change_automaton_id_for_leaves(
-            ct.cast(mtbdd_roots_arr, ct.POINTER(ct.c_ulong)),
-            root_cnt,
-            ct.c_uint32(new_id)
-        )
 
     def complete_transitions_with_trapstate(self, trapstate: int) -> bool:
         '''Complete every stored transition mtbdd with the given trapstate, so that the
