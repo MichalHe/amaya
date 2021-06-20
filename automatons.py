@@ -881,7 +881,7 @@ class MTBDD_NFA(NFA):
                 continue
             mtbdds[c_metastate] = c_metastate_union_mtbdd
 
-            reachable_metastates = MTBDDTransitionFn.get_mtbdd_leaves(c_metastate_union_mtbdd)
+            reachable_metastates = MTBDDTransitionFn.call_get_mtbdd_leaves(c_metastate_union_mtbdd)
             for r_metastate in reachable_metastates:
                 r_metastate = tuple(r_metastate)
 

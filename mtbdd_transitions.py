@@ -28,10 +28,10 @@ mtbdd_wrapper.amaya_mtbdd_get_transition_target.argtypes = (
 mtbdd_wrapper.amaya_mtbdd_get_transition_target.restype = ct.POINTER(c_side_state_type)
 
 mtbdd_wrapper.amaya_mtbdd_rename_states.argtypes = (
-    ct.POINTER(ct.c_ulong),  # MTBDD roots
-    ct.c_uint32,             # root_count
+    ct.POINTER(ct.c_ulong),         # MTBDD roots
+    ct.c_uint32,                    # root_count
     ct.POINTER(c_side_state_type),  # Mappings [old_name1, new_name1, ...]
-    ct.c_uint32,             # Mapping size
+    ct.c_uint32,                    # Mapping size
 )
 mtbdd_wrapper.amaya_mtbdd_rename_states.restype = ct.POINTER(ct.c_ulong)
 
@@ -97,12 +97,6 @@ mtbdd_wrapper.amaya_mtbdd_intersection.argtypes = (
     ct.POINTER(ct.c_uint32),                     # New discoveries size.
 )
 mtbdd_wrapper.amaya_mtbdd_intersection.restype = ct.c_ulong
-
-mtbdd_wrapper.amaya_replace_leaf_contents_with.argtypes = (
-    ct.c_voidp,                          # Leaf pointer
-    ct.POINTER(c_side_state_type),       # New contents
-    ct.c_uint32                          # Content length
-)
 
 mtbdd_wrapper.amaya_begin_intersection.argtypes = (
     ct.c_bool,                      # Is early pruning ON?
@@ -367,8 +361,8 @@ class MTBDDTransitionFn():
             self.mtbdds[state] = new_mtbdd
 
     @staticmethod
-    def get_mtbdd_leaves(mtbdd: MTBDD,
-                         fetch_leaf_tds_ptrs_into: List = None) -> List[List[int]]:
+    def call_get_mtbdd_leaves(mtbdd: MTBDD,
+                              fetch_leaf_tds_ptrs_into: List = None) -> List[List[int]]:
         ''' Internal procedure. '''
         leaf_sizes = ct.POINTER(ct.c_uint32)()
         leaf_cnt = ct.c_uint32()
@@ -781,21 +775,7 @@ class MTBDDTransitionFn():
         for mtbdd in union_tfn.mtbdds.values():
             mtbdd_wrapper.amaya_mtbdd_ref(mtbdd)
 
-        # We need to propagate the new automaton down to mtbdd leaves
         return union_tfn
-
-    @staticmethod
-    def replace_leaf_contents_with(leaf_ptr, contents: List[int]):
-        contents_size = ct.c_uint32(len(contents))
-        contents_arr = (c_side_state_type * len(contents))()
-        for i, x in enumerate(contents):
-            contents_arr[i] = c_side_state_type(x)
-
-        mtbdd_wrapper.amaya_replace_leaf_contents_with(
-            leaf_ptr,
-            ct.cast(contents_arr, ct.POINTER(c_side_state_type)),
-            contents_size
-        )
 
     @staticmethod
     def begin_intersection(prune: Tuple[bool, Iterable[int]] = (False, [])):
