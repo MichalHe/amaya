@@ -3,8 +3,11 @@ import ctypes as ct
 from typing import Dict, Any, Set, Tuple, Union, List, Iterable, Optional
 from collections import defaultdict
 from log import logger
+import pathlib
+import os
 
-mtbdd_wrapper = ct.CDLL('./amaya-mtbdd.so')
+amaya_root_path = pathlib.Path(__file__).parent.absolute()
+mtbdd_wrapper = ct.CDLL(os.path.join(amaya_root_path, 'amaya-mtbdd.so'))
 mtbdd_wrapper.init_machinery()
 
 c_side_state_type = ct.c_int64
