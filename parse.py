@@ -617,7 +617,6 @@ def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> 
 
 
 def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
-    print(ast)
     modulo_exprs = replace_modulo_operators_in_expr(ast[1]) + replace_modulo_operators_in_expr(ast[2])
     modulo_count = len(modulo_exprs)
     if modulo_count > 0:
@@ -636,7 +635,6 @@ def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
                   *reminders_greater_than_zero,
                   *reminders_smaller_than_constant
                   ]
-        print(ast)
 
         ctx['modulos_replaced_cnt'] += modulo_count
 
@@ -897,7 +895,9 @@ def fold_in_required_let_bindings(ast: AST_Node,
         bindings_list_without_folded: List[List[AST_Leaf, AST_NaryNode]] = []
         bindings_stack.append({})
         for let_var_name, binding_ast in ast[1]:
-            if type(binding_ast) == list and binding_ast[0] in ['-', '+', '*', 'mod']:
+            is_arithmetic_expr = type(binding_ast) == list and binding_ast[0] in ['-', '+', '*', 'mod']
+            is_literal = type(binding_ast) == str
+            if is_arithmetic_expr or is_literal:
                 # The current binding must be folded in oder to be able to
                 # evaluate the tree
                 bindings_stack[-1][let_var_name] = binding_ast
@@ -1017,13 +1017,22 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     for constant_symbol in constant_symbols:
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
-    assert_tree = asserts[0]
+    if len(asserts) > 1:
+        # There are more than one asserts, the resulting formula is SAT only
+        # when all of them are --> conjunction
+        assert_conjunction = ['and']
+        for _assert in asserts:
+            assert_conjunction.append(_assert[1])  # Append the formulae in asserts
 
-    preprocess_assert_tree(assert_tree)
+        assert_tree_to_evaluate = ['assert', assert_conjunction]
+    else:
+        assert_tree_to_evaluate = asserts[0]  # If there is just 1, do not transform AST
+
+    preprocess_assert_tree(assert_tree_to_evaluate)  # Preprocessing is performed in place
 
     # We are interested only in the number of different variables found in the
     # assert tree
-    get_all_used_variables(asserts[0], eval_ctx)
+    get_all_used_variables(assert_tree_to_evaluate, eval_ctx)
 
     # Generate consequent IDs to which the variable names will be bound at
     # later stages
@@ -1037,7 +1046,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
     logger.info(f'Proceeding to assert tree evaluation (backend={eval_ctx.execution_config.backend_type.name})')
-    nfa = run_evaluation_procedure(assert_tree[1], eval_ctx)
+    nfa = run_evaluation_procedure(assert_tree_to_evaluate[1], eval_ctx)  # Evaluate the formula in the assert tree
 
     return (nfa, smt_info)
 
