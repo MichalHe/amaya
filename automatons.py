@@ -290,7 +290,7 @@ class NFA(Generic[AutomatonState]):
             resulting_nfa.add_initial_state(initial_state)
 
         while work_queue:
-            current_state: Tuple[int, int] = work_queue.pop(0)
+            current_state: Tuple[int, int] = work_queue.pop(-1)
             resulting_nfa.add_state(current_state)
 
             logger.debug(f'Processed state {current_state}, remaining in queue {len(work_queue)}')
@@ -370,7 +370,7 @@ class NFA(Generic[AutomatonState]):
         projected_alphabet_symbols = list(self.alphabet.gen_projection_symbols_onto_variables(self.used_variables))
 
         while working_queue:
-            unexplored_dfa_state: Tuple[AutomatonState, ...] = working_queue.pop(0)
+            unexplored_dfa_state: Tuple[AutomatonState, ...] = working_queue.pop(-1)
             logger.debug(f'Determinization for {unexplored_dfa_state}, remaining in work queue: {len(working_queue)}')
 
             determinized_automaton.add_state(unexplored_dfa_state)
