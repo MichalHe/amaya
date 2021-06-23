@@ -26,8 +26,10 @@ from log import logger
 import os
 import parse
 import logging
+import sys
 import automatons
 from typing import List, Dict, Optional
+from mtbdd_transitions import MTBDDTransitionFn
 from dataclasses import dataclass
 import time
 
@@ -279,13 +281,19 @@ def run_in_benchmark_mode(args):  # NOQA
                 continue
 
             with open(benchmark_file) as benchmark_input_file:
-                print('Running', benchmark_file)
+                print('Running', benchmark_file, file=sys.stderr)
                 text = benchmark_input_file.read()
 
                 benchmark_start = time.time_ns()
                 nfa, smt_info = parse.perform_whole_evaluation_on_source_text(text, evaluation_config)
                 benchmark_end = time.time_ns()
                 runtime_ns = benchmark_end - benchmark_start
+
+                # Clear sylvan cache if running multiple evaluations, so that
+                # the measurements do not interfere.
+                if evaluation_config.backend_type == parse.BackendType.NAIVE:
+                    MTBDDTransitionFn.call_clear_cachce()
+                    MTBDDTransitionFn.call_sylvan_gc()
 
                 if benchmark_file not in executed_benchmarks:
                     executed_benchmarks[benchmark_file] = BenchmarkStat(os.path.basename(benchmark_file),

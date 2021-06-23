@@ -163,6 +163,9 @@ mtbdd_wrapper.amaya_mtbdd_deref.argtypes = (
 
 mtbdd_wrapper.amaya_sylvan_gc.argtypes = ()
 
+mtbdd_wrapper.amaya_sylvan_clear_cache.argtypes = ()
+mtbdd_wrapper.amaya_sylvan_clear_cache.restype = None
+
 # mtbdd_wrapper.amaya_print_dot.argtypes = (
 #     ct.c_ulong,
 #     ct.c_int32
@@ -1037,12 +1040,16 @@ class MTBDDTransitionFn():
         mtbdd_wrapper.amaya_mtbdd_deref(dd)
 
     @staticmethod
-    def schedule_sylvan_gc():
+    def call_sylvan_gc():
         mtbdd_wrapper.amaya_sylvan_gc()
 
     @staticmethod
     def participate_in_gc():
         mtbdd_wrapper.amaya_sylvan_try_performing_gc()
+
+    @staticmethod
+    def call_clear_cachce():
+        mtbdd_wrapper.amaya_sylvan_clear_cache()
 
 
 if __name__ == '__main__':
