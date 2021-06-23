@@ -324,6 +324,11 @@ class NFA(Generic[AutomatonState]):
                             work_queue.append(produced_intersection_metastate)
 
         resulting_nfa.used_variables = used_variable_ids
+
+        resulting_nfa.remove_nonfinishing_states()
+
+        assert resulting_nfa.used_variables
+
         return resulting_nfa
 
     def union(self, other: NFA[S]) -> NFA[int]:
@@ -517,7 +522,7 @@ class NFA(Generic[AutomatonState]):
         return result
 
     def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
-        if not self.alphabet.active_variables:
+        if not self.used_variables:
             if self.final_states:
                 return (True, [])
             else:
@@ -639,8 +644,7 @@ class NFA(Generic[AutomatonState]):
 
 
 class MTBDD_NFA(NFA):
-    automaton_id_counter = 0
-    # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
+    automaton_id_counter = 0  # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
     fast_prunining_enabled = False
 
     def __init__(self,
@@ -1084,6 +1088,12 @@ class MTBDD_NFA(NFA):
                 stack.append((reachable_state, new_path))
                 state_predecesors[reachable_state] = current_state
         return None
+
+    def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
+        model = self.find_some_model()
+        if model:
+            return (True, model[0])
+        return (False, [])
 
     def get_visualization_representation(self) -> AutomatonVisRepresentation:
 
