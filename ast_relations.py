@@ -87,9 +87,10 @@ def evaluate_expression(expr) -> PresburgerExpr:
             operand2 = evaluate_expression(expr[2])
             return operand1 - operand2
     elif operation == '+':
-        operand1 = evaluate_expression(expr[1])
-        operand2 = evaluate_expression(expr[2])
-        return operand1 + operand2
+        acc = evaluate_expression(expr[1])
+        for operand in expr[2:]:
+            acc += evaluate_expression(operand)
+        return acc
     elif operation == '*':
         operand1 = evaluate_expression(expr[1])
         operand2 = evaluate_expression(expr[2])
