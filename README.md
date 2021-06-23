@@ -64,8 +64,7 @@ python3 amaya.py --backend naive benchmark --add-directory smt-files/tptp/ --exe
 ```
 
 ## Known bugs
-The MTBDD backend currently does a very poor job of marking which MTBDDs are currently in use and therefore cannot be freed if Sylvan runs out
-of memory and enters garbage collection. This is a known issue and is currently WiP.  
+Some of the harder problems consume more than 10g of RAM (e.g. Psyco).
 
 ## Benchmark tests
 The following table gives serves to reflect the current capabilities of the Amaya solver. 
@@ -73,4 +72,5 @@ The following table gives serves to reflect the current capabilities of the Amay
 |Benchmark name | MTBDD TFN Status | Naive TFN Status |Notes |
 --- | --- | --- | ---
 | TPTP | Passing | Passing | |
+| UltimateAutomizer | Passing | Passing | |
 | Psyco | Not passing | Unknown | The naive TFN runtime is enormous |
