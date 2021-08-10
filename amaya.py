@@ -29,7 +29,6 @@ import logging
 import sys
 import automatons
 from typing import List, Dict, Optional
-from mtbdd_transitions import MTBDDTransitionFn
 from dataclasses import dataclass
 import time
 
@@ -274,6 +273,9 @@ def run_in_benchmark_mode(args):  # NOQA
     executed_benchmarks: Dict[str, BenchmarkStat] = {}
     failed = 0
 
+    if evaluation_config.backend_type == parse.BackendType.MTBDD:
+        from mtbdd_transitions import MTBDDTransitionFn
+
     for i in range(args.benchmark_execution_count):
         for benchmark_file in benchmark_files:
             if benchmark_file in executed_benchmarks and executed_benchmarks[benchmark_file].failed:
@@ -291,7 +293,7 @@ def run_in_benchmark_mode(args):  # NOQA
 
                 # Clear sylvan cache if running multiple evaluations, so that
                 # the measurements do not interfere.
-                if evaluation_config.backend_type == parse.BackendType.NAIVE:
+                if evaluation_config.backend_type == parse.BackendType.MTBDD:
                     MTBDDTransitionFn.call_clear_cachce()
                     MTBDDTransitionFn.call_sylvan_gc()
 
@@ -303,7 +305,7 @@ def run_in_benchmark_mode(args):  # NOQA
                 else:
                     executed_benchmarks[benchmark_file].runtimes_ns.append(runtime_ns)
 
-                expected_sat, _ = parse.get_sat_value_from_smt_info(smt_info, None)
+                expected_sat = parse.get_sat_value_from_smt_info(smt_info, None)
 
                 if expected_sat is not None:
                     sat, _ = nfa.is_sat()

@@ -6,7 +6,7 @@ from ast_relations import (
     try_retrieve_variable_if_literal,
 )
 
-from automatons import NFA, AutomatonType, MTBDD_NFA, LSBF_Alphabet
+from automatons import NFA, AutomatonType, LSBF_Alphabet
 from log import logger
 from logging import INFO
 from dataclasses import dataclass
@@ -16,7 +16,6 @@ from typing import (
     Set,
     Tuple,
     Any,
-    Type,
     Union,
     Dict,
     Callable,
@@ -317,8 +316,9 @@ class EvaluationContext:
             var_id = self._generate_new_variable_id()
             self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
 
-    def get_automaton_class_for_current_backend(self) -> Union[Type[NFA], Type[MTBDD_NFA]]:
+    def get_automaton_class_for_current_backend(self):
         if self.execution_config.backend_type == BackendType.MTBDD:
+            from mtbdd_automatons import MTBDD_NFA
             return MTBDD_NFA
         else:
             return NFA
@@ -1080,6 +1080,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
 
     automaton_constr: Callable = NFA
     if ctx.execution_config.backend_type == BackendType.MTBDD:
+        from mtbdd_automatons import MTBDD_NFA
         automaton_constr = MTBDD_NFA
 
     logger.debug(f'Building an automaton for: {relation_root}')
@@ -1522,27 +1523,18 @@ def expand_multivariable_bindings(assertion_tree):
         expand_multivariable_bindings(assertion_tree[-1])
 
 
-def get_sat_value_from_smt_info(smt_info: Dict[str, str], default: Optional[bool] = True) -> Optional[Tuple[bool, str]]:
-    '''Parses the information collected from the smt-info blocks for the expected SAT value.
-    Params:
-        smt_info: The dictionary containing the parsed information from smt-info statements
-        default:  If the SAT information is not present, the default (fallback) value might be specified.
-    Returns:
-        A tuple of the form (bool, str) carrying the boolean representation of the expected SAT
-        along with the string represenatation.
+def get_sat_value_from_smt_info(smt_info: Dict[str, str], default: Optional[bool] = True) -> Optional[bool]:
     '''
-    expected_sat: Optional[bool] = default
+    Parse the information collected from the smt-info blocks for the expected SAT value.
 
+    :param smt_info: A dictionary containing the parsed information from smt-info statements
+    :param default:  If the SAT information is not present, the default (fallback) value is used.
+    :returns:        True if the expected value is SAT, False if unsat or default if not present.
+    '''
     if ':status' in smt_info:
-        if smt_info[':status'] == 'unsat':
-            expected_sat = False
-        elif smt_info[':status'] == 'sat':
-            expected_sat = True
-
-    if expected_sat is None:
-        return None
-    expected_sat_str = 'sat' if expected_sat else 'unsat'
-    return (expected_sat, expected_sat_str)
+        return smt_info[':status'] == 'sat'
+    else:
+        return default
 
 
 def get_smt_info(ast) -> Dict[str, Any]:
