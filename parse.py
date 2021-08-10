@@ -140,6 +140,12 @@ class EvaluationContext:
         # Execution settings
         self.execution_config = evaluation_config
 
+        # Lazy load MTBDD automata module if needed
+        self.automata_cls = NFA
+        if self.execution_config.backend_type == BackendType.MTBDD:
+            from mtbdd_automatons import MTBDD_NFA
+            self.automata_cls = MTBDD_NFA
+
         self.alphabet = alphabet
 
     def get_alphabet(self) -> LSBF_Alphabet:
@@ -317,11 +323,7 @@ class EvaluationContext:
             self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
 
     def get_automaton_class_for_current_backend(self):
-        if self.execution_config.backend_type == BackendType.MTBDD:
-            from mtbdd_automatons import MTBDD_NFA
-            return MTBDD_NFA
-        else:
-            return NFA
+        return self.automata_cls
 
 
 def emit_evaluation_progress_info(msg: str, depth: int):
@@ -986,17 +988,18 @@ def perform_whole_evaluation_on_source_text(source_text: str,
                                             evaluation_config: EvaluationConfig,
                                             emit_introspect: IntrospectHandle = lambda nfa, op: None
                                             ) -> Tuple[NFA, Dict[str, str]]:
-    '''Verifies that the evaluation procedure produces correct results for
-    the formula in the given SMT2 source text.
+    '''
+    Parses the given SMT2 source code and runs the evaluation procedure.
 
-    Params:
-        source_text - The source text of the given formula.
-        emit_introspect - Introspection handle. Callback function that is
-                          called every time an automaton is produced during the
-                          evaluation.
-    Returns:
-        A tuple of the form (NFA, Dict) where NFA is the result of the evaluation of the first found assert tree, and
-        Dict is the smt-info collected when parsing.
+    If multiple `assert` statements are found in the AST then the AST is modified
+    so it contains only one `assert` that is a logical conjunction of all other
+    formulas in the other assert trees.
+
+    :param source_text: The SMT2 source text encoding the problem.
+    :param emit_introspect: Introspection handle. If given it will be called with every automaton
+                            produced during the evaluation procedure (in the order they are created).
+    :returns: A tuple of the form (NFA, Dict) where NFA is the result of the evaluation
+              of assert tree, and Dict is the smt-info collected when parsing.
     '''
 
     tokens = lex(source_text)
@@ -1078,10 +1081,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
         }
     }
 
-    automaton_constr: Callable = NFA
-    if ctx.execution_config.backend_type == BackendType.MTBDD:
-        from mtbdd_automatons import MTBDD_NFA
-        automaton_constr = MTBDD_NFA
+    automaton_constr = ctx.get_automaton_class_for_current_backend()
 
     logger.debug(f'Building an automaton for: {relation_root}')
     relation = extract_relation(relation_root)
