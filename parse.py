@@ -769,12 +769,18 @@ def replace_forall_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
 def ite_expansion_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     _, bool_expr, if_branch, else_branch = ast
 
-    presbureger_relation_roots = ['<=', '<', '=', '>', '>=']
-    for prr in presbureger_relation_roots:
-        if prr in ctx['history']:
-            # We don't want to perform expansions inside atomic relations -
-            # the expansions must be performed in a different fashion.
-            return NodeEncounteredHandlerStatus(False, False)
+    presbureger_relation_roots = {'<=', '<', '=', '>', '>='}
+
+    # Walk the history and see whether we are under any of the presb. relation roots
+    is_ite_inside_atomic_formula = False
+    for parent_tree in ctx['history']:
+        if parent_tree[0] in presbureger_relation_roots:
+            is_ite_inside_atomic_formula = True
+
+    if is_ite_inside_atomic_formula:
+        # We don't want to perform expansions inside atomic relations -
+        # the expansions must be performed in a different fashion.
+        return NodeEncounteredHandlerStatus(False, False)
 
     ast[0] = 'or'
     ast[1] = ['and', bool_expr, if_branch]
@@ -838,7 +844,7 @@ def transform_ast(ast: AST_Node,  # NOQA
 
     node_name = ast[0]
 
-    ctx['history'].append(node_name)
+    ctx['history'].append(ast)  # Keep track of where in the tree we are
 
     if node_name in node_encountered_handlers:
         handler = node_encountered_handlers[node_name]
