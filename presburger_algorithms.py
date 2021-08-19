@@ -149,14 +149,13 @@ def build_nfa_from_inequality(ineq: Relation,
                               alphabet: LSBF_Alphabet,
                               automaton_constr: AutomatonConstructor) -> NFA[NFA_AutomatonStateType]:
     '''Constructs a non-deterministic automaton for the inequality `ineq` (<=).
-    Params:
-        ineq - The inequality. The variables should be pre-sorted according to their IDs.
-        ineq_variables_ordered - An ordered list of the variables used in this
-                                 inequality with their ID (from exec. context)
-        alphabet - Alphabet containing *all* the variables present in the SMT tree.
-        automaton_constr - A factory function for constructing the automaton itself.
-    Returns:
-        The NFA encoding the inequality.
+
+    :param ineq: The inequality. The variables should be pre-sorted according to their IDs.
+    :param ineq_variables_ordered: An ordered list of the variables used in this
+                                   inequality with their ID (from exec. context)
+    :param alphabet: - Alphabet containing *all* the variables present in the SMT tree.
+    :param automaton_constr: - A factory function for constructing the automaton itself.
+    :returns: The NFA encoding the inequality.
     '''
     nfa = automaton_constr(alphabet, AutomatonType.NFA)
 
