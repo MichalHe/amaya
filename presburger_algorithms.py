@@ -171,12 +171,12 @@ def build_nfa_from_inequality(ineq: Relation,
     # unique number and that we cannot tell until the end
     f_transitions = []
 
-    work_queue: List[int] = [ineq.absolute_part]
-    work_set: Set[int] = set(work_queue)
-    while work_queue:
-        current_state = work_queue.pop()
+    work_list: List[int] = [ineq.absolute_part]
+    work_set: Set[int] = set(work_list)
+    while work_list:
+        current_state = work_list.pop()
         work_set.remove(current_state)
-        logger.debug(f'Processing state {current_state}, remaining in work queue: {len(work_queue)}')
+        logger.debug(f'Processing state {current_state}, remaining in work queue: {len(work_list)}')
         nfa.add_state(current_state)
 
         for alphabet_symbol in projected_alphabet:
@@ -184,7 +184,7 @@ def build_nfa_from_inequality(ineq: Relation,
             destination_state = math.floor(0.5 * (current_state - dot))
 
             if not nfa.has_state_with_value(destination_state) and destination_state not in work_set:
-                work_queue.append(destination_state)
+                work_list.append(destination_state)
                 work_set.add(destination_state)
 
             nfa.update_transition_fn(current_state,
