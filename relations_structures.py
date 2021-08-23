@@ -3,14 +3,54 @@ from dataclasses import dataclass
 from typing import (
     Callable,
     List,
-    Dict
+    Dict,
+    Tuple
 )
+
+
+@dataclass(frozen=True)
+class ModuloTerm:
+    '''Represents modulo term of form: `a.x + b.y ... + C ~=~ 0` (where ~=~ is the symbol for congruent)'''
+    variables: Tuple[str, ...]
+    variable_coeficients: Tuple[int, ...]
+    constant: int
+    modulo: int
+
+    def __str__(self) -> str:
+        variable_with_coefs = zip(self.variable_coeficients, self.variables)
+        _variables = ['{0}.{1}'.format(*var_with_coef) for var_with_coef in variable_with_coefs]
+
+        return '({0} mod {1})'.format(' '.join(_variables), self.modulo)
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    @staticmethod
+    def from_expression(expr, modulo) -> ModuloTerm:
+        '''
+        Create ModuloTerm from PresburgerExpr - the result of evaluation subtrees in modulo term SMT form.
+
+        :param PresburgerExpr expr: Result of evaluating the first AST in [mod AST AST]
+        :param int modulo: Result of evaluating the second AST in [mod AST AST]
+        '''
+        variables = tuple(sorted(expr.variables.keys()))
+        coeficients = tuple(expr.variables[variable] for variable in variables)
+        constant = expr.absolute_part
+
+        return ModuloTerm(
+            variables=variables,
+            variable_coeficients=coeficients,
+            constant=constant,
+            modulo=modulo
+        )
 
 
 @dataclass
 class Relation:
     variable_names: List[str]
     variable_coeficients: List[int]
+    modulo_terms: List[ModuloTerm]
+    modulo_term_coeficients: List[int]
     absolute_part: int
     operation: str
 
@@ -43,38 +83,30 @@ class Relation:
         else:
             return False
 
+    def __str__(self):
+        linear_component = []
+        for coef, variable in zip(self.variable_coeficients, self.variable_names):
+            sign = '+' if coef >= 0 else '0'
+            linear_component.append('{0}{1}.{2}'.format(sign, coef, variable))
 
-@dataclass
-class PresburgerExpr:
-    absolute_part: int
-    variables: Dict[str, int]
+        modulo_components = []
+        for mod_term, coef in zip(self.modulo_terms, self.modulo_term_coeficients):
+            sign = '+' if coef >= 0 else '0'
+            modulo_components.append('{0}{1}.{2}'.format(sign, coef, mod_term))
 
-    def __neg__(self) -> PresburgerExpr:
-        new_variables = {}
-        for variable_name in self.variables:
-            new_variables[variable_name] = -self.variables[variable_name]
+        return 'Relation({0} {1} {2} {3})'.format(
+            ' '.join(linear_component),
+            ' '.join(modulo_components),
+            self.operation,
+            self.absolute_part
+        )
 
-        return PresburgerExpr(-self.absolute_part, new_variables)
+    def __repr__(self):
+        return str(self)
 
-    def __sub__(self, other_expr: PresburgerExpr) -> PresburgerExpr:
-        abs_val = self.absolute_part - other_expr.absolute_part
-        variables = self.variables
-
-        for var_name in other_expr.variables:
-            if var_name in variables:
-                variables[var_name] -= other_expr.variables[var_name]
-            else:
-                variables[var_name] = -other_expr.variables[var_name]
-
-        return PresburgerExpr(abs_val, variables)
-
-    def __add__(self, other: PresburgerExpr) -> PresburgerExpr:
-        abs_val = self.absolute_part + other.absolute_part
-        variables = self.variables
-
-        for var_name in other.variables:
-            if var_name in variables:
-                variables[var_name] += other.variables[var_name]
-            else:
-                variables[var_name] = other.variables[var_name]
-        return PresburgerExpr(abs_val, variables)
+    def get_used_variables(self) -> List[str]:
+        '''Retrieve a collection of all the variables used in this relation.'''
+        used_variables = set(self.variable_names)
+        for modulo_term in self.modulo_terms:
+            used_variables.update(modulo_term.variables)
+        return sorted(used_variables)

@@ -1,9 +1,13 @@
 from __future__ import annotations
 from typing import (
     List,
+    Dict,
+    Iterable,
     Tuple,
     Union,
-    Set, Callable
+    Set,
+    Callable,
+    Optional
 )
 from log import logger
 from utils import vector_dot
@@ -13,6 +17,7 @@ from automatons import (
     LSBF_Alphabet,
     AutomatonType,
 )
+from dataclasses import dataclass
 from relations_structures import Relation
 import math
 
@@ -144,10 +149,120 @@ def build_dfa_from_sharp_inequality(ineq: Relation) -> DFA:
 AutomatonConstructor = Callable[[LSBF_Alphabet, AutomatonType], NFA]
 
 
+def project_symbol_onto_tracks(symbol: Tuple[int, ...], track_indices: List[int]) -> Tuple[int, ...]:
+    return tuple(symbol[i] for i in track_indices)
+
+
+def identify_tracks_used_by_ineq_components(relation_variables: List[str], relation: Relation) -> List[List[int]]:
+    '''
+    Identifies tracks used by the individual components of the relation.
+
+    The relation has exactly one nonmodular compoment and zero or more modular components.
+    The returned list has always the first entry indices used by the nonmodular component and the rest by the modular ones
+    in the same order as stored in the relation.
+
+    :param relation_variables: The variables used in the whole relation, *sorted*.
+    :param relation: The relation itself.
+    :returns: Collection of lists containing indices used by the components.
+    '''
+
+    component_tracks: List[List[int]] = []
+
+    nonmodular_track_indices = []
+    for track_index, variable_id_pair in enumerate(relation_variables):
+        variable, _ = variable_id_pair
+        if variable in relation.variable_names:
+            nonmodular_track_indices.append(track_index)
+    component_tracks.append(nonmodular_track_indices)
+
+    # For every modulo term, identify the tracks that should be used from the  symbols of the projected alphabet
+    for modulo_term in relation.modulo_terms:
+        tracks_used = []
+        for track_index, variable_id_pair in enumerate(relation_variables):
+            variable, _ = variable_id_pair
+            if variable in modulo_term.variables:
+                tracks_used.append(track_index)
+        component_tracks.append(tracks_used)
+    return component_tracks
+
+
+@dataclass(frozen=True)
+class LinearStateComponent(object):
+    value: int
+    variable_coeficients: Tuple[int, ...]
+
+    def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> LinearStateComponent:
+        dot = vector_dot(alphabet_symbol, self.variable_coeficients)
+        destination_state = math.floor(0.5 * (self.value - dot))
+        return LinearStateComponent(value=destination_state,
+                                    variable_coeficients=self.variable_coeficients)
+
+
+@dataclass(frozen=True)
+class ModuloTermStateComponent(object):
+    value: int
+    modulo: int
+    variable_coeficients: Tuple[int, ...]
+
+    def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[ModuloTermStateComponent]:
+        dot = vector_dot(self.variable_coeficients, alphabet_symbol)
+
+        if self.modulo % 2 == 0:
+            if dot % 2 == 0:
+                return ModuloTermStateComponent(
+                    value=dot//2,
+                    modulo=self.modulo//2,
+                    variable_coeficients=self.variable_coeficients
+                )
+            else:
+                return None
+
+        difference = self.value - dot
+        next_value = difference//2 if difference % 2 == 0 else (difference + self.modulo) // 2
+        return ModuloTermStateComponent(
+            value=next_value,
+            modulo=self.modulo,
+            variable_coeficients=self.variable_coeficients
+        )
+
+
+# This is used in the formula->NFA procedure. The created NFA has int automaton
+# states
+InterimAutomatonState = Tuple[Union[LinearStateComponent, ModuloTermStateComponent], ...]
+
+
+class AliasStore(object):
+    def __init__(self):
+        self.data: Dict[InterimAutomatonState, int] = {}
+        self.counter = 0
+
+    def get_alias_for_state(self, state: InterimAutomatonState):
+        if state in self.data:
+            return self.data[state]
+        else:
+            alias = self.counter
+            self.data[state] = alias
+            self.counter += 1
+            return alias
+
+
+def create_multicomponent_initial_state_from_relation(relation: Relation) -> InterimAutomatonState:
+    '''Creates initial state for NFA that has multiple components (linear + modular).'''
+    # Setup the initial state
+    modulo_term_state_components = [ModuloTermStateComponent(value=modulo_term.constant,
+                                                             modulo=modulo_term.modulo,
+                                                             variable_coeficients=modulo_term.variable_coeficients)
+                                    for modulo_term in relation.modulo_terms]
+    linear_component = LinearStateComponent(value=relation.absolute_part, variable_coeficients=tuple(relation.variable_coeficients))
+    initial_state = tuple([linear_component] + modulo_term_state_components)
+    return initial_state
+
+
 def build_nfa_from_inequality(ineq: Relation,
                               ineq_variables_ordered: List[Tuple[str, int]],
                               alphabet: LSBF_Alphabet,
-                              automaton_constr: AutomatonConstructor) -> NFA[NFA_AutomatonStateType]:
+                              automaton_constr: AutomatonConstructor,
+                              embed_metadata: bool = False) -> NFA[NFA_AutomatonStateType]:
     '''Constructs a non-deterministic automaton for the inequality `ineq` (<=) over whole (Z) numbers.
 
     We need to pass the variables with the corresponding IDs so that we know at which tract we need to
@@ -165,39 +280,90 @@ def build_nfa_from_inequality(ineq: Relation,
 
     nfa.add_initial_state(ineq.absolute_part)
 
-    # Not every variable in the overall `alphabet` might be present in the
+    # NOTE:
+    # The relation we receive is no longer a simple straight forward a.x <= C.
+    # Currently we are dealing with something that has multiple individual
+    # components (1 linear and 0+ modular)
+
+    # Not every variable in the overall alphabet might be present in the
     # inequality - we need to iterate over an alphabet projection to the used
     # variables (the bitvectors used in automaton creation) and use the
     # cylindrified version of those bitvectors to insert actual transitions.
-    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(ineq.variable_names))
+    used_variables = ineq.get_used_variables()
+    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(used_variables))
+
+    component_tracks = identify_tracks_used_by_ineq_components(
+        ineq_variables_ordered,
+        ineq)
 
     # We have to postpone the addition of final state, since it has to have
     # unique number and that we cannot tell until the end
     f_transitions = []
 
-    work_list: List[int] = [ineq.absolute_part]
-    work_set: Set[int] = set(work_list)
+    def is_current_transition_final(origin: InterimAutomatonState,
+                                    destination: InterimAutomatonState,
+                                    relation: Relation,
+                                    component_symbols: Iterable[Iterable[int]]) -> bool:
+        '''
+        Looks at the calculated transition and checks whether the
+        transition would lead to a final state if the inpu symbol was the last one.
+        '''
+
+        linear_component = origin[0]
+        linear_component_symbol = component_symbols[0]
+        dot = vector_dot(linear_component.variable_coeficients, linear_component_symbol)
+
+        # Interpret the read symbol as the last one.
+        linear_component_with_sign = linear_component.value + dot
+
+        modulo_terms_value = 0
+        for modulo_term_coeficient, modulo_term_value in zip(relation.modulo_term_coeficients, destination[1:]):
+            modulo_terms_value += modulo_term_coeficient * modulo_term_value.value
+
+        relation_value = linear_component_with_sign - modulo_terms_value
+        return relation_value >= 0
+
+    initial_state = create_multicomponent_initial_state_from_relation(ineq)
+
+    work_list: List[InterimAutomatonState] = [initial_state]
+    work_set: Set[InterimAutomatonState] = set(work_list)  # Seed up checking whether a statee is already present in the work_list
+    alias_store = AliasStore()
+
+    ineq_variable_numbers = list(map(lambda pair: pair[1], ineq_variables_ordered))
+
     while work_list:
         current_state = work_list.pop()
         work_set.remove(current_state)
+
         logger.debug(f'Processing state {current_state}, remaining in work queue: {len(work_list)}')
-        nfa.add_state(current_state)
+
+        current_state_alias = alias_store.get_alias_for_state(current_state)
+
+        nfa.add_state(current_state_alias)
 
         for alphabet_symbol in projected_alphabet:
-            dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
-            destination_state = math.floor(0.5 * (current_state - dot))
+            component_symbols = [project_symbol_onto_tracks(alphabet_symbol, track_indices)
+                                 for track_indices in component_tracks]
+            destination_state = tuple(
+                component_state.generate_next(component_symbol)
+                for component_state, component_symbol in zip(current_state, component_symbols))
 
-            if not nfa.has_state_with_value(destination_state) and destination_state not in work_set:
+            if None in destination_state:
+                continue
+
+            destination_state_alias = alias_store.get_alias_for_state(destination_state)
+
+            if not nfa.has_state_with_value(destination_state_alias) and destination_state not in work_set:
                 work_list.append(destination_state)
                 work_set.add(destination_state)
 
-            nfa.update_transition_fn(current_state,
-                                     alphabet.cylindrify_symbol_of_projected_alphabet(ineq_variables_ordered, alphabet_symbol),
-                                     destination_state)
+            cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(ineq_variable_numbers, alphabet_symbol)
+            nfa.update_transition_fn(current_state_alias,
+                                     cylindrified_symbol,
+                                     destination_state_alias)
 
-            # Check whether state is final
-            if current_state + dot >= 0:
-                f_transitions.append((current_state, alphabet.cylindrify_symbol_of_projected_alphabet(ineq_variables_ordered, alphabet_symbol)))
+            if is_current_transition_final(current_state, destination_state, ineq, component_symbols):
+                f_transitions.append((current_state_alias, cylindrified_symbol))
 
     # All states have been added, now determine the final state value
     if f_transitions:
@@ -209,6 +375,8 @@ def build_nfa_from_inequality(ineq: Relation,
             nfa.update_transition_fn(origin, symbol, final_state)
 
     nfa.used_variables = ineq_variables_ordered
+    if embed_metadata:
+        nfa.extra_info['metadata'] = alias_store
     return nfa
 
 

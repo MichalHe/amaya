@@ -1,12 +1,14 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Set, Optional, Tuple, Any
+from typing import (
+    Dict,
+    Set,
+    Optional,
+    Any
+)
 from log import logger
-from relations_structures import Relation
+from relations_structures import Relation, ModuloTerm
 from utils import number_to_bit_tuple
-
-
-ModuloTerm = Tuple[str, int]  # (x mod 10) --> Variable name: x, modulo: 10
 
 
 @dataclass
@@ -103,7 +105,7 @@ class PresburgerExpr:
         )
 
     @staticmethod
-    def from_modulo_term(modulo_term: ModuloTerm) -> PresburgerExpr:
+    def from_single_modulo_term(modulo_term: ModuloTerm) -> PresburgerExpr:
         """Wraps the given modulo term into PresburgerExpr."""
         return PresburgerExpr(absolute_part=0, variables={}, modulo_terms={modulo_term: 1})
 
@@ -158,15 +160,15 @@ def evaluate_expression(expr) -> PresburgerExpr:
         except ValueError:
             raise ValueError(f'Error while evaluating {expr} -- attempting to multiply variables by variables, which is forbidden in PA.')
     elif operation == 'mod':
-        # We only expect modulo operators in the form of: [mod x constant]
-        variable_name = expr[1]
-        modulo = evaluate_expression(expr[2])  # The modulo might be entire AST
+        variables_expr = evaluate_expression(expr[1])
+        modulo = evaluate_expression(expr[2])  # The modulo might be entire AST but must be a constexpr
 
         assert modulo.is_constexpr(), 'The modulo term does not have a constant as a right operand: {0}'.format(
             modulo
         )
 
-        return PresburgerExpr.from_modulo_term((variable_name, modulo.absolute_part))
+        modulo_term = ModuloTerm.from_expression(variables_expr, modulo.absolute_part)
+        return PresburgerExpr.from_single_modulo_term(modulo_term)
 
     else:
         raise ValueError(f'Unsupported operation type: {operation} in expr: {expr}')
@@ -204,18 +206,25 @@ def normalize_atomic_presburger_formula(op: str, lhs_expr: PresburgerExpr, rhs_e
 
     relation_abs = -unified_expr.absolute_part  # move it to the right side
 
-    # Keep variables in alphabetical order - required for fast projections
+    # Keep variables in alphabetical order - speeds up projections
     sorted_vars = sorted(unified_expr.variables.keys())
     for var_name in sorted_vars:
         var_coef = unified_expr.variables[var_name]
         relation_variable_names.append(var_name)
         relation_variable_coeficients.append(var_coef)
 
+    modulo_terms, modulo_term_coeficients = [], []
+    for modulo_term, modulo_term_coeficient in unified_expr.modulo_terms.items():
+        modulo_terms.append(modulo_term)
+        modulo_term_coeficients.append(modulo_term_coeficient)
+
     return Relation(
-        relation_variable_names,
-        relation_variable_coeficients,
-        relation_abs,
-        rel_op
+        variable_names=relation_variable_names,
+        variable_coeficients=relation_variable_coeficients,
+        modulo_terms=modulo_terms,
+        modulo_term_coeficients=modulo_term_coeficients,
+        absolute_part=relation_abs,
+        operation=rel_op
     )
 
 

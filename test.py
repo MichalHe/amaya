@@ -1,39 +1,33 @@
-from pressburger_algorithms import build_nfa_from_inequality
-from pressburger_algorithms import Relation
-from mtbdd_transitions import MTBDDTransitionFn, determinize_mtbdd
-import timeit
-
-var_names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
-var_coefs_1 = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0]
-var_coefs_2 = [0, 0, 0, 0, 0, 1, 2, 3, 4, 5]
-
-ineq0 = Relation(variable_names=var_names, variable_coeficients=var_coefs_1, absolute_part=1000, operation='<=')
-ineq1 = Relation(variable_names=var_names, variable_coeficients=var_coefs_2, absolute_part=-2001, operation='<=')
-
-nfa_original0 = build_nfa_from_inequality(ineq0)
-nfa_original1 = build_nfa_from_inequality(ineq1)
+from ast_relations import extract_relation
+from presburger_algorithms import build_nfa_from_inequality
+from automatons import LSBF_Alphabet, NFA
+from parse import (
+    build_syntax_tree,
+    lex,
+)
 
 
-proj0 = nfa_original0.do_projection('a')
-proj1 = nfa_original1.do_projection('d')
+expr_ast = ['+',
+            'x',
+            ['*',
+             '10',
+             ['mod', 'y', 5]]]
+ineq = ['<=',
+        ['mod', 'y', 5],
+        '0']
 
-union = proj0.union(proj1)
+formula = '(<= (+ x (* 10 (mod y 5))) 0)'
+atomic_formula = '(<= (mod (+ (* 8 x) (* 4 K1) (* 2 K2) K3 (* 8 y) (* 8 z)) 4294967296) 4)'
+tokens = lex(formula)
+ast = build_syntax_tree(tokens)
 
-mtbdd_tfn = MTBDDTransitionFn()
-lt = None
-for t in union.transition_fn.iter():
-    if lt is None:
-        lt = len(t[1])
-    else:
-        assert lt == len(t[1])  # Integrity checking
-    mtbdd_tfn.insert_transition(t[0], t[1], t[2])
+print(ast)
 
-mtbdd_time = timeit.timeit(lambda: determinize_mtbdd(mtbdd_tfn, union.initial_states), number=1)
-standard_time = timeit.timeit(lambda: union.determinize(), number=1)
+relation = extract_relation(ast[0])
+relation_variables = [('x', 1), ('y', 2), ('z', 3), ('K1', 4), ('K2', 5), ('K3', 6)]
+alphabet = LSBF_Alphabet.from_variable_names(['x', 'y', 'z', 'K1', 'K2', 'K3'])
+nfa = build_nfa_from_inequality(relation, relation_variables, alphabet, NFA, embed_metadata=True)
 
-print(mtbdd_time)
-print(standard_time)
+print(len(nfa.states))
 
-# TODO: 2) Write MTBDD_TransitionFn function which simply receives set of
-#       states and returns the union mtbdd + its leaves (= one metastep in
-#       determinization)
+# nfa = build_nfa_from_inequality(_ineq, [('y', 1)], alphabet, NFA, embed_metadata=True)
