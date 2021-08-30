@@ -191,11 +191,28 @@ class LinearStateComponent(object):
     value: int
     variable_coeficients: Tuple[int, ...]
 
-    def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> LinearStateComponent:
+    def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[LinearStateComponent]:
+        raise NotImplementedError('The LinearStateComponent should not be instantiated directly, use its subclasses')
+
+
+class IneqLinearStateComponent(LinearStateComponent):
+    def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[LinearStateComponent]:
         dot = vector_dot(alphabet_symbol, self.variable_coeficients)
         destination_state = math.floor(0.5 * (self.value - dot))
-        return LinearStateComponent(value=destination_state,
-                                    variable_coeficients=self.variable_coeficients)
+        return IneqLinearStateComponent(value=destination_state,
+                                        variable_coeficients=self.variable_coeficients)
+
+
+class EqLinearStateComponent(LinearStateComponent):
+    def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[LinearStateComponent]:
+        dot = vector_dot(alphabet_symbol, self.variable_coeficients)
+        diff = self.value - dot
+
+        if diff % 2 == 1:
+            return None
+
+        return IneqLinearStateComponent(value=diff // 2,
+                                        variable_coeficients=self.variable_coeficients)
 
 
 @dataclass(frozen=True)
@@ -384,16 +401,51 @@ def build_nfa_from_equality(eq: Relation,
                             eq_variables_ordered: List[int],
                             alphabet: LSBF_Alphabet,
                             automaton_constr: AutomatonConstructor):
-    '''TODO'''
+    '''
+    Builds NFA representing the solution space of given equality.
+
+    The eq_variables_ordered are being passed in because we need to know which
+    tracks in the overall alphabet belong to the variables referenced
+    in the equality (note that variable names are not unique).
+
+    Currently we support either building an NFA for equality of form: `a.x = C`
+    or `a*(x mod C1) + b*(x mod C2) ... = M` that is don't know how to mix them
+    together.
+    '''
+
+    if eq.modulo_terms and eq.variable_names:
+        # We don't know how to build an NFA for such equality
+        raise ValueError('No idea how to build an NFA for equality that has linear terms mixed with modulo terms.')
 
     nfa = automaton_constr(
         alphabet=alphabet,
         automaton_type=AutomatonType.NFA
     )
 
-    nfa.add_initial_state(eq.absolute_part)
+    # The InterimAutomatonState used has only one component type - choose the
+    # correct one -- it encapsulates the logic needed to build the NFA.
+    if eq.variable_names:
+        linear_state_component = EqLinearStateComponent(value=eq.absolute_part,
+                                                        variable_coeficients=eq.variable_coeficients)
+        initial_state: InterimAutomatonState = (linear_state_component,)
+    else:
+        modular_components = [
+            ModuloTermStateComponent(value=mt.constant, modulo=mt.modulo, variable_coeficient=mt.variable_coeficients)
+            for mt in eq.modulo_terms]
+        initial_state: InterimAutomatonState = tuple(modular_components)
 
-    states_to_explore: List[int] = [eq.absolute_part]
+    alias_store = AliasStore()
+
+    nfa.add_initial_state(alias_store.get_alias_for_state(initial_state))
+
+    work_list: List[InterimAutomatonState] = [eq.absolute_part]
+    work_set: Set[InterimAutomatonState] = set(work_list)  # To speed up work_list lookups
+
+    # FIXME(codeboy): Change this not to return tracks for both linear and
+    #                 modulo terms
+    component_tracks = identify_tracks_used_by_ineq_components(
+        eq_variables_ordered,
+        eq)
 
     # We keep only the information about the origin state and transition symbol
     # as the final state is only one
@@ -401,38 +453,42 @@ def build_nfa_from_equality(eq: Relation,
 
     projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(eq_variables_ordered))
 
-    work_set = set(states_to_explore)
-    while states_to_explore:
-        logger.debug(f'Build NFA from equality: Remaining states in the work queue: {len(states_to_explore)}')
-        e_state = states_to_explore.pop()  # e_state = (currently) explored state
-        work_set.remove(e_state)
+    while work_list:
+        logger.debug(f'Build NFA from equality: Remaining states in the work queue: {len(work_list)}')
 
-        nfa.add_state(e_state)
+        current_state: InterimAutomatonState = work_list.pop()
+        work_set.remove(current_state)
+        current_state_alias: int = alias_store.get_alias_for_state(current_state)
 
-        for symbol in projected_alphabet:
-            dot = vector_dot(symbol, eq.variable_coeficients)
-            d_state = e_state - dot  # Discovered state
+        nfa.add_state(current_state_alias)
 
-            # Process only even states
-            if d_state % 2 == 0:
-                d_state = int(d_state / 2)
-                nfa.update_transition_fn(e_state,
-                                         alphabet.cylindrify_symbol_of_projected_alphabet(eq_variables_ordered, symbol),
-                                         d_state)
+        for alphabet_symbol in projected_alphabet:
+            component_symbols = [project_symbol_onto_tracks(alphabet_symbol, track_indices)
+                                 for track_indices in component_tracks]
 
-                # Check whether we already did process this state
-                if not nfa.has_state_with_value(d_state):
-                    # State might be reachable from multiple locations, this
-                    # discovery does not have to be the first one
-                    if d_state not in work_set:
-                        states_to_explore.append(d_state)
-                        work_set.add(d_state)
+            destination_state = tuple(
+                component_state.generate_next(component_symbol)
+                for component_state, component_symbol in zip(current_state, component_symbols))
 
-                # Check whether current state should have transition to final
-                if e_state + dot == 0:
-                    # Postpone the addition of the transition to final state
-                    # (we do not know the integer value of the state yet)
-                    transitions_to_final_state.add((e_state, alphabet.cylindrify_symbol_of_projected_alphabet(eq_variables_ordered, symbol)))
+            destination_state_alias: int = alias_store.get_alias_for_state(destination_state)
+
+            # Check whether we already did process this state
+            if not nfa.has_state_with_value(destination_state_alias):
+                # State might be reachable from multiple locations, this
+                # discovery does not have to be the first one
+                if destination_state not in work_set:
+                    work_list.append(destination_state)
+                    work_set.add(destination_state)
+
+            cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(eq_variables_ordered, alphabet_symbol)
+            nfa.update_transition_fn(current_state_alias,
+                                     cylindrified_symbol,
+                                     destination_state_alias)
+            # Check whether current state should have transition to final
+            if current_state + dot == 0:
+                # Postpone the addition of the transition to final state
+                # (we do not know the integer value of the state yet)
+                transitions_to_final_state.add((current_state_alias, alphabet.cylindrify_symbol_of_projected_alphabet(eq_variables_ordered, symbol)))
 
     if transitions_to_final_state:
         final_state = max(nfa.states) + 1
