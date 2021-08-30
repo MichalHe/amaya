@@ -819,7 +819,7 @@ def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AS
             _, let_binding_subtree = binding
             yield (let_binding_subtree, (root_node[1], i))
         yield (root_node[2], (root_node, 2))
-    elif node_name in ['and', 'or', '-']:
+    elif node_name in ['and', 'or', '-', 'div']:
         # - can be both unary and binary
         for i, operand_tree in enumerate(root_node[1:]):
             yield (operand_tree, (root_node, i + 1))
