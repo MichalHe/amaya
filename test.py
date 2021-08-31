@@ -1,5 +1,5 @@
 from ast_relations import extract_relation
-from presburger_algorithms import build_nfa_from_inequality
+from presburger_algorithms import build_nfa_from_linear_equality
 from automatons import LSBF_Alphabet, NFA
 from parse import (
     build_syntax_tree,
@@ -7,26 +7,16 @@ from parse import (
 )
 
 
-expr_ast = ['+',
-            'x',
-            ['*',
-             '10',
-             ['mod', 'y', 5]]]
-ineq = ['<=',
-        ['mod', 'y', 5],
-        '0']
-
-formula = '(<= (+ x (* 10 (mod y 5))) 0)'
-atomic_formula = '(<= (mod (+ (* 8 x) (* 4 K1) (* 2 K2) K3 (* 8 y) (* 8 z)) 4294967296) 4)'
+formula = '(= x 0)'
 tokens = lex(formula)
 ast = build_syntax_tree(tokens)
 
 print(ast)
 
 relation = extract_relation(ast[0])
-relation_variables = [('x', 1), ('y', 2), ('z', 3), ('K1', 4), ('K2', 5), ('K3', 6)]
-alphabet = LSBF_Alphabet.from_variable_names(['x', 'y', 'z', 'K1', 'K2', 'K3'])
-nfa = build_nfa_from_inequality(relation, relation_variables, alphabet, NFA, embed_metadata=True)
+relation_variables = [('x', 1)]
+alphabet = LSBF_Alphabet.from_variable_names(['x'])
+nfa = build_nfa_from_linear_equality(relation, relation_variables, alphabet, NFA)
 
 print(len(nfa.states))
 
