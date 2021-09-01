@@ -250,9 +250,9 @@ class ModuloTermStateComponent(object):
 
 # This is used in the formula->NFA procedure. The created NFA has int automaton
 # states
+InterimModuloAutomatonState = Tuple[ModuloTermStateComponent, ...]
 InterimAutomatonState = Tuple[Union[LinearStateComponent, ModuloTermStateComponent], ...]
 TransitionPredicate = Callable[[InterimAutomatonState, Tuple[int, ...], InterimAutomatonState, Relation], bool]
-InterimModuloAutomatonState = Tuple[ModuloTermStateComponent, ...]
 
 
 class AliasStore(object):
@@ -419,3 +419,106 @@ def build_nfa_from_linear_sharp_inequality(ineq: Relation, emit_handle=None):
     nfa_ineq = build_nfa_from_linear_inequality(ineq)
 
     return nfa_ineq
+
+
+def build_presburger_modulo_dfa(relation: Relation,  # NOQA
+                                relation_variables_with_ids: List[Tuple[str, int]],
+                                alphabet: LSBF_Alphabet,
+                                nfa: NFA) -> NFA:
+    '''
+    Builds DFA off the provided initial_state.
+
+    The logic behind what state is the transition target after reading some
+    symbol X is contained with the ModuloTermStateComponents that will be fed
+    with the required alphabet symbols.
+
+    The automata encoding are deterministic as no sign interpretation of the
+    last read symbol is performed.
+
+    :param initial_state: Tuple with containing ModuloTermStateComponent-s.
+    :param is_state_final: Predicate that determines whether the processed state
+                           is final.
+    :param relation_variables_with_ids: The sorted (by ID) list of variable names with their IDs.
+                                       Required so we know which tracks of the overall alphabet are used.
+    :param alphabet: The overall alphabet.
+    :param nfa: An empty NFA that will have its structure formed to encode the modulo relation.
+    '''
+
+    logger.info('Building modulo-DFA for provided relation: {0}'.format(relation))
+
+    assert not relation.variable_names, 'Trying to build modulo automaton from relation with some linear terms.'
+
+    variable_name_to_id: Dict[str, int] = dict(relation_variables_with_ids)
+
+    assert len(variable_name_to_id) == len(relation_variables_with_ids), 'Provided variables must be unique.'
+
+    variable_ids = sorted(variable_name_to_id.values())
+    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(variable_ids))
+
+    variable_name_to_track_index: Dict[str, int] = {}
+    for i, variable_name in enumerate(relation_variables_with_ids):
+        variable_name_to_track_index[variable_name] = i
+
+    # Identify what tracks (their indices) are relevant for the individual components
+    component_tracks: List[Tuple[int, ...]] = []
+    for modulo_term in relation.modulo_terms:
+        term_tracks = sorted(variable_name_to_track_index[variable] for variable in modulo_term.variables)
+        component_tracks.append(tuple(term_tracks))
+
+    # Prepare initial state
+    initial_components: List[ModuloTermStateComponent] = []
+    for modulo_term in relation.modulo_terms:
+        component = ModuloTermStateComponent(value=modulo_term.constant,
+                                             modulo=modulo_term.modulo,
+                                             variable_coeficients=modulo_term.variable_coeficients)
+        initial_components.append(component)
+    initial_state = tuple(initial_components)
+
+    # Create a predicate that determines which states are considered final.
+    if relation.operation == '<':
+        relation.operation = '<='
+        relation.absolute_part -= 1
+    if relation.operation == '<=':
+        def is_state_final(state: InterimModuloAutomatonState) -> bool:
+            state_values = [component.value for component in state]
+            dot = vector_dot(state_values, component.variable_coeficients)
+            return dot <= relation.absolute_part
+    else:
+        def is_state_final(state: InterimModuloAutomatonState) -> bool:
+            state_values = [component.value for component in state]
+            dot = vector_dot(state_values, component.variable_coeficients)
+            return dot == relation.absolute_part
+
+    work_list: List[InterimModuloAutomatonState] = [initial_state]
+    work_set: Set[InterimModuloAutomatonState] = set(work_list)
+    alias_store = AliasStore()
+
+    while work_list:
+        current_state = work_list.pop(-1)
+        work_set.remove(current_state)
+        current_state_alias = alias_store.get_alias_for_state(current_state)
+
+        logger.debug('Processing metastate {0} aka {1}, remaining in work list: {2}'.format(
+            current_state, current_state_alias, len(work_list)
+        ))
+
+        nfa.add_state(current_state_alias)
+        if is_state_final(current_state):
+            nfa.add_final_state(current_state_alias)
+
+        for symbol in projected_alphabet:
+            projected_symbols_for_components = [project_symbol_onto_tracks(symbol, component_track_indices)
+                                                for component_track_indices in component_tracks]
+            destination_state = (comp.generate_next(comp_symbol)
+                                 for comp, comp_symbol in zip(current_state, projected_symbols_for_components))
+
+            if None in destination_state:
+                continue
+
+            destination_state_alias = alias_store.get_alias_for_state(destination_state)
+            if not nfa.has_state_with_value(destination_state_alias) and destination_state not in work_set:
+                work_list.append(destination_state)
+                work_set.add(destination_state)
+    logger.info('Done. Built DFA with {0} states, out of which {1} are final.'.format(
+        len(nfa.states), len(nfa.final_states)))
+    return nfa
