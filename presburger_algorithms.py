@@ -456,8 +456,8 @@ def build_presburger_modulo_dfa(relation: Relation,  # NOQA
     projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(variable_ids))
 
     variable_name_to_track_index: Dict[str, int] = {}
-    for i, variable_name in enumerate(relation_variables_with_ids):
-        variable_name_to_track_index[variable_name] = i
+    for i, variable_id_pair in enumerate(relation_variables_with_ids):
+        variable_name_to_track_index[variable_id_pair[0]] = i
 
     # Identify what tracks (their indices) are relevant for the individual components
     component_tracks: List[Tuple[int, ...]] = []
@@ -493,6 +493,8 @@ def build_presburger_modulo_dfa(relation: Relation,  # NOQA
     work_set: Set[InterimModuloAutomatonState] = set(work_list)
     alias_store = AliasStore()
 
+    nfa.add_initial_state(alias_store.get_alias_for_state(initial_state))
+
     while work_list:
         current_state = work_list.pop(-1)
         work_set.remove(current_state)
@@ -509,13 +511,17 @@ def build_presburger_modulo_dfa(relation: Relation,  # NOQA
         for symbol in projected_alphabet:
             projected_symbols_for_components = [project_symbol_onto_tracks(symbol, component_track_indices)
                                                 for component_track_indices in component_tracks]
-            destination_state = (comp.generate_next(comp_symbol)
-                                 for comp, comp_symbol in zip(current_state, projected_symbols_for_components))
+
+            destination_state = tuple(comp.generate_next(comp_symbol)
+                                      for comp, comp_symbol in zip(current_state, projected_symbols_for_components))
 
             if None in destination_state:
                 continue
 
             destination_state_alias = alias_store.get_alias_for_state(destination_state)
+
+            nfa.update_transition_fn(current_state_alias, symbol, destination_state_alias)
+
             if not nfa.has_state_with_value(destination_state_alias) and destination_state not in work_set:
                 work_list.append(destination_state)
                 work_set.add(destination_state)
