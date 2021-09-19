@@ -82,7 +82,6 @@ class NodeEncounteredHandlerStatus:
 
 NodeEncounteredHandler = Callable[[AST_NaryNode, bool, Dict], NodeEncounteredHandlerStatus]
 
-
 @dataclass
 class EvaluationStat():
     operation: ParsingOperation
@@ -595,6 +594,11 @@ def get_asserts_from_ast(ast):
 
 
 def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> List[AST_NaryNode]:
+    '''
+    Recursively traverse given AST down to the leaves. Upon finding a modulo term, replace it with a new variable. 
+    The number of variables found so far is propagated via the `already_replaced` variable 
+    (it is a list to provide mutability).
+    '''
     if type(ast) != list:
         return []
     node_name = ast[0]
@@ -619,6 +623,24 @@ def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> 
 
 
 def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
+    '''Transform AST handler - traverse the given AST, count all modulos and create equivalent existential formula.
+    
+    Traverses the given AST in a recursive fashion looking for the occurrences of the modulo term. Upon finding such
+    modulo terms the algorithm immediately replaces them with a multiplication with a new variable representing 
+    the modulo term. The original formula is put in conjunction with other formulas that put forward limits on how
+    big can the variable representing modulo be.
+    '''
+
+    # Detect the special form of equality relation ((a.x + b.y .... mod P) = c) that can be converted 
+    # directly to an NFA
+    if ast[0] == '=':
+        lhs, rhs = ast[1], ast[2]
+        if type(lhs) == int:
+            lhs, rhs = rhs, lhs  # Swap equation sides so we don't have to check for the specific structure twice
+
+        can_convert_modulo_relation_directly = (type(rhs) == int and type(lhs) == list and lhs[0] == 'mod')
+        if can_convert_modulo_relation_directly:
+            return
     modulo_exprs = replace_modulo_operators_in_expr(ast[1]) + replace_modulo_operators_in_expr(ast[2])
     modulo_count = len(modulo_exprs)
     if modulo_count > 0:
@@ -721,9 +743,10 @@ def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -
 def preprocess_relations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     modulo_expansion_status = replace_modulo_with_exists_handler(ast, is_reeval, ctx)
     ite_expansions_status = expand_ite_expressions_inside_presburger_relation(ast, ctx)
-
-    return NodeEncounteredHandlerStatus(modulo_expansion_status.should_reevaluate_result or ite_expansions_status.should_reevaluate_result,
-                                        False)
+    
+    should_reeval_modulo = modulo_expansion_status.should_reevaluate_result
+    should_reeval_ite = ite_expansions_status.should_reevaluate_result
+    return NodeEncounteredHandlerStatus(should_reeval_modulo or should_reeval_modulo, False)
 
 
 def remove_double_negations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
