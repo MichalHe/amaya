@@ -2,6 +2,7 @@ from __future__ import annotations
 import presburger_algorithms as pa
 from ast_relations import (
     extract_relation,
+    Relation,
     expand_relation_on_ite,
     try_retrieve_variable_if_literal,
 )
@@ -30,7 +31,7 @@ PRETTY_PRINT_INDENT = ' ' * 2
 logger.setLevel(INFO)
 
 
-AST_Leaf = str
+AST_Leaf = Union[str,Relation]
 AST_NaryNode = List[Union[AST_Leaf, 'AST_NaryNode']]
 AST_Node = Union[AST_Leaf, AST_NaryNode]
 
@@ -78,6 +79,7 @@ class VariableType(IntEnum):
 class NodeEncounteredHandlerStatus:
     should_reevaluate_result: bool
     is_result_atomic: bool
+    do_not_descend_further: bool = False
 
 
 NodeEncounteredHandler = Callable[[AST_NaryNode, bool, Dict], NodeEncounteredHandlerStatus]
@@ -740,13 +742,81 @@ def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -
     return NodeEncounteredHandlerStatus(True, False)
 
 
-def preprocess_relations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
-    modulo_expansion_status = replace_modulo_with_exists_handler(ast, is_reeval, ctx)
-    ite_expansions_status = expand_ite_expressions_inside_presburger_relation(ast, ctx)
+def process_relations_handler(ast: AST_NaryNode) -> AST_Node:
     
-    should_reeval_modulo = modulo_expansion_status.should_reevaluate_result
-    should_reeval_ite = ite_expansions_status.should_reevaluate_result
-    return NodeEncounteredHandlerStatus(should_reeval_modulo or should_reeval_modulo, False)
+    if type(ast) != list:
+        return
+    
+    if ast[0] in ['<', '>', '<=', '>=', '=']:
+        relation = extract_relation(ast)
+        direct_construction_exists = False 
+        if not relation.modulo_terms:
+            direct_construction_exists = True
+        elif relation.operation == '=' and len(relation.modulo_terms) == 1 and not relation.variable_names:
+            # This is the special form of modulo equation we can construct automaton for
+            direct_construction_exists = True
+            
+        if direct_construction_exists:
+            return relation
+        
+        # We must construct existencial formula to deal with the modulo terms
+        modulo_variables = ['Mod_Var_{0}'.format(i) for i in range(len(relation.modulo_terms))]
+        modulo_terms, modulo_coeficients = relation.modulo_terms, relation.modulo_term_coeficients
+        
+        linear_var_to_coef_map = dict(zip(relation.variable_names, relation.variable_coeficients))
+        reminder_size_limit_relations: List[Relation] = []       
+
+        # Edit the relation as if the modulo terms are expressed using the new modulo variables 
+        for modvar, coeficient, modulo_term in zip(modulo_variables, modulo_coeficients, modulo_terms):
+            # Fold in the coeficient standing before the modulo term eg: 3*(x + y mod K)
+            variable_coeficients = [coeficient * variable_coef for variable_coef in modulo_term.variable_coeficients]
+            
+            # Add the variables and their coeficients from reminders expressed via modulo variables 
+            # to the linear variables in the relation
+            for variable_coef, variable_in_modulo in zip(variable_coeficients, modulo_term.variables):
+                current_linear_variable_coef = linear_var_to_coef_map.get(variable_in_modulo, 0)
+                new_linear_variable_coef = current_linear_variable_coef + variable_coef
+                linear_var_to_coef_map[variable_in_modulo] = new_linear_variable_coef
+            
+            # Subtracted the modulo variable * overall modulo term coeficient
+            modvar_coef = -1 * coeficient * modulo_term.modulo
+            print(f'Coeficient: {coeficient}')
+            linear_var_to_coef_map[modvar] = modvar_coef
+            
+            # Move the multiplied constant to the other side of relation (rhs)
+            relation.absolute_part -= coeficient * modulo_term.constant
+            
+            reminder_formulas_variable_names = tuple(list(modulo_term.variables) + [modvar])
+            reminder_formulas_variable_coefs = tuple(variable_coeficients + [modvar_coef])
+            reminder_greater_than_zero = Relation(
+                    variable_names=reminder_formulas_variable_names,
+                    # Multiply the whole relation by -1 so we have a.x >= 0 ---> -a.x <= 0
+                    variable_coeficients=[coef * -1 for coef in reminder_formulas_variable_coefs], 
+                    modulo_terms=[],
+                    modulo_term_coeficients=[],
+                    absolute_part=0,
+                    operation='<=')
+
+            reminder_smaller_than_modulo = Relation(
+                    variable_names=reminder_formulas_variable_names,
+                    variable_coeficients=reminder_formulas_variable_coefs, 
+                    modulo_terms=[],
+                    modulo_term_coeficients=[],
+                    absolute_part=modulo_term.modulo - 1,
+                    operation='<=')
+
+            reminder_size_limit_relations.append(reminder_greater_than_zero)
+            reminder_size_limit_relations.append(reminder_smaller_than_modulo)
+        
+        # All modulos have been expressed with the new mod vars, reconstruct the relation
+        variable_names, variable_coeficients = zip(*linear_var_to_coef_map.items())
+        relation = Relation(variable_names=variable_names, 
+                            variable_coeficients=variable_coeficients, 
+                            modulo_terms=[], modulo_term_coeficients=[],
+                            absolute_part=relation.absolute_part,
+                            operation=relation.operation)
+
+        return ['and', relation, ] + reminder_size_limit_relations
 
 
 def remove_double_negations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
@@ -980,11 +1050,11 @@ def preprocess_assert_tree(assert_tree):
         'forall': replace_forall_with_exists_handler,
         'modulo': replace_modulo_with_exists_handler,
         'ite': ite_expansion_handler,
-        '>=': preprocess_relations_handler,
-        '<=': preprocess_relations_handler,
-        '=': preprocess_relations_handler,
-        '>': preprocess_relations_handler,
-        '<': preprocess_relations_handler,
+        '>=': expand_ite_expressions_inside_presburger_relation,
+        '<=': expand_ite_expressions_inside_presburger_relation,
+        '=': expand_ite_expressions_inside_presburger_relation,
+        '>': expand_ite_expressions_inside_presburger_relation,
+        '<': expand_ite_expressions_inside_presburger_relation,
         '=>': expand_implications_handler,
     }
 
@@ -1118,6 +1188,11 @@ def build_automaton_from_presburger_relation_ast(relation_root,
         assert ctx.alphabet, 'The context must have alphabet already created in the second stage of evaluation'
         logger.info(f'Encountered relation that is always true: {relation_root}, returning trivial accepting automaton.')
         return ctx.get_automaton_class_for_current_backend().trivial_accepting(ctx.alphabet)
+
+    # Replace modulo expressions with existencial quantifier here:
+    if len(relation.modulo_terms) == 1 and relation.operation == '=':
+        raise NotImplementedError('Build special automaton here')
+    
 
     operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(
         relation.operation,
