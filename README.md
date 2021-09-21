@@ -74,3 +74,12 @@ The following table gives serves to reflect the current capabilities of the Amay
 | TPTP | Passing | Passing | |
 | UltimateAutomizer | Passing | Passing | |
 | Psyco | Not passing | Unknown | The naive TFN runtime is enormous |
+
+## Implementation backlog
+- [ ] Enable the usage of the efficient construction for modulo automata
+  - [ ] Process atomic formulae before the evaluation starts into Relations structures
+  - [ ] Detect the special form of equalities with one modulo term when building an automaton
+  - [ ] Add basic unit tests covering that the tasks above work (and still work after some modifications to the code will happen, and they will)
+- [ ] Refactor all code source code into one `amaya/` folder (this way it will be a proper python module)
+- [ ] Unify the `ast_relations` and `relations_structures` modules into `relations` module with `data` and `algorithm` submodules
+- [ ] Fix the `visualization` functions so that they do not create own variable names (instead they should be propagated from the actual automata)
