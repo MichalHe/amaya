@@ -255,6 +255,13 @@ def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Rel
         normalized_expr.variable_coeficients = coefs
         normalized_expr.variable_names = var_names
 
+    if normalized_expr.operation == '<':
+        conversion_message = 'Converting sharp inequality into non-sharp one (from={0},'.format(normalized_expr)
+        normalized_expr.operation = '<-'
+        normalized_expr.absolute_part -= 1
+        conversion_message += ' to={0})'.format(normalized_expr)
+        logger.debug(conversion_message)
+
     return normalized_expr
 
 
