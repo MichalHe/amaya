@@ -742,13 +742,89 @@ def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -
     return NodeEncounteredHandlerStatus(True, False)
 
 
-def process_relations_handler(ast: AST_NaryNode) -> AST_Node:
+
+def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> List[Union[str,Relation]]:
+    """
+    Replace modulo terms with existencial variables.
+
+    Convert the given relation containing modulo terms to an equivalent relation in which the modulos are expressed 
+    using the existencially quantified variables (modvars). The returned list further contains new relations that 
+    limit the reminders size.
     
+    Example:
+        x + (y mod 3) = 0   ---->   (x + y - 3*Mod_Var_0 = 0) and (y - 3*Mod_Var_0 >= 0) and (y - 3*Mod_Var_0 <= 2)
+
+    :param int first_modvar_index: The (suffix) index to start number the used modvars from (Mod_Var_{first_modvar_index})
+    """
+
+    modulo_variables = ['Mod_Var_{0}'.format(i + first_modvar_index) for i in range(len(relation.modulo_terms))]
+    modulo_terms, modulo_coeficients = relation.modulo_terms, relation.modulo_term_coeficients
+    
+    linear_var_to_coef_map = dict(zip(relation.variable_names, relation.variable_coeficients))
+    reminder_size_limit_relations: List[Relation] = []       
+
+    # Edit the relation as if the modulo terms are expressed using the new modulo variables 
+    for modvar, coeficient, modulo_term in zip(modulo_variables, modulo_coeficients, modulo_terms):
+        # Fold in the coeficient standing before the modulo term eg: 3*(x + y mod K)
+        variable_coeficients = [coeficient * variable_coef for variable_coef in modulo_term.variable_coeficients]
+        
+        # Add the variables and their coeficients from reminders expressed via modulo variables 
+        # to the linear variables in the relation
+        for variable_coef, variable_in_modulo in zip(variable_coeficients, modulo_term.variables):
+            current_linear_variable_coef = linear_var_to_coef_map.get(variable_in_modulo, 0)
+            new_linear_variable_coef = current_linear_variable_coef + variable_coef
+            linear_var_to_coef_map[variable_in_modulo] = new_linear_variable_coef
+        
+        # Subtracted the modulo variable * overall modulo term coeficient
+        modvar_coef = -1 * coeficient * modulo_term.modulo
+        linear_var_to_coef_map[modvar] = modvar_coef
+        
+        # Move the multiplied constant to the other side of relation (rhs)
+        relation.absolute_part -= coeficient * modulo_term.constant
+        
+        # FIXME(codeboy): This should be sorted so we keep the canoical form
+        reminder_formulas_variable_names = list(modulo_term.variables) + [modvar]
+        reminder_formulas_variable_coefs = variable_coeficients + [modvar_coef]
+        reminder_greater_than_zero = Relation(
+                variable_names=reminder_formulas_variable_names,
+                # Multiply the whole relation by -1 so we have a.x >= 0 ---> -a.x <= 0
+                variable_coeficients=[coef * -1 for coef in reminder_formulas_variable_coefs], 
+                modulo_terms=[],
+                modulo_term_coeficients=[],
+                absolute_part=0,
+                operation='<=')
+
+        reminder_smaller_than_modulo = Relation(
+                variable_names=reminder_formulas_variable_names,
+                variable_coeficients=reminder_formulas_variable_coefs, 
+                modulo_terms=[],
+                modulo_term_coeficients=[],
+                absolute_part=modulo_term.modulo - 1,
+                operation='<=')
+
+        reminder_size_limit_relations.append(reminder_greater_than_zero)
+        reminder_size_limit_relations.append(reminder_smaller_than_modulo)
+    
+    # All modulos have been expressed with the new mod vars, reconstruct the relation
+    variable_names, variable_coeficients = zip(*linear_var_to_coef_map.items())
+    relation = Relation(variable_names=list(variable_names), 
+                        variable_coeficients=list(variable_coeficients), 
+                        modulo_terms=[], modulo_term_coeficients=[],
+                        absolute_part=relation.absolute_part,
+                        operation=relation.operation)
+    relation.ensure_canoical_form_if_equation()
+
+    return ['and', relation, ] + reminder_size_limit_relations
+
+
+def process_relations_handler(ast: AST_NaryNode) -> AST_Node:
     if type(ast) != list:
-        return
+        return ast
     
     if ast[0] in ['<', '>', '<=', '>=', '=']:
         relation = extract_relation(ast)
+        relation.ensure_canoical_form_if_equation()
+
         direct_construction_exists = False 
         if not relation.modulo_terms:
             direct_construction_exists = True
@@ -758,65 +834,13 @@ def process_relations_handler(ast: AST_NaryNode) -> AST_Node:
             
         if direct_construction_exists:
             return relation
-        
-        # We must construct existencial formula to deal with the modulo terms
-        modulo_variables = ['Mod_Var_{0}'.format(i) for i in range(len(relation.modulo_terms))]
-        modulo_terms, modulo_coeficients = relation.modulo_terms, relation.modulo_term_coeficients
-        
-        linear_var_to_coef_map = dict(zip(relation.variable_names, relation.variable_coeficients))
-        reminder_size_limit_relations: List[Relation] = []       
-
-        # Edit the relation as if the modulo terms are expressed using the new modulo variables 
-        for modvar, coeficient, modulo_term in zip(modulo_variables, modulo_coeficients, modulo_terms):
-            # Fold in the coeficient standing before the modulo term eg: 3*(x + y mod K)
-            variable_coeficients = [coeficient * variable_coef for variable_coef in modulo_term.variable_coeficients]
-            
-            # Add the variables and their coeficients from reminders expressed via modulo variables 
-            # to the linear variables in the relation
-            for variable_coef, variable_in_modulo in zip(variable_coeficients, modulo_term.variables):
-                current_linear_variable_coef = linear_var_to_coef_map.get(variable_in_modulo, 0)
-                new_linear_variable_coef = current_linear_variable_coef + variable_coef
-                linear_var_to_coef_map[variable_in_modulo] = new_linear_variable_coef
-            
-            # Subtracted the modulo variable * overall modulo term coeficient
-            modvar_coef = -1 * coeficient * modulo_term.modulo
-            print(f'Coeficient: {coeficient}')
-            linear_var_to_coef_map[modvar] = modvar_coef
-            
-            # Move the multiplied constant to the other side of relation (rhs)
-            relation.absolute_part -= coeficient * modulo_term.constant
-            
-            reminder_formulas_variable_names = tuple(list(modulo_term.variables) + [modvar])
-            reminder_formulas_variable_coefs = tuple(variable_coeficients + [modvar_coef])
-            reminder_greater_than_zero = Relation(
-                    variable_names=reminder_formulas_variable_names,
-                    # Multiply the whole relation by -1 so we have a.x >= 0 ---> -a.x <= 0
-                    variable_coeficients=[coef * -1 for coef in reminder_formulas_variable_coefs], 
-                    modulo_terms=[],
-                    modulo_term_coeficients=[],
-                    absolute_part=0,
-                    operation='<=')
-
-            reminder_smaller_than_modulo = Relation(
-                    variable_names=reminder_formulas_variable_names,
-                    variable_coeficients=reminder_formulas_variable_coefs, 
-                    modulo_terms=[],
-                    modulo_term_coeficients=[],
-                    absolute_part=modulo_term.modulo - 1,
-                    operation='<=')
-
-            reminder_size_limit_relations.append(reminder_greater_than_zero)
-            reminder_size_limit_relations.append(reminder_smaller_than_modulo)
-        
-        # All modulos have been expressed with the new mod vars, reconstruct the relation
-        variable_names, variable_coeficients = zip(*linear_var_to_coef_map.items())
-        relation = Relation(variable_names=variable_names, 
-                            variable_coeficients=variable_coeficients, 
-                            modulo_terms=[], modulo_term_coeficients=[],
-                            absolute_part=relation.absolute_part,
-                            operation=relation.operation)
-
-        return ['and', relation, ] + reminder_size_limit_relations
+        return express_modulo_terms_with_modvars(relation)
+    else:
+        new_subtree: AST_NaryNode = []
+        for subtree in ast:
+            processed_subtree = process_relations_handler(subtree)
+            new_subtree.append(processed_subtree)
+        return new_subtree
 
 
 def remove_double_negations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
