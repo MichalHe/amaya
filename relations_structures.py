@@ -86,12 +86,12 @@ class Relation:
     def __str__(self):
         linear_component = []
         for coef, variable in zip(self.variable_coeficients, self.variable_names):
-            sign = '+' if coef >= 0 else '0'
+            sign = '+' if coef >= 0 else ''
             linear_component.append('{0}{1}.{2}'.format(sign, coef, variable))
 
         modulo_components = []
         for mod_term, coef in zip(self.modulo_terms, self.modulo_term_coeficients):
-            sign = '+' if coef >= 0 else '0'
+            sign = '+' if coef >= 0 else ''
             modulo_components.append('{0}{1}.{2}'.format(sign, coef, mod_term))
 
         return 'Relation({0} {1} {2} {3})'.format(
@@ -110,3 +110,27 @@ class Relation:
         for modulo_term in self.modulo_terms:
             used_variables.update(modulo_term.variables)
         return sorted(used_variables)
+
+    def is_in_canoical_form(self) -> bool:
+        sign_count = len(self.variable_coeficients) + len(self.modulo_term_coeficients)
+
+        positive_sign_count = 0
+        for coef in self.variable_coeficients:
+            if coef >= 0:
+                positive_sign_count += 1
+        for coef in self.modulo_term_coeficients:
+            if coef >= 0:
+                positive_sign_count += 1
+
+        if positive_sign_count == sign_count / 2:
+            return self.absolute_part >= 0
+
+        return (positive_sign_count > sign_count / 2)
+
+    def ensure_canoical_form_if_equation(self):
+        """Ensures that the majority of variables/moduloterms in the relation have positive sign if the operation is =."""
+
+        if not self.is_in_canoical_form():
+            self.variable_coeficients = [-1 * coef for coef in self.variable_coeficients]
+            self.modulo_term_coeficients = [-1 * coef for coef in self.modulo_term_coeficients]
+            self.absolute_part *= -1
