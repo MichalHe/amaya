@@ -216,8 +216,8 @@ class EqLinearStateComponent(LinearStateComponent):
         if diff % 2 == 1:
             return None
 
-        return IneqLinearStateComponent(value=diff // 2,
-                                        variable_coeficients=self.variable_coeficients)
+        return EqLinearStateComponent(value=diff // 2,
+                                      variable_coeficients=self.variable_coeficients)
 
 
 @dataclass(frozen=True)
@@ -240,7 +240,7 @@ class ModuloTermStateComponent(object):
                 return None
 
         difference = self.value - dot
-        next_value = difference//2 if difference % 2 == 0 else (difference + self.modulo) // 2
+        next_value = difference // 2 if difference % 2 == 0 else (difference + self.modulo) // 2
         return ModuloTermStateComponent(
             value=next_value,
             modulo=self.modulo,
@@ -333,7 +333,7 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
             cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(relation_variable_ids, alphabet_symbol)
             nfa.update_transition_fn(current_state.value,
                                      cylindrified_symbol,
-                                     current_state.value)
+                                     destination_state.value)
 
             if is_transition_final(current_state, alphabet_symbol, destination_state):
                 f_transitions.append((current_state, cylindrified_symbol))
@@ -345,9 +345,9 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
         nfa.add_state(final_state)
         nfa.add_final_state(final_state)
         for origin, symbol in f_transitions:
-            nfa.update_transition_fn(origin, symbol, final_state)
+            nfa.update_transition_fn(origin.value, symbol, final_state)
 
-    nfa.used_variables = relation_variable_with_ids
+    nfa.used_variables = relation_variable_ids
     return nfa
 
 
@@ -367,6 +367,8 @@ def build_nfa_from_linear_inequality(ineq: Relation,
         return False
 
     nfa = automaton_constr(alphabet=alphabet, automaton_type=AutomatonType.NFA)
+
+    nfa.add_initial_state(initial_state.value)
 
     nfa = build_presburger_linear_nfa_from_initial_state(initial_state,
                                                          is_transition_final,
@@ -392,6 +394,8 @@ def build_nfa_from_linear_equality(eq: Relation,
 
     initial_state = EqLinearStateComponent(value=eq.absolute_part,
                                            variable_coeficients=tuple(eq.variable_coeficients))
+    
+    nfa.add_initial_state(initial_state.value)
 
     def is_transition_final(source: LinearStateComponent,
                             symbol: Tuple[int, ...],
@@ -424,7 +428,7 @@ def build_nfa_from_linear_sharp_inequality(ineq: Relation, emit_handle=None):
 def build_presburger_modulo_nfa(relation: Relation,  # NOQA
                                 relation_variables_with_ids: List[Tuple[str, int]],
                                 alphabet: LSBF_Alphabet,
-                                nfa: NFA) -> NFA:
+                                automaton_constr: AutomatonConstructor) -> NFA:
     '''
     Builds the NFA that encodes the given relation of the form is_congruent_with(vector_dot(a.x, K))
 
@@ -441,6 +445,8 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
     assert len(relation.modulo_terms) == 1, 'Currently we don\'t know how to build automaton for more than 1 mod term.'
     assert relation.operation == '=', 'Don\'t know how to build NFA for different relation than equality.'
 
+    nfa = automaton_constr(alphabet=alphabet, automaton_type=AutomatonType.NFA)
+    
     variable_name_to_id: Dict[str, int] = dict(relation_variables_with_ids)
     variable_ids = sorted(variable_name_to_id.values())
     projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(variable_ids))
@@ -452,12 +458,13 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
     modulo_term = relation.modulo_terms[0]
     initial_state = ModuloTermStateComponent(value=relation.absolute_part,
                                              modulo=modulo_term.modulo,
-                                             variable_coeficients=modulo_term.variable_coeficients)
+                                             variable_coeficients=tuple(modulo_term.variable_coeficients))
 
+    alias_store = AliasStore()
     work_list: List[ModuloTermStateComponent] = [initial_state]
     work_set: Set[ModuloTermStateComponent] = set(work_list)
 
-    nfa.add_initial_state(initial_state.value)
+    nfa.add_initial_state(alias_store.get_alias_for_state(initial_state))
 
     # List of transitions to final state that will be added after the main
     # automaton structure is build (because final state will be calculated as
@@ -466,13 +473,14 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
 
     while work_list:
         current_state = work_list.pop(-1)
+        current_state_alias = alias_store.get_alias_for_state(current_state)
         work_set.remove(current_state)
-
-        logger.debug('Processing metastate {0}, remaining in work list: {1}'.format(
-            current_state, len(work_list)
+        
+        logger.debug('Processing metastate {0} (aka {1}), remaining in work list: {1}'.format(
+            current_state, current_state_alias, len(work_list)
         ))
 
-        nfa.add_state(current_state.value)
+        nfa.add_state(current_state_alias)
 
         for symbol in projected_alphabet:
             cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(variable_ids, symbol)
@@ -481,15 +489,17 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
             if destination_state is None:
                 continue
 
-            nfa.update_transition_fn(current_state.value, cylindrified_symbol, destination_state.value)
+            destination_state_alias = alias_store.get_alias_for_state(destination_state)
 
+            nfa.update_transition_fn(current_state_alias, cylindrified_symbol, destination_state_alias)
+                
             # Make nondeterministic guess that the current symbol is the last on the input tape.
             value_with_symbol_interp_as_sign = current_state.value + vector_dot(symbol, modulo_term.variable_coeficients)
-            if (value_with_symbol_interp_as_sign % modulo_term.modulo) == 0:
-                partial_transition_to_final_state = (current_state.value, cylindrified_symbol)
+            if (value_with_symbol_interp_as_sign % current_state.modulo) == 0:
+                partial_transition_to_final_state = (current_state_alias, cylindrified_symbol)
                 transitions_to_final_state.append(partial_transition_to_final_state)
 
-            if not nfa.has_state_with_value(destination_state.value) and destination_state not in work_set:
+            if not nfa.has_state_with_value(destination_state_alias) and destination_state not in work_set:
                 work_list.append(destination_state)
                 work_set.add(destination_state)
 
@@ -500,6 +510,8 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
         for source, symbol in transitions_to_final_state:
             nfa.update_transition_fn(source, symbol, final_state)
 
-    logger.info('Done. Built DFA with {0} states, out of which {1} are final.'.format(
+    logger.info('Done. Built NFA with {0} states, out of which {1} are final.'.format(
         len(nfa.states), len(nfa.final_states)))
+
+    nfa.extra_info['aliases'] = alias_store 
     return nfa

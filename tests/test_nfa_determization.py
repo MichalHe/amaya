@@ -1,14 +1,14 @@
 import pytest
 from relations_structures import Relation
-from pressburger_algorithms import build_nfa_from_inequality
-from pressburger_algorithms import AutomatonConstructor
+from presburger_algorithms import build_nfa_from_linear_inequality
+from presburger_algorithms import AutomatonConstructor
 from typing import Union, Dict
 from automatons import (
     AutomatonType,
     LSBF_Alphabet,
     NFA,
-    MTBDD_NFA,
 )
+from mtbdd_automatons import MTBDD_NFA
 
 alphabet = LSBF_Alphabet.from_variable_names([1, 2])
 
@@ -21,7 +21,7 @@ def mk_simple_presburger(constr: AutomatonConstructor) -> NFA:
         operation='<='
     )
 
-    return build_nfa_from_inequality(ineq, alphabet, constr)
+    return build_nfa_from_linear_inequality(ineq, alphabet, constr)
 
 
 @pytest.fixture
@@ -52,7 +52,9 @@ class ResolutionState:
     def bind(self, real_automaton_state):
         if self.automaton_state is not None:
             if self.automaton_state != real_automaton_state:
-                raise ValueError('Attempting to rebind automaton state value!')
+                raise ValueError('Attempting to rebind automaton state value! Current: {0} New {1}'.format(
+                    self.automaton_state, real_automaton_state
+                ))
         else:
             self.automaton_state = real_automaton_state
 

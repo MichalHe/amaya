@@ -1,6 +1,16 @@
 import pytest
-from parse import eval_smt_tree, EvaluationContext, SolutionDomain, VariableType
-from automatons import NFA
+from parse import (
+    run_evaluation_procedure,
+    EvaluationContext,
+    EvaluationConfig,
+    BackendType,
+    SolutionDomain,
+    VariableType,
+)
+from automatons import (
+    NFA,
+    LSBF_Alphabet
+)
 
 
 @pytest.fixture
@@ -14,9 +24,21 @@ def conj_bool_relation_term():
     return term
 
 
-def test_conj_bool_with_relation(conj_bool_relation_term):
-    ctx = EvaluationContext(SolutionDomain.INTEGERS)
-    nfa = eval_smt_tree(conj_bool_relation_term, ctx, variable_types={'b0': VariableType.Bool})
+@pytest.mark.parametrize(('backend_type',), [(BackendType.NAIVE,), (BackendType.MTBDD,)])
+def test_conj_bool_with_relation(conj_bool_relation_term, backend_type):
+    eval_cfg = EvaluationConfig(
+        solution_domain=SolutionDomain.INTEGERS,
+        backend_type=backend_type
+    )
+
+    alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+    ctx = EvaluationContext(eval_cfg, alphabet=alphabet)
+    ctx.add_global_variable('b0', VariableType.BOOL)
+    ctx.add_global_variable('x', VariableType.INT)
+
+    nfa = run_evaluation_procedure(
+        conj_bool_relation_term,
+        ctx)
 
     assert nfa
     assert len(nfa.initial_states) == 1
@@ -47,15 +69,18 @@ def test_conj_bool_with_relation(conj_bool_relation_term):
 
 
 def test_bool_automaton_complement():
-    nfa_0 = NFA.for_bool_variable('b0', True)
+    alphabet = LSBF_Alphabet.from_variable_ids([1])
+    nfa_0 = NFA.for_bool_variable(alphabet, var_id=1, var_value=True)
     nfa = nfa_0.determinize().complement()
 
     assert len(nfa.initial_states) == 1
     assert len(nfa.final_states) == 1
     assert len(nfa.states) == 3
 
+    # The bool automaton should have three states after determinization:
+    # initial, final and TRAP
     init_state = list(nfa.initial_states)[0]
-    final_state = list(nfa.final_states)[0]
+    final_state = list(nfa.final_states)[0]  # TRAP is final, since it is a complement automaton
 
     assert final_state in nfa.get_transition_target(init_state, (0, ))
     assert len(nfa.get_transition_target(init_state, (0, ))) == 1
@@ -69,5 +94,10 @@ def test_bool_automaton_complement():
     nonfinal_state = list(nonfinal_state_set)[0]
     assert nonfinal_state
 
+    print(nfa.get_visualization_representation())
+
     assert len(set(nfa.get_transition_target(final_state, ('*', )))) == 1
-    assert len(set(nfa.get_transition_target(nonfinal_state, ('*', )))) == 1
+
+    # The previous accepting state should have one selfloop the true/false
+    # symbol and one leading to the trap state
+    assert len(set(nfa.get_transition_target(nonfinal_state, ('*', )))) == 2

@@ -2,6 +2,7 @@ from __future__ import annotations
 import presburger_algorithms as pa
 from ast_relations import (
     extract_relation,
+    ModuloTerm,
     Relation,
     expand_relation_on_ite,
     try_retrieve_variable_if_literal,
@@ -24,6 +25,7 @@ from typing import (
     Generator
 )
 from enum import IntEnum, Enum
+import utils
 from utils import number_to_bit_tuple
 
 PRETTY_PRINT_INDENT = ' ' * 2
@@ -458,7 +460,15 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
             (<variable_name>, <variable_id>, <variable_type>)
     '''
 
-    if type(tree) != list:
+    if not isinstance(tree, list):
+        if isinstance(tree, Relation):
+            # Register all the variables located in the Presburger formula
+            variables_used: Set[Tuple[str, int, VariableType]] = set()
+            for variable_name in tree.variable_names:
+                var_info = ctx.get_variable_info(variable_name)
+                var_info.ussage_count += 1  # The variable was used somewhere
+                variables_used.add((var_info.name, var_info.id, var_info.type))
+            return variables_used
         # Dealing with a standalone string
         if ctx.get_let_binding_value(tree) is not None:
             return set()
@@ -467,30 +477,10 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
             return set([(info.name, info.id, info.type)])
 
     root = tree[0]
-    if root in ['<', '<=', '>=', '>', '=']:
-        if root == '=':
-            if not is_tree_presburger_equality(tree, ctx):
-                # This is a SMT boolean equality check (all variables should be
-                # defined beforhand (either let, or defun)
-                return set()
 
-        expanded_relation = expand_relation_on_ite(tree)
-        if expanded_relation[0] == 'or':
-            # The relation was successful and produced a new subtree.
-            return get_all_used_variables(expanded_relation, ctx)
+    assert root not in ['<', '<=', '>=', '>', '='], 'Relations should get processed beforehand in a separate pass.'
 
-        apf = extract_relation(tree)  # Atomic Presburger Formula
-
-        # Register all the variables located in the Presburger formula
-        variables_used: Set[Tuple[str, int, VariableType]] = set()
-        for variable_name in apf.variable_names:
-            var_info = ctx.get_variable_info(variable_name)
-            var_info.ussage_count += 1  # The variable was used somewhere
-            variables_used.add((var_info.name, var_info.id, var_info.type))
-
-        return variables_used
-
-    elif root in ['exists']:
+    if root in ['exists']:
         # When we are entering the new context (\\exists) we can bound at max
         # only those variables that are bound by the \\exists, nothing more -
         # all other variables then belong to the enclosing scopes
@@ -694,7 +684,9 @@ def collect_ite_control_variables(ast) -> Set[str]:
     return set()
 
 
-def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode, ctx: Dict) -> NodeEncounteredHandlerStatus:
+def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode, 
+                                                      is_reeval: bool,
+                                                      ctx: Dict) -> NodeEncounteredHandlerStatus:
     from ast_relations import evaluate_ite_for_var_assignment
     ite_control_variables = collect_ite_control_variables(relation_root)
 
@@ -1156,6 +1148,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
     preprocess_assert_tree(assert_tree_to_evaluate)  # Preprocessing is performed in place
 
+    assert_tree_to_evaluate = process_relations_handler(assert_tree_to_evaluate)
     # We are interested only in the number of different variables found in the
     # assert tree
     get_all_used_variables(assert_tree_to_evaluate, eval_ctx)
@@ -1177,7 +1170,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     return (nfa, smt_info)
 
 
-def build_automaton_from_presburger_relation_ast(relation_root,
+def build_automaton_from_presburger_relation_ast(relation: Relation,
                                                  ctx: EvaluationContext,
                                                  depth: int) -> NFA:
     '''Converts the provided relation to an automaton that encodes it. To do so it employs the algorithms
@@ -1192,9 +1185,9 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     building_handlers: Dict[SolutionDomain, Dict[str, Tuple[ParsingOperation, Callable]]] = {
         SolutionDomain.INTEGERS: {
             '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ,
-                   pa.build_nfa_from_inequality),
+                   pa.build_nfa_from_linear_inequality),
             '=':  (ParsingOperation.BUILD_NFA_FROM_EQ,
-                   pa.build_nfa_from_equality)
+                   pa.build_nfa_from_linear_equality)
         },
         SolutionDomain.NATURALS: {
             '<=': (ParsingOperation.BUILD_DFA_FROM_INEQ,
@@ -1206,21 +1199,16 @@ def build_automaton_from_presburger_relation_ast(relation_root,
 
     automaton_constr = ctx.get_automaton_class_for_current_backend()
 
-    logger.debug(f'Building an automaton for: {relation_root}')
-    relation = extract_relation(relation_root)
+    logger.debug(f'Building an automaton for: {relation}')
     if relation.is_always_satisfied():
         assert ctx.alphabet, 'The context must have alphabet already created in the second stage of evaluation'
-        logger.info(f'Encountered relation that is always true: {relation_root}, returning trivial accepting automaton.')
-        return ctx.get_automaton_class_for_current_backend().trivial_accepting(ctx.alphabet)
-
-    # Replace modulo expressions with existencial quantifier here:
-    if len(relation.modulo_terms) == 1 and relation.operation == '=':
-        raise NotImplementedError('Build special automaton here')
+        logger.info(f'Encountered relation that is always true: {relation}, returning trivial accepting automaton.')
+        return automaton_constr.trivial_accepting(ctx.alphabet)
     
 
-    operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(
-        relation.operation,
-        (ParsingOperation.BUILD_NFA_FROM_SHARP_INEQ, None))  # For the '<' provide no function, as there is no direct conversion (yet?)
+    # We should never encounter the '<' inequality as we are always converting it to the <=
+    assert relation.operation in ['<=', '=']
+    operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(relation.operation)
 
     # The relation might have som yet-not-seen variables, add them if need be
     variables_with_ids = ctx.get_multiple_variable_ids(relation.variable_names)
@@ -1231,8 +1219,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     variables_with_ids_correct_order = sorted(variables_with_ids,
                                               key=lambda var_with_id: var_with_id[1])
 
-    # Shuffle the variables in the extracted relation so that it matches the
-    # alphabet
+    # Shuffle the variables in the extracted relation so that it matches the alphabet
     variables_with_coeficients_dict: Dict[str, int] = {}
     variables_with_coeficients_dict.update(zip(relation.variable_names, relation.variable_coeficients))
     variables_ordered = []
@@ -1240,7 +1227,7 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     for variable_name, _ in variables_with_ids_correct_order:
         variables_ordered.append(variable_name)
         coeficients_ordered.append(variables_with_coeficients_dict[variable_name])
-    logger.debug(f'Reshufling the variables found in relation from: {0} to {1}'.format(
+    logger.debug(f'Reshuffling the variables found in relation from: {0} to {1}'.format(
         list(zip(relation.variable_names, relation.variable_coeficients)),
         list(zip(variables_ordered, coeficients_ordered))
     ))
@@ -1248,37 +1235,41 @@ def build_automaton_from_presburger_relation_ast(relation_root,
     relation.variable_coeficients = coeficients_ordered
 
     # Extract just the used variable IDS, so that they can be used when the automaton is build
-    _, ordered_variable_ids = zip(*variables_with_ids_correct_order)
+    # TODO(codeboy): I believe this is used not anymore.
+    # _, ordered_variable_ids = zip(*variables_with_ids_correct_order)
 
     logger.info(f'Variables with IDs used: {variables_with_ids_correct_order}')
 
     automaton_building_function_args = (relation,
-                                        list(ordered_variable_ids),
+                                        list(variables_with_ids_correct_order),
                                         ctx.get_alphabet(),
                                         automaton_constr)
 
-    if relation.operation == '<':
-        # We are going to evaluate this as '<' = ('<=' and (not '='))
+    # Replace modulo expressions with existencial quantifier here:
+    if len(relation.modulo_terms) == 1 and relation.operation == '=':
+        logger.debug(f'The relation has special form - building automaton using the construction for atomic modulo constraints.')
+        
+        modulo_term = relation.modulo_terms[0]
+        modulo_variables_with_ids = ctx.get_multiple_variable_ids(modulo_term.variables)
+        variables, coeficients = utils.reorder_variables_according_to_ids(
+                modulo_variables_with_ids, 
+                (modulo_term.variables, modulo_term.variable_coeficients))
 
-        eq_op, equality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['=']
-        ineq_op, inequality_automaton_building_function = building_handlers[ctx.execution_config.solution_domain]['<=']
+        reordered_modulo_term = ModuloTerm(variables=variables, 
+                                           variable_coeficients=coeficients, 
+                                           constant=modulo_term.constant, 
+                                           modulo=modulo_term.modulo)
+        relation.modulo_terms[0] = reordered_modulo_term
+        logger.debug(
+                f'Performed variable reordering according to the IDs retrieved from context: {modulo_term} {reordered_modulo_term}')
+        
+        return pa.build_presburger_modulo_nfa(relation, modulo_variables_with_ids, ctx.get_alphabet(), automaton_constr)
 
-        equality_automaton = equality_automaton_building_function(*automaton_building_function_args)
+    assert automaton_building_function
+    automaton = automaton_building_function(*automaton_building_function_args)
+    ctx.emit_evaluation_introspection_info(automaton, operation)
 
-        ctx.emit_evaluation_introspection_info(equality_automaton, eq_op)
-        negated_equality_automaton = equality_automaton.determinize().complement()
-
-        inquality_automaton = inequality_automaton_building_function(*automaton_building_function_args)
-        ctx.emit_evaluation_introspection_info(inquality_automaton, ineq_op)
-
-        automaton = negated_equality_automaton.intersection(inquality_automaton)
-        ctx.emit_evaluation_introspection_info(automaton, ParsingOperation.NFA_INTERSECT)
-    else:
-        assert automaton_building_function
-        automaton = automaton_building_function(*automaton_building_function_args)
-        ctx.emit_evaluation_introspection_info(automaton, operation)
-
-    emit_evaluation_progress_info(f' >> {operation.value}({relation_root}) (result size: {len(automaton.states)}, automaton_type={automaton.automaton_type})', depth)
+    emit_evaluation_progress_info(f' >> {operation.value}({relation}) (result size: {len(automaton.states)}, automaton_type={automaton.automaton_type})', depth)
 
     # Finalization - increment variable ussage counter and bind variable ID to a name in the alphabet (lazy binding)
     # as the variable IDs could not be determined beforehand.
@@ -1435,7 +1426,7 @@ def evaluate_not_expr(not_expr: List,
         result = ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), variable_id, not variable_value)
         ctx.stats_operation_ends(result)
         return result
-
+        
     if (operand.automaton_type & AutomatonType.NFA):
         ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
         operand = operand.determinize()
@@ -1488,7 +1479,7 @@ def evaluate_exists_expr(exists_expr: List,
         # No projection will occur
         return nfa
 
-    logger.debug('Established projection order: {projected_var_ids}')
+    logger.debug(f'Established projection order: {projected_var_ids}')
 
     last_var_id: int = projected_var_ids[-1]
 
@@ -1550,6 +1541,10 @@ def run_evaluation_procedure(root,  # NOQA
         # This means that either we hit a SMT2 term (boolean variable) or
         # the tree is malformed, and therefore we cannot continue.
 
+        # TODO(codeboy): Here we should handle atoms -> like the processed relations.
+        if isinstance(root, Relation):
+            return build_automaton_from_presburger_relation_ast(root, ctx, _debug_recursion_depth)
+
         # Is the term a bool variable?
         is_bool_var = False
         maybe_variable_type = ctx.get_variable_type_if_defined(root)
@@ -1597,7 +1592,7 @@ def run_evaluation_procedure(root,  # NOQA
 
         # If the relation was indeed expanded, the root will be 'or'
         if expanded_tree[0] == 'or':
-            assert False
+            assert False, 'The ITE expansion should be done in preprocessing.'
             return run_evaluation_procedure(expanded_tree, ctx, _debug_recursion_depth)
         else:
             # The relation was no expanded

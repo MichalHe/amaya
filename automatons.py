@@ -326,7 +326,7 @@ class NFA(Generic[AutomatonState]):
         resulting_nfa.remove_nonfinishing_states()
 
         assert resulting_nfa.used_variables
-
+        
         return resulting_nfa
 
     def union(self, other: NFA[S]) -> NFA[int]:

@@ -230,7 +230,7 @@ def normalize_atomic_presburger_formula(op: str, lhs_expr: PresburgerExpr, rhs_e
 
 def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Relation:
     # (<= 2 ?X)  <=> [<=, 2, ?X]
-    logger.debug(f'Extracting inequality from: {ast}')
+    logger.debug(f'Extracting relation from: {ast}')
     assert(len(ast) == 3)
     op, lhs, rhs = ast
     logger.debug(f'Operation: \'{op}\', Left side: \'{lhs}\', Right side: \'{rhs}\'')
@@ -257,11 +257,12 @@ def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Rel
 
     if normalized_expr.operation == '<':
         conversion_message = 'Converting sharp inequality into non-sharp one (from={0},'.format(normalized_expr)
-        normalized_expr.operation = '<-'
+        normalized_expr.operation = '<='
         normalized_expr.absolute_part -= 1
         conversion_message += ' to={0})'.format(normalized_expr)
         logger.debug(conversion_message)
 
+    logger.debug(f'Extraced relation: {normalized_expr}')
     return normalized_expr
 
 

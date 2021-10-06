@@ -126,7 +126,11 @@ class AutomatonVisRepresentation:
         '''Peforms transition sets compression using plain BDDs.'''
         from dd.autoref import BDD
         manager = BDD()
-        manager.declare(*tuple(self.variable_names))
+
+        variables = [chr(ord('a') + i) for i in range(len(self.variable_names))]
+
+        manager.declare(*tuple(variables))
+        self.variable_names = variables
 
         compressed_transitions: List[Transition] = []
 

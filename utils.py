@@ -107,6 +107,29 @@ def create_enumeration_state_translation_map(states: Iterable[S],
     return (state_cnt, translation)
 
 
+def reorder_variables_according_to_ids(variable_id_pairs: List[Tuple[str, int]],
+                                       variables_with_coeficients: Tuple[List[str], List[int]]) -> Tuple[List[str], List[int]]:
+    '''
+    Reorder the variables and their coeficients so that they match the order given by their IDs sorted.
+
+    Example: 
+        variable_id_pairs = [('x', 2), ('y', 1)]
+        variable_with_coeficients = (['x', 'y'], [10, 12])
+        returns: (['y', 'x'], [12, 10])
+    '''
+    
+    variable_id_pairs_sorted = sorted(variable_id_pairs, key=lambda pair: pair[1])
+    variable_to_coef_map: Dict[str, int] = dict(zip(*variables_with_coeficients))
+    
+    variables_ordered = []
+    coeficients_ordered = []
+    for var, dummy_id in variable_id_pairs_sorted:
+        variables_ordered.append(var)
+        coeficients_ordered.append(variable_to_coef_map.get(var))
+    
+    return (variables_ordered, coeficients_ordered)
+    
+
 K = TypeVar('K')
 def get_default_if_none(maybe_none: Optional[K], default: Callable[[], K]) -> K:
     if maybe_none is None:

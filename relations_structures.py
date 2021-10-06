@@ -129,7 +129,8 @@ class Relation:
 
     def ensure_canoical_form_if_equation(self):
         """Ensures that the majority of variables/moduloterms in the relation have positive sign if the operation is =."""
-
+        if self.operation != '=':
+            return 
         if not self.is_in_canoical_form():
             self.variable_coeficients = [-1 * coef for coef in self.variable_coeficients]
             self.modulo_term_coeficients = [-1 * coef for coef in self.modulo_term_coeficients]
