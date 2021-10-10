@@ -734,7 +734,6 @@ def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -
     return NodeEncounteredHandlerStatus(True, False)
 
 
-
 def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> List[Union[str,Relation]]:
     """
     Replace modulo terms with existencial variables.
@@ -744,7 +743,7 @@ def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> 
     limit the reminders size.
     
     Example:
-        x + (y mod 3) = 0   ---->   (x + y - 3*Mod_Var_0 = 0) and (y - 3*Mod_Var_0 >= 0) and (y - 3*Mod_Var_0 <= 2)
+        x + (y mod 3) = 0   ---->   (x + z = 0) and (y - z ~ 0 (mod 3) and (0 <= z) and (z <= 2)
 
     :param int first_modvar_index: The (suffix) index to start number the used modvars from (Mod_Var_{first_modvar_index})
     """
@@ -820,6 +819,8 @@ def process_relations_handler(ast: AST_NaryNode) -> AST_Node:
         direct_construction_exists = False 
         if not relation.modulo_terms:
             direct_construction_exists = True
+        
+        # TODO(codeboy): This should be relation.is_special... call for clarity
         elif relation.operation == '=' and len(relation.modulo_terms) == 1 and not relation.variable_names:
             # This is the special form of modulo equation we can construct automaton for
             direct_construction_exists = True
@@ -1210,70 +1211,52 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
     assert relation.operation in ['<=', '=']
     operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(relation.operation)
 
-    # The relation might have som yet-not-seen variables, add them if need be
-    variables_with_ids = ctx.get_multiple_variable_ids(relation.variable_names)
-
-    # The extracted relation contains the list of variables and their
-    # coeficients in an arbitrary order - we need to make sure that the order
-    # of variables will be by ascending IDs (MTBDD requirement)
-    variables_with_ids_correct_order = sorted(variables_with_ids,
-                                              key=lambda var_with_id: var_with_id[1])
-
-    # Shuffle the variables in the extracted relation so that it matches the alphabet
-    variables_with_coeficients_dict: Dict[str, int] = {}
-    variables_with_coeficients_dict.update(zip(relation.variable_names, relation.variable_coeficients))
-    variables_ordered = []
-    coeficients_ordered: List[int] = []
-    for variable_name, _ in variables_with_ids_correct_order:
-        variables_ordered.append(variable_name)
-        coeficients_ordered.append(variables_with_coeficients_dict[variable_name])
-    logger.debug(f'Reshuffling the variables found in relation from: {0} to {1}'.format(
-        list(zip(relation.variable_names, relation.variable_coeficients)),
-        list(zip(variables_ordered, coeficients_ordered))
-    ))
-    relation.variable_names = variables_ordered
-    relation.variable_coeficients = coeficients_ordered
-
-    # Extract just the used variable IDS, so that they can be used when the automaton is build
-    # TODO(codeboy): I believe this is used not anymore.
-    # _, ordered_variable_ids = zip(*variables_with_ids_correct_order)
-
-    logger.info(f'Variables with IDs used: {variables_with_ids_correct_order}')
-
-    automaton_building_function_args = (relation,
-                                        list(variables_with_ids_correct_order),
-                                        ctx.get_alphabet(),
-                                        automaton_constr)
-
-    # Replace modulo expressions with existencial quantifier here:
-    if len(relation.modulo_terms) == 1 and relation.operation == '=':
-        logger.debug(f'The relation has special form - building automaton using the construction for atomic modulo constraints.')
-        
+    if relation.is_conguence_equality():
+        logger.debug(f'Given relation: {relation} is congruence equivalence. Reordering variables.')
         modulo_term = relation.modulo_terms[0]
-        modulo_variables_with_ids = ctx.get_multiple_variable_ids(modulo_term.variables)
-        variables, coeficients = utils.reorder_variables_according_to_ids(
-                modulo_variables_with_ids, 
+        variable_id_pairs = sorted(ctx.get_multiple_variable_ids(modulo_term.variables), 
+                                   key=lambda pair: pair[1])
+        var_names, var_coefs = utils.reorder_variables_according_to_ids(
+                variable_id_pairs, 
                 (modulo_term.variables, modulo_term.variable_coeficients))
 
-        reordered_modulo_term = ModuloTerm(variables=variables, 
-                                           variable_coeficients=coeficients, 
-                                           constant=modulo_term.constant, 
-                                           modulo=modulo_term.modulo)
-        relation.modulo_terms[0] = reordered_modulo_term
-        logger.debug(
-                f'Performed variable reordering according to the IDs retrieved from context: {modulo_term} {reordered_modulo_term}')
-        
-        return pa.build_presburger_modulo_nfa(relation, modulo_variables_with_ids, ctx.get_alphabet(), automaton_constr)
+        modulo_term_ordered = ModuloTerm(variables=var_names, 
+                                         variable_coeficients=var_coefs, 
+                                         constant=modulo_term.constant,
+                                         modulo=modulo_term.constant)
+        logger.debug(f'Reordered modulo term from: {modulo_term} to {modulo_term_ordered}')
+        return pa.build_presburger_modulo_nfa(relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
+    
+    else:
+        assert not relation.modulo_terms
 
-    assert automaton_building_function
-    automaton = automaton_building_function(*automaton_building_function_args)
-    ctx.emit_evaluation_introspection_info(automaton, operation)
+        # The extracted relation contains the list of variables and their
+        # coeficients in an arbitrary order - we need to make sure that the order
+        # of variables will be by ascending IDs (MTBDD requirement)
+        variable_id_pairs = sorted(ctx.get_multiple_variable_ids(relation.variable_names),
+                                   key=lambda pair: pair[1])
+        var_names, var_coefs = utils.reorder_variables_according_to_ids(
+                variable_id_pairs, 
+                (relation.variable_names, relation.variable_coeficients))
 
-    emit_evaluation_progress_info(f' >> {operation.value}({relation}) (result size: {len(automaton.states)}, automaton_type={automaton.automaton_type})', depth)
+        reordered_relation = Relation(variable_names=var_names,
+                                      variable_coeficients=var_coefs,
+                                      modulo_terms=[],
+                                      modulo_term_coeficients=[],
+                                      absolute_part=relation.absolute_part,
+                                      operation=relation.operation)
+
+        assert automaton_building_function
+        nfa = automaton_building_function(*automaton_building_function_args)
+        ctx.emit_evaluation_introspection_info(automaton, operation)
+
+        emit_evaluation_progress_info(f' >> {operation.value}({relation}) (result size: {len(automaton.states)}, automaton_type={automaton.automaton_type})', depth)
+
+        logger.debug(f'Reordered the relation from {relation} to {reordered_relation}')
 
     # Finalization - increment variable ussage counter and bind variable ID to a name in the alphabet (lazy binding)
     # as the variable IDs could not be determined beforehand.
-    for var_name, var_id in variables_with_ids:
+    for var_name, var_id in variable_id_pairs:
         assert ctx.alphabet
         if var_id not in ctx.alphabet.variable_names:
             ctx.alphabet.bind_variable_name_to_id(var_name, var_id)
