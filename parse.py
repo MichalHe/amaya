@@ -28,14 +28,18 @@ from enum import IntEnum, Enum
 import utils
 from utils import number_to_bit_tuple
 
+import preprocessing
+
 PRETTY_PRINT_INDENT = ' ' * 2
 
 logger.setLevel(INFO)
 
-
-AST_Leaf = Union[str,Relation]
-AST_NaryNode = List[Union[AST_Leaf, 'AST_NaryNode']]
-AST_Node = Union[AST_Leaf, AST_NaryNode]
+from ast_definitions import (
+        AST_Leaf, 
+        AST_Node, 
+        AST_NaryNode,
+        NodeEncounteredHandler,
+        NodeEncounteredHandlerStatus)
 
 
 class SolutionDomain(IntEnum):
@@ -76,15 +80,6 @@ class VariableType(IntEnum):
         }
         return m[type_str]
 
-
-@dataclass
-class NodeEncounteredHandlerStatus:
-    should_reevaluate_result: bool
-    is_result_atomic: bool
-    do_not_descend_further: bool = False
-
-
-NodeEncounteredHandler = Callable[[AST_NaryNode, bool, Dict], NodeEncounteredHandlerStatus]
 
 @dataclass
 class EvaluationStat():
@@ -658,32 +653,6 @@ def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
     return NodeEncounteredHandlerStatus(False, False)
 
 
-def collect_ite_control_variables(ast) -> Set[str]:
-    '''Returns the set of boolean variables found in the ITE expressions in the given AST.'''
-    if type(ast) != list:
-        return set()
-
-    root = ast[0]
-    if root == 'ite':
-        assert len(ast) == 4
-        ite_variable = ast[1]
-        ite_true_tree = ast[2]
-        ite_false_tree = ast[3]
-
-        ite_true_info = collect_ite_control_variables(ite_true_tree)
-        ite_false_info = collect_ite_control_variables(ite_false_tree)
-
-        return set([ite_variable]).union(ite_true_info).union(ite_false_info)
-    elif root in ['+',  '*', '<=', '>=', '>', '<', '=', 'mod']:
-        return collect_ite_control_variables(ast[1]).union(collect_ite_control_variables(ast[2]))
-    elif root in ['-']:
-        if len(root) == 3:
-            return collect_ite_control_variables(ast[1]).union(collect_ite_control_variables(ast[2]))
-        else:
-            return collect_ite_control_variables(ast[1])
-    return set()
-
-
 def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode, 
                                                       is_reeval: bool,
                                                       ctx: Dict) -> NodeEncounteredHandlerStatus:
@@ -716,20 +685,6 @@ def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNod
         relation_root.append(node)
 
     ctx['ite_expansions_cnt'] += len(ite_control_variables)
-
-    return NodeEncounteredHandlerStatus(True, False)
-
-
-def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
-    # Expand with: A => B  <<-->> ~A or B
-    A = ast[1]
-    B = ast[2]
-
-    ast[0] = 'or'
-    ast[1] = ['not', A]
-    ast[2] = B
-
-    ctx['implications_expanded_cnt'] += 1
 
     return NodeEncounteredHandlerStatus(True, False)
 
@@ -808,298 +763,6 @@ def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> 
     return ['and', relation, ] + reminder_size_limit_relations
 
 
-def process_relations_handler(ast: AST_NaryNode) -> AST_Node:
-    if type(ast) != list:
-        return ast
-    
-    if ast[0] in ['<', '>', '<=', '>=', '=']:
-        relation = extract_relation(ast)
-        relation.ensure_canoical_form_if_equation()
-
-        direct_construction_exists = False 
-        if not relation.modulo_terms:
-            direct_construction_exists = True
-        
-        # TODO(codeboy): This should be relation.is_special... call for clarity
-        elif relation.operation == '=' and len(relation.modulo_terms) == 1 and not relation.variable_names:
-            # This is the special form of modulo equation we can construct automaton for
-            direct_construction_exists = True
-            
-        if direct_construction_exists:
-            return relation
-        return express_modulo_terms_with_modvars(relation)
-    else:
-        new_subtree: AST_NaryNode = []
-        for subtree in ast:
-            processed_subtree = process_relations_handler(subtree)
-            new_subtree.append(processed_subtree)
-        return new_subtree
-
-
-def remove_double_negations_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
-    subtree = ast[1]
-    if type(subtree) == list and subtree[0] == 'not':
-        expr_under_double_negation = subtree[1]
-
-        # Empty the current AST root node
-        ast.pop(-1)
-        ast.pop(-1)
-
-        if type(expr_under_double_negation) == list:
-            # Under the double nagation lies a tree, copy the contents of its
-            # root node to the current one, effectively replacing the current
-            # root with the root of the tree under double negation.
-            is_result_atomic = False
-            for node_under_double_negation_elem in expr_under_double_negation:
-                ast.append(node_under_double_negation_elem)
-        else:
-            # There is a literal under the double negation, just copy it.
-            is_result_atomic = True
-            ast.append(expr_under_double_negation)
-
-        ctx['negation_pairs_removed_cnt'] += 1
-
-        return NodeEncounteredHandlerStatus(True, is_result_atomic)
-
-    return NodeEncounteredHandlerStatus(False, False)
-
-
-def replace_forall_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
-    _, binders, stmt = ast
-
-    ast[0] = 'not'
-    ast[1] = ['exists', binders, ['not', stmt]]
-    ast.pop(-1)  # Remove the original stmt from [forall, binders, stmt] -> [not, [exists, [not, stmt]]]
-
-    ctx['forall_replaced_cnt'] += 1
-
-    return NodeEncounteredHandlerStatus(True, False)
-
-
-def ite_expansion_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
-    _, bool_expr, if_branch, else_branch = ast
-
-    presbureger_relation_roots = {'<=', '<', '=', '>', '>='}
-
-    # Walk the history and see whether we are under any of the presb. relation roots
-    is_ite_inside_atomic_formula = False
-    for parent_tree in ctx['history']:
-        if parent_tree[0] in presbureger_relation_roots:
-            is_ite_inside_atomic_formula = True
-
-    if is_ite_inside_atomic_formula:
-        # We don't want to perform expansions inside atomic relations -
-        # the expansions must be performed in a different fashion.
-        return NodeEncounteredHandlerStatus(False, False)
-
-    ast[0] = 'or'
-    ast[1] = ['and', bool_expr, if_branch]
-    ast[2] = ['and', ['not', bool_expr], else_branch]
-
-    ctx['ite_expansions_cnt'] += 1
-
-    return NodeEncounteredHandlerStatus(True, False)
-
-
-def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AST_NaryNode, int]], None, None]:
-    if type(root_node) != list:
-        return root_node
-
-    node_name = root_node[0]
-
-    node_descriptions = {
-        'assert': [1],
-        'not': [1],
-        'ite': [1, 2, 3],
-        '=>': [1, 2],
-        '<=': [1, 2],
-        '<': [1, 2],
-        '=': [1, 2],
-        '>=': [1, 2],
-        '>': [1, 2],
-        '+': [1, 2],
-        '*': [1, 2],
-        'mod': [1, 2],
-        'exists': [2],
-        'forall': [2],
-    }
-
-    if node_name == 'let':
-        for i, binding in enumerate(root_node[1]):
-            _, let_binding_subtree = binding
-            yield (let_binding_subtree, (root_node[1], i))
-        yield (root_node[2], (root_node, 2))
-    elif node_name in ['and', 'or', '-', 'div']:
-        # - can be both unary and binary
-        for i, operand_tree in enumerate(root_node[1:]):
-            yield (operand_tree, (root_node, i + 1))
-    else:
-        assert node_name in node_descriptions, f'Don\'t know how to descent into {node_name} ({root_node})'
-        descend_into_subtrees = node_descriptions[node_name]
-        for subtree_index in descend_into_subtrees:
-            yield (root_node[subtree_index], (root_node, subtree_index))
-
-
-def transform_ast(ast: AST_Node,  # NOQA
-                  ctx: Dict,
-                  node_encountered_handlers: Dict[str, NodeEncounteredHandler],
-                  parent_backlink: Optional[Tuple[AST_NaryNode, int]] = None,
-                  is_tree_reevaluation_pass: bool = False):
-
-    if 'history' not in ctx:
-        ctx['history'] = list()
-
-    if type(ast) != list:
-        return
-
-    node_name = ast[0]
-
-    ctx['history'].append(ast)  # Keep track of where in the tree we are
-
-    if node_name in node_encountered_handlers:
-        handler = node_encountered_handlers[node_name]
-        handler_status = handler(ast, is_tree_reevaluation_pass, ctx)
-        reevaluation_root = ast
-        if handler_status.is_result_atomic:
-            # Replace the reference to a subtree in the parent node with
-            # the atomic result
-            parent_node, i = parent_backlink
-            parent_node[i] = ast[0]
-            reevaluation_root = parent_node[i]
-
-        # Re-walk the current node.
-        if handler_status.should_reevaluate_result:
-            transform_ast(reevaluation_root,
-                          ctx,
-                          node_encountered_handlers,
-                          parent_backlink=parent_backlink,
-                          is_tree_reevaluation_pass=True)
-            # We don't want to continue with the evaluation - the tree underneath
-            # has been changed and will be solved in the recursive call.
-            ctx['history'].pop(-1)
-            return
-
-    for subtree, backlink in ast_iter_subtrees(ast):
-        transform_ast(subtree, ctx, node_encountered_handlers, parent_backlink=backlink)
-
-    ctx['history'].pop(-1)
-
-
-def fold_in_required_let_bindings(ast: AST_Node,
-                                  bindings_stack: List[Dict[str, AST_Node]],
-                                  path: List[Tuple[AST_Node, int]]) -> int:
-    if type(ast) != list:
-        for bindings in reversed(bindings_stack):
-            if ast in bindings:
-                parent, position_in_parent = path[-1]
-                parent[position_in_parent] = bindings[ast]
-
-                return 1
-        return 0
-
-    node_name = ast[0]
-    folds_performed: int = 0
-    if node_name == 'let':
-        # First try to fold in variables from previous let expressions.
-        binding_list = ast[1]
-        for i, binding in enumerate(binding_list):
-            _, binding_ast = binding
-            path.append((ast, i))
-            folds_performed += fold_in_required_let_bindings(binding_ast, bindings_stack, path)
-            path.pop(-1)
-
-        # Identify bindings that stand for a literal, or an arithmetic
-        # expression - those must be folded in
-        bindings_list_without_folded: List[List[AST_Leaf, AST_NaryNode]] = []
-        bindings_stack.append({})
-        for let_var_name, binding_ast in ast[1]:
-            is_arithmetic_expr = type(binding_ast) == list and binding_ast[0] in ['-', '+', '*', 'mod']
-            is_literal = type(binding_ast) == str
-            if is_arithmetic_expr or is_literal:
-                # The current binding must be folded in oder to be able to
-                # evaluate the tree
-                bindings_stack[-1][let_var_name] = binding_ast
-            else:
-                bindings_list_without_folded.append([let_var_name, binding_ast])
-
-        # Continue folding down the line.
-        path.append((ast, 2))
-        folds_performed += fold_in_required_let_bindings(ast[2], bindings_stack, path)
-        path.pop(-1)
-
-        # Check whether some binding in the `let` was left
-        if not bindings_list_without_folded:
-            # No bingings were left, remove the `let` node alltogether.
-            assert path
-            parent, position_in_parent = path[-1]
-            parent[position_in_parent] = ast[2]
-
-        bindings_stack.pop(-1)
-        return folds_performed
-    else:
-        for subtree, parent_backlink in ast_iter_subtrees(ast):
-            path.append(parent_backlink)
-            folds_performed += fold_in_required_let_bindings(subtree, bindings_stack, path)
-            path.pop(-1)
-        return folds_performed
-
-
-def preprocess_assert_tree(assert_tree):
-    '''Peforms preprocessing on the given assert tree. The following proprocessing
-    operations are performed:
-        - Universal quantifiers are replaced with existential quantifiers.
-        - Implications are expanded: `A => B` <<-->> `~A or B`
-        - Consequent negation pairs are removed.
-        - Modulo operator in Presburger relations are replaced/expressed via
-        exists
-
-    Params:
-        assert_tree - The SMT tree to be preprocessed. The preprocessing is
-                      performed in place.
-    '''
-    logger.info('Entering the first preprocessing pass: Folding in arithmetic expressions.')
-    folds_performed = fold_in_required_let_bindings(assert_tree, [], [])
-    logger.info(f'Performed {folds_performed} folds.')
-
-    logger.info('Entering the second preprocessing pass: `ite` expansion, `forall` removal, modulo operator expansion.')
-
-    second_pass_transformations = {
-        'forall': replace_forall_with_exists_handler,
-        'modulo': replace_modulo_with_exists_handler,
-        'ite': ite_expansion_handler,
-        '>=': expand_ite_expressions_inside_presburger_relation,
-        '<=': expand_ite_expressions_inside_presburger_relation,
-        '=': expand_ite_expressions_inside_presburger_relation,
-        '>': expand_ite_expressions_inside_presburger_relation,
-        '<': expand_ite_expressions_inside_presburger_relation,
-        '=>': expand_implications_handler,
-    }
-
-    second_pass_context = {
-        'forall_replaced_cnt': 0,
-        'modulos_replaced_cnt': 0,
-        'ite_expansions_cnt': 0,
-        'implications_expanded_cnt': 0
-    }
-    transform_ast(assert_tree, second_pass_context, second_pass_transformations)
-
-    logger.info('First pass stats: ')
-    logger.info(f'Replaced {second_pass_context["forall_replaced_cnt"]} forall quantifiers with exists.')
-    logger.info(f'Transformed {second_pass_context["modulos_replaced_cnt"]} modulo expressions into \\exists formulas.')
-    logger.info(f'Expanded {second_pass_context["ite_expansions_cnt"]} ite expressions outside of atomic Presburfer formulas.')
-    logger.info(f'Expanded {second_pass_context["implications_expanded_cnt"]} implications.')
-
-    logger.info('Entering the third preprocessing pass: double negation removal.')
-    third_pass_transformations = {
-        'not': remove_double_negations_handler
-    }
-    third_pass_context = {
-        'negation_pairs_removed_cnt': 0,
-    }
-    transform_ast(assert_tree, third_pass_context, third_pass_transformations)
-    logger.info(f'Removed {third_pass_context["negation_pairs_removed_cnt"]} negation pairs.')
-
-
 def perform_whole_evaluation_on_source_text(source_text: str,
                                             evaluation_config: EvaluationConfig,
                                             emit_introspect: IntrospectHandle = lambda nfa, op: None
@@ -1147,9 +810,10 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     else:
         assert_tree_to_evaluate = asserts[0]  # If there is just 1, do not transform AST
 
-    preprocess_assert_tree(assert_tree_to_evaluate)  # Preprocessing is performed in place
+    # preprocess_assert_tree(assert_tree_to_evaluate)  # Preprocessing is performed in place
+    preprocessing.preprocess_ast(assert_tree_to_evaluate)  # Preprocessing is performed in place
 
-    assert_tree_to_evaluate = process_relations_handler(assert_tree_to_evaluate)
+    assert_tree_to_evaluate = preprocessing.reduce_relation_asts_to_evaluable_leaves(assert_tree_to_evaluate)
     # We are interested only in the number of different variables found in the
     # assert tree
     get_all_used_variables(assert_tree_to_evaluate, eval_ctx)
@@ -1247,12 +911,10 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
                                       operation=relation.operation)
 
         assert automaton_building_function
-        nfa = automaton_building_function(*automaton_building_function_args)
-        ctx.emit_evaluation_introspection_info(automaton, operation)
+        nfa = automaton_building_function(relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
+        ctx.emit_evaluation_introspection_info(nfa, operation)
 
-        emit_evaluation_progress_info(f' >> {operation.value}({relation}) (result size: {len(automaton.states)}, automaton_type={automaton.automaton_type})', depth)
-
-        logger.debug(f'Reordered the relation from {relation} to {reordered_relation}')
+        emit_evaluation_progress_info(f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})', depth)
 
     # Finalization - increment variable ussage counter and bind variable ID to a name in the alphabet (lazy binding)
     # as the variable IDs could not be determined beforehand.
@@ -1267,7 +929,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
         assert var_info
         var_info.ussage_count += 1
 
-    return automaton
+    return nfa
 
 
 def build_automaton_for_boolean_variable(var_name: str,

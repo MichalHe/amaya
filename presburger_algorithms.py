@@ -512,6 +512,7 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
 
     logger.info('Done. Built NFA with {0} states, out of which {1} are final.'.format(
         len(nfa.states), len(nfa.final_states)))
-
+    
+    nfa.used_variables = list(map(lambda pair: pair[1], relation_variables_with_ids))
     nfa.extra_info['aliases'] = alias_store 
     return nfa
