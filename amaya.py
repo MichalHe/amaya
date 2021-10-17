@@ -71,7 +71,12 @@ argparser.add_argument('--backend',
 argparser.add_argument('--verbose',
                        action='store_true',
                        default=False,
-                       help='Toggles the verbose output.')
+                       help='Toggles the verbose output (logging level >= INFO).')
+
+argparser.add_argument('--debug',
+                       action='store_true',
+                       default=False,
+                       help='Enables debug output  (logging level >= DEBUG).')
 
 argparser.add_argument('--domain',
                        choices=['integers', 'naturals'],
@@ -145,9 +150,10 @@ elif 'input_file' in args:
     runner_mode = RunnerMode.GET_SAT
 logger.debug(f'Chosen runner mode: {runner_mode}')
 
-# Verbose output?
-if args.verbose:
+if args.debug:
     logger.setLevel(logging.DEBUG)
+elif args.verbose:
+    logger.setLevel(logging.INFO)
 else:
     logger.setLevel(logging.WARNING)
 
