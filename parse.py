@@ -1,7 +1,6 @@
 from __future__ import annotations
 import presburger_algorithms as pa
 from ast_relations import (
-    extract_relation,
     ModuloTerm,
     Relation,
     expand_relation_on_ite,
@@ -22,24 +21,19 @@ from typing import (
     Dict,
     Callable,
     Optional,
-    Generator
 )
 from enum import IntEnum, Enum
 import utils
 from utils import number_to_bit_tuple
 
 import preprocessing
+from ast_definitions import (
+        AST_NaryNode,
+        NodeEncounteredHandlerStatus)
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
 logger.setLevel(INFO)
-
-from ast_definitions import (
-        AST_Leaf,
-        AST_Node,
-        AST_NaryNode,
-        NodeEncounteredHandler,
-        NodeEncounteredHandlerStatus)
 
 
 class SolutionDomain(IntEnum):
@@ -464,6 +458,13 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
                 var_info = ctx.get_variable_info(variable_name)
                 var_info.ussage_count += 1  # The variable was used somewhere
                 variables_used.add((var_info.name, var_info.id, var_info.type))
+
+            for modulo_term in tree.modulo_terms:
+                for variable_name in modulo_term.variables:
+                    var_info = ctx.get_variable_info(variable_name)
+                    var_info.ussage_count += 1  # The variable was used somewhere
+                    variables_used.add((var_info.name, var_info.id, var_info.type))
+
             return variables_used
         # Dealing with a standalone string
         if ctx.get_let_binding_value(tree) is not None:
@@ -657,8 +658,9 @@ def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
 def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode,
                                                       is_reeval: bool,
                                                       ctx: Dict) -> NodeEncounteredHandlerStatus:
+    """Deprecated."""
     from ast_relations import evaluate_ite_for_var_assignment
-    ite_control_variables = collect_ite_control_variables(relation_root)
+    ite_control_variables = []  # This was here before the empty list: collect_ite_control_variables(relation_root)
 
     if not ite_control_variables:
         # There are no control variables, no modification to the AST needs to be performed.
@@ -690,7 +692,7 @@ def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNod
     return NodeEncounteredHandlerStatus(True, False)
 
 
-def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> List[Union[str,Relation]]:
+def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> List[Union[str, Relation]]:
     """
     Replace modulo terms with existencial variables.
 
@@ -871,7 +873,6 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
         logger.info(f'Encountered relation that is always true: {relation}, returning trivial accepting automaton.')
         return automaton_constr.trivial_accepting(ctx.alphabet)
 
-
     # We should never encounter the '<' inequality as we are always converting it to the <=
     assert relation.operation in ['<=', '=']
     operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(relation.operation)
@@ -915,7 +916,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
                                       operation=relation.operation)
 
         assert automaton_building_function
-        nfa = automaton_building_function(relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
+        nfa = automaton_building_function(reordered_relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
         ctx.emit_evaluation_introspection_info(nfa, operation)
 
         emit_evaluation_progress_info(f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})', depth)
