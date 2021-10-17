@@ -263,6 +263,9 @@ class NFA(Generic[AutomatonState]):
         if self.alphabet != other.alphabet:
             assert False
 
+        logger.info('Performing automaton intesection. Input automaton sizes: {0} states other {1} states'.format(
+            len(self.states), len(other.states)))
+
         self_renamed_highest_state, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
 
@@ -274,7 +277,7 @@ class NFA(Generic[AutomatonState]):
         used_variable_ids = sorted(set(self.used_variables + other.used_variables))
         projected_alphabet = list(self.alphabet.gen_projection_symbols_onto_variables(used_variable_ids))
 
-        logger.debug('Calculating intersection with used_variables: self={0} other={1} result={2}'.format(
+        logger.debug('Automata use the following vvariables: self={0} other={1} result={2}'.format(
             self.used_variables,
             other.used_variables,
             used_variable_ids
@@ -326,7 +329,7 @@ class NFA(Generic[AutomatonState]):
         resulting_nfa.remove_nonfinishing_states()
 
         assert resulting_nfa.used_variables
-        
+        logger.info(f'Intersection done. Result has {len(resulting_nfa.states)} states.')
         return resulting_nfa
 
     def union(self, other: NFA[S]) -> NFA[int]:
