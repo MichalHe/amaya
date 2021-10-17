@@ -59,9 +59,9 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode) -> AST_Node:
                                             absolute_part=replacement_info.term.modulo - 1,
                                             operation='<=')
 
-            resulting_relations.append(congruence_relation)
             resulting_relations.append(reminder_lower_bound)
             resulting_relations.append(reminder_upper_bound)
+            resulting_relations.append(congruence_relation)
 
         variable_binding_list = [[variable, 'Int'] for variable in sorted(map(lambda info: info.variable, replacement_infos))]
         return ['exists', variable_binding_list, ['and', *resulting_relations]]
