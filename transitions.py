@@ -19,6 +19,7 @@ from typing import (
 import functools
 import utils
 from dd.autoref import BDD
+from log import logger
 
 Symbol = Tuple[Union[str, int], ...]
 # State = Union[str, int]
@@ -548,6 +549,8 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
     def remove_nonfinishing_states(self, states: Set, final_states: Set) -> Set:
         '''BFS on rotated transitions'''
+        logger.info('Removing nonfinishing states.')
+        logger.info('Rotating transition function.')
         rotated_transitions = make_rotate_transition_function(self.data)
 
         queue = collections.deque(final_states)
@@ -556,6 +559,8 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
         while queue:
             current_state = queue.popleft()
             reachable_states.add(current_state)
+
+            logger.debug(f'Processing state {current_state} (remaining in the queue: {len(queue)})')
 
             # We might be processing a state that is terminal
             if current_state not in rotated_transitions:

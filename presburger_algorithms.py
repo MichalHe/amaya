@@ -241,6 +241,7 @@ class ModuloTermStateComponent(object):
 
         difference = self.value - dot
         next_value = difference // 2 if difference % 2 == 0 else (difference + self.modulo) // 2
+        next_value = next_value % self.modulo
         return ModuloTermStateComponent(
             value=next_value,
             modulo=self.modulo,
@@ -394,7 +395,7 @@ def build_nfa_from_linear_equality(eq: Relation,
 
     initial_state = EqLinearStateComponent(value=eq.absolute_part,
                                            variable_coeficients=tuple(eq.variable_coeficients))
-    
+
     nfa.add_initial_state(initial_state.value)
 
     def is_transition_final(source: LinearStateComponent,
@@ -446,7 +447,7 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
     assert relation.operation == '=', 'Don\'t know how to build NFA for different relation than equality.'
 
     nfa = automaton_constr(alphabet=alphabet, automaton_type=AutomatonType.NFA)
-    
+
     variable_name_to_id: Dict[str, int] = dict(relation_variables_with_ids)
     variable_ids = sorted(variable_name_to_id.values())
     projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(variable_ids))
@@ -475,8 +476,8 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
         current_state = work_list.pop(-1)
         current_state_alias = alias_store.get_alias_for_state(current_state)
         work_set.remove(current_state)
-        
-        logger.debug('Processing metastate {0} (aka {1}), remaining in work list: {1}'.format(
+
+        logger.debug('Processing metastate {0} (aka {1}), remaining in work list: {2}'.format(
             current_state, current_state_alias, len(work_list)
         ))
 
@@ -492,7 +493,7 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
             destination_state_alias = alias_store.get_alias_for_state(destination_state)
 
             nfa.update_transition_fn(current_state_alias, cylindrified_symbol, destination_state_alias)
-                
+
             # Make nondeterministic guess that the current symbol is the last on the input tape.
             value_with_symbol_interp_as_sign = current_state.value + vector_dot(symbol, modulo_term.variable_coeficients)
             if (value_with_symbol_interp_as_sign % current_state.modulo) == 0:
@@ -512,7 +513,7 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
 
     logger.info('Done. Built NFA with {0} states, out of which {1} are final.'.format(
         len(nfa.states), len(nfa.final_states)))
-    
+
     nfa.used_variables = list(map(lambda pair: pair[1], relation_variables_with_ids))
-    nfa.extra_info['aliases'] = alias_store 
+    nfa.extra_info['aliases'] = alias_store
     return nfa

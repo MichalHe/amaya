@@ -48,7 +48,7 @@ class ModuloTerm:
         """Sorts the variables and corresponding coeficients alphabetically."""
         var_coef_pairs = zip(self.variables, self.variable_coeficients)
         sorted_var_coef_pairs = sorted(var_coef_pairs, key=lambda pair: pair[1])
-        
+
         sorted_vars, sorted_coefs = zip(*sorted_var_coef_pairs)
         return ModuloTerm(variables=sorted_vars, variable_coeficients=sorted_coefs,
                           constant=self.constant, modulo=self.modulo)
@@ -81,6 +81,10 @@ class Relation:
     def is_always_satisfied(self) -> bool:
         '''Returns true if all the variable cooeficients are zero and
         the relation is satisfied.'''
+        # TODO(codeboy): This needs fixing
+        if self.modulo_terms:
+            return False
+
         are_all_coefs_zero = self.are_all_coeficients_zero()
 
         if are_all_coefs_zero:
@@ -145,7 +149,7 @@ class Relation:
     def ensure_canoical_form_if_equation(self):
         """Ensures that the majority of variables/moduloterms in the relation have positive sign if the operation is =."""
         if self.operation != '=':
-            return 
+            return
         if not self.is_in_canoical_form():
             self.variable_coeficients = [-1 * coef for coef in self.variable_coeficients]
             self.modulo_term_coeficients = [-1 * coef for coef in self.modulo_term_coeficients]
@@ -159,15 +163,15 @@ class Relation:
         """Returns true if there exists a direct construction for the stored relation."""
         is_congruence_eq = self.is_conguence_equality()
         is_linear_relation = bool(self.variable_names) and not bool(self.modulo_terms)
-        
+
         return is_congruence_eq or is_linear_relation
 
     def replace_modulo_terms_with_variables(self) -> Tuple[Relation, List[ModuloReplacementInfo]]:
         """Returns relation where every modulo term is replaced with a variable."""
-        mod_vars = ['Mod_{0}_Var'.format(i) for i in range(len(self.modulo_terms))] 
-        
+        mod_vars = ['Mod_{0}_Var'.format(i) for i in range(len(self.modulo_terms))]
+
         modulo_replacement_info: List[ModuloReplacementInfo] = []
-        
+
         relation_with_modulos_replaced = Relation(variable_names=self.variable_names[:],
                                                   variable_coeficients=self.variable_coeficients[:],
                                                   modulo_terms=[],
@@ -177,16 +181,16 @@ class Relation:
 
         for i, mod_term_data in enumerate(zip(mod_vars, self.modulo_term_coeficients, self.modulo_terms)):
             mod_var, term_coef, term = mod_term_data
-            
+
             assert mod_var not in self.variable_names, 'Name collision when trying to replace modulo with a Mod_Var'
 
             relation_with_modulos_replaced.variable_names.append(mod_var)
             relation_with_modulos_replaced.variable_coeficients.append(term_coef)
 
-            modulo_replacement_info.append(ModuloReplacementInfo(term=term, variable=mod_var)) 
-        
+            modulo_replacement_info.append(ModuloReplacementInfo(term=term, variable=mod_var))
+
         # Sort the relation variables alphabetically, so we have a canoical form in the future
-        relation_with_modulos_replaced.sort_variables_alphabetically() 
+        relation_with_modulos_replaced.sort_variables_alphabetically()
 
         return (relation_with_modulos_replaced, modulo_replacement_info)
 
@@ -194,7 +198,7 @@ class Relation:
         """Sorts the variables and corresponding coeficients alphabetically."""
         var_coef_pairs = zip(self.variable_names, self.variable_coeficients)
         sorted_var_coef_pairs = sorted(var_coef_pairs, key=lambda pair: pair[1])
-        
+
         sorted_vars, sorted_coefs = zip(*sorted_var_coef_pairs)
         self.variable_names = list(sorted_vars)
         self.variable_coeficients = list(sorted_coefs)

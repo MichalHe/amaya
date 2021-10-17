@@ -35,8 +35,8 @@ PRETTY_PRINT_INDENT = ' ' * 2
 logger.setLevel(INFO)
 
 from ast_definitions import (
-        AST_Leaf, 
-        AST_Node, 
+        AST_Leaf,
+        AST_Node,
         AST_NaryNode,
         NodeEncounteredHandler,
         NodeEncounteredHandlerStatus)
@@ -56,6 +56,7 @@ class ParsingOperation(Enum):
     BUILD_NFA_FROM_INEQ = 'build_nfa_from_ineq'
     BUILD_NFA_FROM_SHARP_INEQ = 'build_nfa_from_sharp_ineq'
     BUILD_NFA_FROM_EQ = 'build_nfa_from_eq'
+    BUILD_NFA_FROM_CONGRUENCE = 'build_nfa_from_eq'
     BUILD_NFA_FROM_RELATION = 'build_nfa_from_relation'  # We don't know the relation type, or we do not care.
     NFA_UNION = 'union'
     NFA_PROJECTION = 'projection'
@@ -582,8 +583,8 @@ def get_asserts_from_ast(ast):
 
 def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> List[AST_NaryNode]:
     '''
-    Recursively traverse given AST down to the leaves. Upon finding a modulo term, replace it with a new variable. 
-    The number of variables found so far is propagated via the `already_replaced` variable 
+    Recursively traverse given AST down to the leaves. Upon finding a modulo term, replace it with a new variable.
+    The number of variables found so far is propagated via the `already_replaced` variable
     (it is a list to provide mutability).
     '''
     if type(ast) != list:
@@ -611,14 +612,14 @@ def replace_modulo_operators_in_expr(ast, already_replaced: List[int] = [0]) -> 
 
 def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
     '''Transform AST handler - traverse the given AST, count all modulos and create equivalent existential formula.
-    
+
     Traverses the given AST in a recursive fashion looking for the occurrences of the modulo term. Upon finding such
-    modulo terms the algorithm immediately replaces them with a multiplication with a new variable representing 
+    modulo terms the algorithm immediately replaces them with a multiplication with a new variable representing
     the modulo term. The original formula is put in conjunction with other formulas that put forward limits on how
     big can the variable representing modulo be.
     '''
 
-    # Detect the special form of equality relation ((a.x + b.y .... mod P) = c) that can be converted 
+    # Detect the special form of equality relation ((a.x + b.y .... mod P) = c) that can be converted
     # directly to an NFA
     if ast[0] == '=':
         lhs, rhs = ast[1], ast[2]
@@ -653,7 +654,7 @@ def replace_modulo_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
     return NodeEncounteredHandlerStatus(False, False)
 
 
-def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode, 
+def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode,
                                                       is_reeval: bool,
                                                       ctx: Dict) -> NodeEncounteredHandlerStatus:
     from ast_relations import evaluate_ite_for_var_assignment
@@ -693,10 +694,10 @@ def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> 
     """
     Replace modulo terms with existencial variables.
 
-    Convert the given relation containing modulo terms to an equivalent relation in which the modulos are expressed 
-    using the existencially quantified variables (modvars). The returned list further contains new relations that 
+    Convert the given relation containing modulo terms to an equivalent relation in which the modulos are expressed
+    using the existencially quantified variables (modvars). The returned list further contains new relations that
     limit the reminders size.
-    
+
     Example:
         x + (y mod 3) = 0   ---->   (x + z = 0) and (y - z ~ 0 (mod 3) and (0 <= z) and (z <= 2)
 
@@ -705,36 +706,36 @@ def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> 
 
     modulo_variables = ['Mod_Var_{0}'.format(i + first_modvar_index) for i in range(len(relation.modulo_terms))]
     modulo_terms, modulo_coeficients = relation.modulo_terms, relation.modulo_term_coeficients
-    
-    linear_var_to_coef_map = dict(zip(relation.variable_names, relation.variable_coeficients))
-    reminder_size_limit_relations: List[Relation] = []       
 
-    # Edit the relation as if the modulo terms are expressed using the new modulo variables 
+    linear_var_to_coef_map = dict(zip(relation.variable_names, relation.variable_coeficients))
+    reminder_size_limit_relations: List[Relation] = []
+
+    # Edit the relation as if the modulo terms are expressed using the new modulo variables
     for modvar, coeficient, modulo_term in zip(modulo_variables, modulo_coeficients, modulo_terms):
         # Fold in the coeficient standing before the modulo term eg: 3*(x + y mod K)
         variable_coeficients = [coeficient * variable_coef for variable_coef in modulo_term.variable_coeficients]
-        
-        # Add the variables and their coeficients from reminders expressed via modulo variables 
+
+        # Add the variables and their coeficients from reminders expressed via modulo variables
         # to the linear variables in the relation
         for variable_coef, variable_in_modulo in zip(variable_coeficients, modulo_term.variables):
             current_linear_variable_coef = linear_var_to_coef_map.get(variable_in_modulo, 0)
             new_linear_variable_coef = current_linear_variable_coef + variable_coef
             linear_var_to_coef_map[variable_in_modulo] = new_linear_variable_coef
-        
+
         # Subtracted the modulo variable * overall modulo term coeficient
         modvar_coef = -1 * coeficient * modulo_term.modulo
         linear_var_to_coef_map[modvar] = modvar_coef
-        
+
         # Move the multiplied constant to the other side of relation (rhs)
         relation.absolute_part -= coeficient * modulo_term.constant
-        
+
         # FIXME(codeboy): This should be sorted so we keep the canoical form
         reminder_formulas_variable_names = list(modulo_term.variables) + [modvar]
         reminder_formulas_variable_coefs = variable_coeficients + [modvar_coef]
         reminder_greater_than_zero = Relation(
                 variable_names=reminder_formulas_variable_names,
                 # Multiply the whole relation by -1 so we have a.x >= 0 ---> -a.x <= 0
-                variable_coeficients=[coef * -1 for coef in reminder_formulas_variable_coefs], 
+                variable_coeficients=[coef * -1 for coef in reminder_formulas_variable_coefs],
                 modulo_terms=[],
                 modulo_term_coeficients=[],
                 absolute_part=0,
@@ -742,7 +743,7 @@ def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> 
 
         reminder_smaller_than_modulo = Relation(
                 variable_names=reminder_formulas_variable_names,
-                variable_coeficients=reminder_formulas_variable_coefs, 
+                variable_coeficients=reminder_formulas_variable_coefs,
                 modulo_terms=[],
                 modulo_term_coeficients=[],
                 absolute_part=modulo_term.modulo - 1,
@@ -750,11 +751,11 @@ def express_modulo_terms_with_modvars(relation, first_modvar_index: int = 0) -> 
 
         reminder_size_limit_relations.append(reminder_greater_than_zero)
         reminder_size_limit_relations.append(reminder_smaller_than_modulo)
-    
+
     # All modulos have been expressed with the new mod vars, reconstruct the relation
     variable_names, variable_coeficients = zip(*linear_var_to_coef_map.items())
-    relation = Relation(variable_names=list(variable_names), 
-                        variable_coeficients=list(variable_coeficients), 
+    relation = Relation(variable_names=list(variable_names),
+                        variable_coeficients=list(variable_coeficients),
                         modulo_terms=[], modulo_term_coeficients=[],
                         absolute_part=relation.absolute_part,
                         operation=relation.operation)
@@ -869,7 +870,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
         assert ctx.alphabet, 'The context must have alphabet already created in the second stage of evaluation'
         logger.info(f'Encountered relation that is always true: {relation}, returning trivial accepting automaton.')
         return automaton_constr.trivial_accepting(ctx.alphabet)
-    
+
 
     # We should never encounter the '<' inequality as we are always converting it to the <=
     assert relation.operation in ['<=', '=']
@@ -878,19 +879,22 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
     if relation.is_conguence_equality():
         logger.debug(f'Given relation: {relation} is congruence equivalence. Reordering variables.')
         modulo_term = relation.modulo_terms[0]
-        variable_id_pairs = sorted(ctx.get_multiple_variable_ids(modulo_term.variables), 
+        variable_id_pairs = sorted(ctx.get_multiple_variable_ids(modulo_term.variables),
                                    key=lambda pair: pair[1])
         var_names, var_coefs = utils.reorder_variables_according_to_ids(
-                variable_id_pairs, 
+                variable_id_pairs,
                 (modulo_term.variables, modulo_term.variable_coeficients))
 
-        modulo_term_ordered = ModuloTerm(variables=var_names, 
-                                         variable_coeficients=var_coefs, 
+        modulo_term_ordered = ModuloTerm(variables=var_names,
+                                         variable_coeficients=var_coefs,
                                          constant=modulo_term.constant,
                                          modulo=modulo_term.constant)
+
         logger.debug(f'Reordered modulo term from: {modulo_term} to {modulo_term_ordered}')
-        return pa.build_presburger_modulo_nfa(relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
-    
+        nfa = pa.build_presburger_modulo_nfa(relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
+        ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.BUILD_NFA_FROM_CONGRUENCE)
+        return nfa
+
     else:
         assert not relation.modulo_terms
 
@@ -900,7 +904,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
         variable_id_pairs = sorted(ctx.get_multiple_variable_ids(relation.variable_names),
                                    key=lambda pair: pair[1])
         var_names, var_coefs = utils.reorder_variables_according_to_ids(
-                variable_id_pairs, 
+                variable_id_pairs,
                 (relation.variable_names, relation.variable_coeficients))
 
         reordered_relation = Relation(variable_names=var_names,
@@ -1071,7 +1075,7 @@ def evaluate_not_expr(not_expr: List,
         result = ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), variable_id, not variable_value)
         ctx.stats_operation_ends(result)
         return result
-        
+
     if (operand.automaton_type & AutomatonType.NFA):
         ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
         operand = operand.determinize()
