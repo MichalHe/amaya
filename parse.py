@@ -101,7 +101,7 @@ class VariableInfo:
     id: int
     name: str
     type: VariableType = VariableType.UNSET  # variable was found in a Presburger expr, but was not bound via exists
-    ussage_count: int = 0
+    usage_count: int = 0
 
 
 @dataclass
@@ -441,7 +441,7 @@ def is_tree_presburger_equality(tree, ctx: EvaluationContext) -> bool:
 
 def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, VariableType]]:  # NOQA
     '''Traverses the whole AST `tree` and identifies all the variables used. Manages
-    the variable contexts implaced by the ussage of \\exists, so that two
+    the variable contexts implaced by the usage of \\exists, so that two
     variables with the same name, one of them bound via \\exists other is in
     FREE(\\psi) are treated as a two separate variables.
 
@@ -456,13 +456,13 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
             variables_used: Set[Tuple[str, int, VariableType]] = set()
             for variable_name in tree.variable_names:
                 var_info = ctx.get_variable_info(variable_name)
-                var_info.ussage_count += 1  # The variable was used somewhere
+                var_info.usage_count += 1  # The variable was used somewhere
                 variables_used.add((var_info.name, var_info.id, var_info.type))
 
             for modulo_term in tree.modulo_terms:
                 for variable_name in modulo_term.variables:
                     var_info = ctx.get_variable_info(variable_name)
-                    var_info.ussage_count += 1  # The variable was used somewhere
+                    var_info.usage_count += 1  # The variable was used somewhere
                     variables_used.add((var_info.name, var_info.id, var_info.type))
 
             return variables_used
@@ -921,7 +921,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
 
         emit_evaluation_progress_info(f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})', depth)
 
-    # Finalization - increment variable ussage counter and bind variable ID to a name in the alphabet (lazy binding)
+    # Finalization - increment variable usage counter and bind variable ID to a name in the alphabet (lazy binding)
     # as the variable IDs could not be determined beforehand.
     for var_name, var_id in variable_id_pairs:
         assert ctx.alphabet
@@ -932,7 +932,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
 
         var_info = ctx.lookup_variable(var_name)
         assert var_info
-        var_info.ussage_count += 1
+        var_info.usage_count += 1
 
     return nfa
 
@@ -981,7 +981,7 @@ def get_automaton_for_operand(operand_value: Union[str, List],
             # the boolean be considered False, it would be encoded
             # ['not', 'var_name'], which is equivalent to the complement of the
             # automaton.
-            variable_info.ussage_count += 1
+            variable_info.usage_count += 1
             return build_automaton_for_boolean_variable(str(operand_value), True, ctx)
         else:
             logger.debug(f'The variable {operand_value} is not boolean, searching `let` bindings.')
@@ -1119,7 +1119,7 @@ def evaluate_exists_expr(exists_expr: List,
     projected_var_ids: List[int] = list()
     for var_name in variable_bindings:
         current_var_info = vars_info[var_name]
-        if current_var_info.ussage_count == 0:
+        if current_var_info.usage_count == 0:
             logger.info(f'Skipping projecting away a variable "{var_name}" - the variable is not used anywhere in the tree underneath.')
             logger.debug(f'{exists_expr}')
         else:
