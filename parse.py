@@ -1134,6 +1134,7 @@ def evaluate_exists_expr(exists_expr: List,
     last_var_id: int = projected_var_ids[-1]
 
     for var_id in projected_var_ids:
+        logger.debug(f'Projecting away variable {var_id}')
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
 
         # Do not skip only after the last projection
@@ -1142,6 +1143,7 @@ def evaluate_exists_expr(exists_expr: List,
         assert projection_result
         nfa = projection_result
         ctx.stats_operation_ends(nfa)
+        logger.debug(f'Variable {var_id} projected away.')
 
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
 
