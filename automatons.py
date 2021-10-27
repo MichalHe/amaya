@@ -463,7 +463,8 @@ class NFA(Generic[AutomatonState]):
             new_nfa.transition_fn = self.transition_fn
             new_nfa.transition_fn.project_bit_away(bit_pos)
 
-            new_nfa.perform_pad_closure()
+            if not skip_pad_closure:
+                new_nfa.perform_pad_closure()
             new_used_vars = list(self.used_variables)
             new_used_vars.remove(variable_id)
             new_nfa.used_variables = new_used_vars
@@ -515,7 +516,7 @@ class NFA(Generic[AutomatonState]):
             # In trivial automaton we only need to do alternation.
             result.final_states = result.initial_states - self.final_states
         else:
-            result.final_states = self.states - self.initial_states - self.final_states
+            result.final_states = self.states - self.final_states
 
         result.transition_fn = self.transition_fn.copy()
 
@@ -548,7 +549,7 @@ class NFA(Generic[AutomatonState]):
 
                 # The NFA cannot accept empty words - that happens when after
                 # determinization and complement some of the initial states
-                # becomes accepting -- THIS SHOUL NOT HAPPEN anymore
+                # becomes accepting
                 if used_word:
                     return (True, used_word)
 
