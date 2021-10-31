@@ -28,7 +28,7 @@ def gen_is_frobenius_candidate(var, coeficients, exist_var_prefix='x'):
     all_binding_vars_gte_zero = [f'(<= 0 {var})' for var in binding_vars]
 
     return forall(
-        binding_vars, 
+        binding_vars,
         implies(
             conjunction(*all_binding_vars_gte_zero),
             not_eq(weighted_sum(binding_vars, coeficients), var)
@@ -44,7 +44,7 @@ def smt_preamble(var):
         '(set-logic LIA)',
         f'(declare-fun {var} () Int)',
         ''
-    ]    
+    ]
     return '\n'.join(preable)
 
 
@@ -56,15 +56,17 @@ def smt_fin():
     ]
     return '\n'.join(fin)
 
+
 def _assert(formula):
     return f'(assert {formula})'
 
 
 def generate_frobenius_number_formula(coefs):
     formula = conjunction(
-        gen_is_frobenius_candidate('P', coefs), 
+        ineq('0', 'P'),
+        gen_is_frobenius_candidate('P', coefs),
         forall(
-            ['R'], 
+            ['R'],
             implies(
                 gen_is_frobenius_candidate('R', coefs),
                 ineq('R', 'P'))))
@@ -90,8 +92,8 @@ for coef_str in coef_strings:
             print_usage_and_exit()
         coefs.append(coef)
     except ValueError:
-            print('Given coeficient is not an integer.')
-            print_usage_and_exit()
+        print('Given coeficient is not an integer.')
+        print_usage_and_exit()
 
 
 print(generate_frobenius_number_formula(coefs))
