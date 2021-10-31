@@ -1008,14 +1008,25 @@ def evaluate_binary_conjunction_expr(expr: List,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
                                      reduction_operation: ParsingOperation,
                                      _depth: int) -> NFA:
-    '''Perform the evaluation of AND and OR expressions in an abstract fashion using the provided
-    reduction function (used to fold the operands into a result).'''
+    """
+    Abstract binary conjuction evaluation algorithm.
+
+    Perform the evaluation of AND and OR expressions in an abstract fashion using the provided
+    reduction function (used to fold the operands into a result).
+    """
     assert type(expr) == list and len(expr) >= 3
     first_operand = expr[1]
 
     reduction_result = get_automaton_for_operand(first_operand, ctx, _depth)
 
     for next_operand in expr[2:]:
+        # Detect and perform on the fly construction
+        if isinstance(next_operand, Relation):
+            operand_mod = next_operand.is_conguence_equality()
+            doing_intersect = reduction_operation == ParsingOperation.NFA_INTERSECT
+            if operand_mod and doing_intersect:
+                pa.on_the_fly_intersection(reduction_result, next_operand)
+
         next_operand_automaton = get_automaton_for_operand(next_operand, ctx, _depth)
 
         ctx.stats_operation_starts(reduction_operation, reduction_result, next_operand_automaton)
@@ -1323,12 +1334,3 @@ def get_smt_info(ast) -> Dict[str, Any]:
             smt_info[info_category] = info_value
 
     return smt_info
-
-
-S0_SMT_TREE = ['<=', 10, 'x']
-
-S1_SMT_TREE = ['and',
-               ['<=', 10, 'x'],
-               ['<=', 10, 'y']]
-
-S2_SMT_TREE = ['=', ['ite', 'b0', 'x', ['*', '2', 'x']], '0']

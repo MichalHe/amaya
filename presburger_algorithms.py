@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import (
     List,
     Dict,
+    Generator,
     Tuple,
     Union,
     Set,
@@ -517,3 +518,70 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
     nfa.used_variables = list(map(lambda pair: pair[1], relation_variables_with_ids))
     nfa.extra_info['aliases'] = alias_store
     return nfa
+
+
+def on_the_fly_intersection(lin_automaton: NFA, modulo_relation: Relation):
+    """
+    Performs on-the-fly intersection.
+
+    Performs on-the-fly intersection on the given automaton from linear constraints
+    with the automaton that would result from the modulo term.
+    """
+    modulo_term = modulo_relation.modulo_terms[0]
+
+    lin_automaton_initial_state = next(iter(lin_automaton.initial_states))
+    mod_automaton_initial_state = ModuloTermStateComponent(
+        value=modulo_relation.absolute_part,
+        modulo=modulo_term.modulo,
+        variable_coeficients=tuple(modulo_term.variable_coeficients))
+
+    initial_state: Tuple[int, ModuloTermStateComponent] = (lin_automaton_initial_state, mod_automaton_initial_state)
+    work_list: List[Tuple[int, ModuloTermStateComponent]] = [initial_state]
+    work_set = set(work_list)
+
+    # To support MTBDDs we need to keep states as ints. Therefore, we have
+    # to map the product states to ints as we are creating them.
+    alias_store = AliasStore()
+
+    result = NFA(alphabet=lin_automaton.alphabet, automaton_type=AutomatonType.NFA)
+    result.initial_states = {alias_store.get_alias_for_state(initial_state)}
+
+    def flat_post(state) -> Generator[Tuple[int, int], None, None]:
+        for post_state in lin_automaton.get_state_post(state):
+            for symbol in lin_automaton.get_symbols_leading_from_state_to_state(state, post_state):
+                yield (post_state, symbol)
+
+    def mod_accepts_with_symbol(mod_state: ModuloTermStateComponent, symbol: LSBF_Alphabet) -> bool:
+        value_with_symbol_interp_as_sign = mod_state.value + vector_dot(symbol, mod_state.variable_coeficients)
+        return value_with_symbol_interp_as_sign % mod_state.modulo == 0
+
+    while work_list:
+        current_product_state = work_list.pop(-1)
+        work_set.remove(current_product_state)
+
+        print(current_product_state)
+
+        current_product_state_alias = alias_store.get_alias_for_state(current_product_state)
+        current_lin_component, current_mod_component = current_product_state
+
+        for post_state, symbol in flat_post(current_lin_component):
+            mod_symbol = (symbol[1], )
+            mod_accepts = mod_accepts_with_symbol(current_mod_component, mod_symbol)
+            lin_is_final = post_state in lin_automaton.final_states
+
+            if mod_accepts and lin_is_final:
+                print('>>> Result', (current_mod_component, current_lin_component))
+                return (current_mod_component, current_lin_component)
+
+            mod_post_state = current_mod_component.generate_next(mod_symbol)
+            dest_product_state = (post_state, mod_post_state)
+            dest_product_state_alias = alias_store.get_alias_for_state(dest_product_state)
+
+            # Check whether we should process this state again.
+            in_result = dest_product_state_alias in result.states
+            in_worklist = dest_product_state in work_set  # Use workset to speed up lookups
+            if not (in_result or in_worklist):
+                work_list.append(dest_product_state)
+                work_set.add(dest_product_state)
+
+            result.update_transition_fn(current_product_state_alias, symbol, dest_product_state_alias)
