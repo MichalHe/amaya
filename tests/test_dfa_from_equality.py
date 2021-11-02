@@ -1,5 +1,5 @@
 import pytest
-import pressburger_algorithms as pa
+import presburger_algorithms as pa
 from collections import defaultdict
 from relations_structures import Relation
 
@@ -9,6 +9,8 @@ def equality() -> Relation:
     return Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[1, 1],
+        modulo_term_coeficients=[],
+        modulo_terms=[],
         absolute_part=4,
         operation='='
     )

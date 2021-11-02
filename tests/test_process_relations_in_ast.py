@@ -2,7 +2,7 @@ import pytest
 import parse
 from parse import process_relations_handler
 from relations_structures import ModuloTerm, Relation
-from typing import Union
+from typing import Union, List
 
 
 def test_process_ast_of_single_equation():

@@ -19,7 +19,7 @@ def inequality_tree():
 
 @pytest.fixture
 def sample_inequation(inequality_tree):
-    return ast_relations.extract_inquality(inequality_tree)
+    return ast_relations.extract_relation(inequality_tree)
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ from automatons import NFA, LSBF_Alphabet, AutomatonType
 @pytest.fixture()
 def satisfiable_automaton() -> NFA:
     nfa = NFA(
-        alphabet=LSBF_Alphabet.from_variable_names(['x', 'y']),
+        alphabet=LSBF_Alphabet.from_variable_ids([1, 2]),
         automaton_type=AutomatonType.NFA
     )
 
@@ -39,7 +39,7 @@ def satisfiable_automaton() -> NFA:
 @pytest.fixture()
 def nonsatisfiable_automaton() -> NFA:
     nfa = NFA(
-        alphabet=LSBF_Alphabet.from_variable_names(['x', 'y']),
+        alphabet=LSBF_Alphabet.from_variable_ids([1, 2]),
         automaton_type=AutomatonType.NFA
     )
 

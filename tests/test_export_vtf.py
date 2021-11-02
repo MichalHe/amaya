@@ -6,7 +6,7 @@ from export_transformations import convert_automaton_to_vtf, iter_alphabet_symbo
 @pytest.fixture()
 def simple_automaton() -> NFA:
     return NFA(
-        alphabet=LSBF_Alphabet.from_variable_names(('x', 'y')),
+        alphabet=LSBF_Alphabet.from_variable_ids([1, 2]),
         automaton_type=AutomatonType.NFA,
         initial_states=set([0]),
         final_states=set([1]),
@@ -22,7 +22,7 @@ def simple_automaton() -> NFA:
 @pytest.fixture()
 def automaton_for_ground_formula() -> NFA:
     return NFA(
-        alphabet=LSBF_Alphabet.from_variable_names(('x', 'y')),
+        alphabet=LSBF_Alphabet.from_variable_ids([1, 2]),
         automaton_type=AutomatonType.NFA,
         initial_states=set([0]),
         final_states=set([0]),

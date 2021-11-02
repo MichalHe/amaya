@@ -1050,37 +1050,3 @@ class MTBDDTransitionFn():
     @staticmethod
     def call_clear_cachce():
         mtbdd_wrapper.amaya_sylvan_clear_cache()
-
-
-if __name__ == '__main__':
-    from automatons import LSBF_Alphabet, MTBDD_NFA, AutomatonType
-    alphabet = LSBF_Alphabet.from_variable_names([1, 2, 3])
-    nfa = MTBDD_NFA(alphabet, AutomatonType.NFA)
-    tfn = MTBDDTransitionFn(alphabet, 1)
-
-    zeta0 = (0, 0, 1)
-    # zeta1 = (1, 0, 0)
-
-    # TODO: Move this to a test file (pad closure)
-    nfa.update_transition_fn(0, zeta0, 1)
-    # tfn.insert_transition(0, zeta1, 1)
-
-    # tfn.insert_transition(1, zeta1, 2)
-    # tfn.insert_transition(1, zeta0, 3)
-
-    # tfn.insert_transition(2, zeta1, 3)
-
-    # final_states = [3]
-    # initial_states = [0]
-
-    # Initialstate, final states
-    # tfn.do_pad_closure(initial_states, final_states)
-    # tfn.insert_transition(0, (0, 0, 1), 1)
-    # tfn.insert_transition(0, (0, 0, 1), 2)
-
-    # tfn.insert_transition(1, (0, 0, 1), 1)
-    # tfn.insert_transition(1, (0, 0, 1), 3)
-
-    # MTBDDTransitionFn.get_mtbdd_leaves(tfn.mtbdds[0])
-
-    # print(list(tfn.iter_transitions(0, [1, 2, 3])))

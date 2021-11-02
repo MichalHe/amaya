@@ -1,7 +1,9 @@
 import pytest
-from automatons import NFA, LSBF_Alphabet, MTBDD_NFA
+from automatons import NFA
+from alphabet import LSBF_Alphabet
+from mtbdd_automatons import MTBDD_NFA
 from relations_structures import Relation
-from pressburger_algorithms import build_nfa_from_inequality
+from presburger_algorithms import build_nfa_from_linear_inequality
 from log import logger
 from collections import namedtuple
 from typing import (
@@ -9,28 +11,31 @@ from typing import (
     Any
 )
 
-alphabet = LSBF_Alphabet.from_variable_names([1, 2])
+alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
 
 
 @pytest.fixture
 def ineq0() -> Relation:
-    ineq = Relation(
+    return Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
         absolute_part=2,
+        modulo_terms=[],
+        modulo_term_coeficients=[],
         operation='<='
     )
-    return ineq
 
 
 @pytest.fixture
 def ineq1() -> Relation:
-    ineq = Relation(
+    return Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[3, -1],
-        absolute_part=3, operation='<='
+        absolute_part=3, 
+        operation='<=',
+        modulo_terms=[],
+        modulo_term_coeficients=[]
     )
-    return ineq
 
 
 def do_test_automaton_union(nfa1, nfa2):
@@ -87,12 +92,12 @@ def do_test_automaton_union(nfa1, nfa2):
 
 
 def test_sparse_nfa_union(ineq0, ineq1):
-    nfa0 = build_nfa_from_inequality(ineq0, alphabet, NFA)
-    nfa1 = build_nfa_from_inequality(ineq1, alphabet, NFA)
+    nfa0 = build_nfa_from_linear_inequality(ineq0, [('x', 1), ('y', 2)], alphabet, NFA)
+    nfa1 = build_nfa_from_linear_inequality(ineq1, [('x', 1), ('y', 2)], alphabet, NFA)
     do_test_automaton_union(nfa0, nfa1)
 
 
 def test_mtbdd_nfa_union(ineq0, ineq1):
-    mtbdd_nfa0 = build_nfa_from_inequality(ineq0, alphabet, MTBDD_NFA)
-    mtbdd_nfa1 = build_nfa_from_inequality(ineq1, alphabet, MTBDD_NFA)
+    mtbdd_nfa0 = build_nfa_from_linear_inequality(ineq0, [('x', 1), ('y', 2)], alphabet, MTBDD_NFA)
+    mtbdd_nfa1 = build_nfa_from_linear_inequality(ineq1, [('x', 1), ('y', 2)], alphabet, MTBDD_NFA)
     do_test_automaton_union(mtbdd_nfa0, mtbdd_nfa1)

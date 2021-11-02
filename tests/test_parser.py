@@ -1,5 +1,6 @@
 import pytest
 import parse
+import preprocessing
 import re
 import utils
 from typing import List
@@ -130,7 +131,7 @@ def test_expand_multivariable_bindings_mixed(plain_tree_multivar_mixed):
 
 
 def test_replace_forall_with_exists_simple(plain_tree_multivar_forall):
-    parse.replace_forall_with_exists(plain_tree_multivar_forall)
+    preprocessing.replace_forall_with_exists(plain_tree_multivar_forall)
     assert(plain_tree_multivar_forall)
 
     node_names = get_node_name_sequence(plain_tree_multivar_forall[1], 3)
@@ -138,7 +139,7 @@ def test_replace_forall_with_exists_simple(plain_tree_multivar_forall):
 
 
 def test_replace_forall_with_exists_mixed(plain_tree_multivar_mixed):
-    parse.replace_forall_with_exists(plain_tree_multivar_mixed)
+    preprocessing.replace_forall_with_exists(plain_tree_multivar_mixed)
     assert plain_tree_multivar_mixed
     node_names = get_node_name_sequence(plain_tree_multivar_mixed, 8)
     expected_node_seq = ['assert', 'not', 'exists', 'not', 'exists', 'not', 'exists', 'not']
@@ -147,7 +148,7 @@ def test_replace_forall_with_exists_mixed(plain_tree_multivar_mixed):
 
 
 def test_formula_cleanup(plain_tree_multivar_mixed):
-    parse.replace_forall_with_exists(plain_tree_multivar_mixed)
+    preprocessing.replace_forall_with_exists(plain_tree_multivar_mixed)
     parse.expand_multivariable_bindings(plain_tree_multivar_mixed)
 
     expected = ['not', 'exists', 'exists', 'not', 'exists', 'exists', 'not', 'exists', 'not']

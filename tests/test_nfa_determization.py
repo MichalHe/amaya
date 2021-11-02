@@ -10,7 +10,7 @@ from automatons import (
 )
 from mtbdd_automatons import MTBDD_NFA
 
-alphabet = LSBF_Alphabet.from_variable_names([1, 2])
+alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
 
 
 def mk_simple_presburger(constr: AutomatonConstructor) -> NFA:
@@ -18,10 +18,12 @@ def mk_simple_presburger(constr: AutomatonConstructor) -> NFA:
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
         absolute_part=2,
+        modulo_term_coeficients=[],
+        modulo_terms=[],
         operation='<='
     )
 
-    return build_nfa_from_linear_inequality(ineq, alphabet, constr)
+    return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, constr)
 
 
 @pytest.fixture

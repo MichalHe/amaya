@@ -8,8 +8,8 @@ from typing import List
 @pytest.fixture
 def bddtfn() -> SparseBDDTransitionFunction:
     manager = bdd.BDD()
-    manager.declare('x', 'y', 'z')
-    alphabet = LSBF_Alphabet.from_variable_names(('x', 'y', 'z'))
+    manager.declare('1', '2', '3')
+    alphabet = LSBF_Alphabet.from_variable_ids([1, 2, 3])
     return SparseBDDTransitionFunction(manager, alphabet)
 
 
@@ -24,7 +24,7 @@ def test_iterator(bddtfn: SparseBDDTransitionFunction):
 
 def test_complete_with_trap_state(bddtfn: SparseBDDTransitionFunction):
     states = ['q0', 'q1']
-    alphabet = LSBF_Alphabet.from_variable_names(('x', 'y', 'z'))
+    alphabet = LSBF_Alphabet.from_variable_ids([1, 2, 3])
     bddtfn.insert_transition('q0', (0, 0, 1), 'q1')
 
     trap_state_present = bddtfn.complete_with_trap_state(alphabet, states)
@@ -167,8 +167,8 @@ def test_determinize_syntetic_simple(bddtfn: SparseBDDTransitionFunction):
 def test_determinize_real_nfa():
     from automaton_algorithms import determinize_bdd
     manager = bdd.BDD()
-    manager.declare('x', 'y')
-    alphabet = LSBF_Alphabet.from_variable_names(('x', 'y'))
+    manager.declare('1', '2')
+    alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
     tfn: SparseBDDTransitionFunction = SparseBDDTransitionFunction(manager, alphabet)
 
     # Real automaton for the intequation: x - y \le 3

@@ -1,22 +1,28 @@
-import pytest
-import automatons as fsms
-import relations_structures as rs
-import presburger_algorithms as p_algos
 from typing import Callable
+import pytest
+
+from alphabet import LSBF_Alphabet
+from automatons import (
+    NFA,
+    AutomatonType
+)
+from mtbdd_automatons import MTBDD_NFA
+from relations_structures import Relation
+import presburger_algorithms
 
 
-AutomatonFactory = Callable[[fsms.LSBF_Alphabet, fsms.AutomatonType], fsms.NFA]
+AutomatonFactory = Callable[[LSBF_Alphabet, AutomatonType], NFA]
 
 
-def mk_simple_nfa(factory: AutomatonFactory) -> fsms.NFA:
+def mk_simple_nfa(factory: AutomatonFactory) -> NFA:
     final_state = 3
     states = [
         0, 1, 2, final_state
     ]
 
-    alphabet = fsms.LSBF_Alphabet.from_variable_names([1])
+    alphabet = LSBF_Alphabet.from_variable_ids([1])
 
-    nfa: fsms.NFA = factory(alphabet, fsms.AutomatonType.NFA)
+    nfa: NFA = factory(alphabet, AutomatonType.NFA)
     nfa.states = set(states)
     nfa.add_final_state(final_state)
     nfa.add_initial_state(0)
@@ -34,11 +40,11 @@ def mk_simple_nfa(factory: AutomatonFactory) -> fsms.NFA:
     return nfa
 
 
-def mk_multipath_nfa(factory: AutomatonFactory) -> fsms.NFA:
+def mk_multipath_nfa(factory: AutomatonFactory) -> NFA:
     final_state = 4
     states = [0, 1, 2, 3, final_state]
-    alphabet = fsms.LSBF_Alphabet.from_variable_names([1, 2])
-    multipath_nfa = factory(alphabet, fsms.AutomatonType.NFA)
+    alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+    multipath_nfa = factory(alphabet, AutomatonType.NFA)
 
     multipath_nfa.states = set(states)
     multipath_nfa.add_initial_state(0)
@@ -63,10 +69,10 @@ def mk_multipath_nfa(factory: AutomatonFactory) -> fsms.NFA:
     return multipath_nfa
 
 
-def mk_advanced_nfa(factory: AutomatonFactory) -> fsms.NFA:
+def mk_advanced_nfa(factory: AutomatonFactory) -> NFA:
     states = [-1, 0, 1, 2, 3, 4, 5, 6]
-    alphabet = fsms.LSBF_Alphabet.from_variable_names(['x', 'y'])
-    advanced_nfa = fsms.NFA(alphabet=alphabet, automaton_type=fsms.AutomatonType.NFA)
+    alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+    advanced_nfa = NFA(alphabet=alphabet, automaton_type=AutomatonType.NFA)
 
     final_state = 6
 
@@ -100,12 +106,18 @@ def mk_advanced_nfa(factory: AutomatonFactory) -> fsms.NFA:
 
 
 @pytest.fixture()
-def real_nfa() -> fsms.NFA:
-    equality = rs.Relation(['x', 'y'], [2, -1], 2, operation='=')
-    return p_algos.build_nfa_from_equality(equality)
+def real_nfa() -> NFA:
+    equality = Relation(variable_names=['x', 'y'],
+                        variable_coeficients=[2, -1], 
+                        absolute_part=2, 
+                        operation='=', 
+                        modulo_term_coeficients=[], 
+                        modulo_terms=[])
+    alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+    return presburger_algorithms.build_nfa_from_linear_equality(equality, [1, 2], alphabet, NFA)
 
 
-def do_simple_padding_closure_tests(nfa: fsms.NFA):
+def do_simple_padding_closure_tests(nfa: NFA):
     nfa.perform_pad_closure()
 
     sigma = (0,)
@@ -122,18 +134,18 @@ def do_simple_padding_closure_tests(nfa: fsms.NFA):
 
 
 def test_mdbdd_simple_finality_propagation():
-    simple_nfa = mk_simple_nfa(fsms.MTBDD_NFA)
+    simple_nfa = mk_simple_nfa(MTBDD_NFA)
     # Expect finallity propagation via sigma to every state
 
     do_simple_padding_closure_tests(simple_nfa)
 
 
 def test_simple_finality_propagation():
-    simple_nfa = mk_simple_nfa(fsms.NFA)
+    simple_nfa = mk_simple_nfa(NFA)
     do_simple_padding_closure_tests(simple_nfa)
 
 
-def do_multipath_propagation_tests(multipath_nfa: fsms.NFA):
+def do_multipath_propagation_tests(multipath_nfa: NFA):
     multipath_nfa.perform_pad_closure()
 
     final_state = 4
@@ -163,16 +175,16 @@ def do_multipath_propagation_tests(multipath_nfa: fsms.NFA):
 
 
 def test_multipath_propagation_tests():
-    nfa = mk_multipath_nfa(fsms.NFA)
+    nfa = mk_multipath_nfa(NFA)
     do_multipath_propagation_tests(nfa)
 
 
 def test_mtbdd_multipath_propagation_tests():
-    nfa = mk_multipath_nfa(fsms.MTBDD_NFA)
+    nfa = mk_multipath_nfa(MTBDD_NFA)
     do_multipath_propagation_tests(nfa)
 
 
-def do_advanced_propagation_tests(nfa: fsms.NFA):
+def do_advanced_propagation_tests(nfa: NFA):
     transitions_before_padding = list(nfa.transition_fn.iter())
     nfa.perform_pad_closure()
 
@@ -201,16 +213,16 @@ def do_advanced_propagation_tests(nfa: fsms.NFA):
 
 
 def test_advanced_propagation():
-    nfa = mk_advanced_nfa(fsms.NFA)
+    nfa = mk_advanced_nfa(NFA)
     do_advanced_propagation_tests(nfa)
 
 
 def test_mtbdd_advanced_propagation():
-    nfa = mk_advanced_nfa(fsms.MTBDD_NFA)
+    nfa = mk_advanced_nfa(MTBDD_NFA)
     do_advanced_propagation_tests(nfa)
 
 
-def x_test_real_pressburger_automaton_after_projection(real_nfa: fsms.NFA):
+def x_test_real_pressburger_automaton_after_projection(real_nfa: NFA):
     '''*Not performed currently* - the MTBDD NFAs do not fully support variable projection.'''
     final_state = list(real_nfa.final_states)[0]
     sigma_0 = (0, '*')  # NOQA

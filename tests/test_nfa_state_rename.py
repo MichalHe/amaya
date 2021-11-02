@@ -1,7 +1,8 @@
 import pytest
-from automatons import NFA, AutomatonType, LSBF_Alphabet, MTBDD_NFA
+from automatons import NFA, AutomatonType, LSBF_Alphabet
+from mtbdd_automatons import MTBDD_NFA
 from relations_structures import Relation
-from pressburger_algorithms import build_nfa_from_inequality
+from presburger_algorithms import build_nfa_from_linear_inequality
 from typing import (
     Any,
     Dict,
@@ -10,26 +11,27 @@ from typing import (
 
 @pytest.fixture
 def ineq() -> Relation:
-    ineq = Relation(
+    return Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
         absolute_part=3,
+        modulo_terms=[],
+        modulo_term_coeficients=[],
         operation="<="
     )
-    return ineq
 
 
-alphabet = LSBF_Alphabet.from_variable_names(['1', '2'])
+alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
 
 
 def test_nfa_state_rename_w_simple_tfn(ineq: Relation):
-    nfa = build_nfa_from_inequality(ineq, alphabet, NFA)
+    nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, NFA)
     assert nfa, 'Build nfa from ineq did not return a NFA'
     _test_state_renaming(nfa)
 
 
 def test_nfa_state_rename_w_mtbdd_tfn(ineq: Relation):
-    nfa = build_nfa_from_inequality(ineq, alphabet, MTBDD_NFA)
+    nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, MTBDD_NFA)
     assert nfa, 'Build nfa from ineq did not return a NFA'
     _test_state_renaming(nfa)
 

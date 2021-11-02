@@ -1,15 +1,17 @@
 import pytest
-from pressburger_algorithms import build_dfa_from_sharp_inequality
+from presburger_algorithms import build_dfa_from_sharp_inequality
 from relations_structures import Relation
 
 
 @pytest.fixture()
 def simple_sharp_ineq() -> Relation:
     return Relation(
-        ['x', 'y'],
-        [1, 1],
-        4,
-        '<'
+        variable_names=['x', 'y'],
+        variable_coeficients=[1, 1],
+        modulo_terms=[],
+        modulo_term_coeficients=[],
+        absolute_part=4,
+        operation='<'
     )
 
 

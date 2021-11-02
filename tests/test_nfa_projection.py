@@ -1,5 +1,6 @@
 from tests.test_nfa_intersection import mtbdd_nfa1  # NOQA
-from automatons import MTBDD_NFA, AutomatonSnapshot
+from mtbdd_automatons import MTBDD_NFA
+from automatons import AutomatonSnapshot
 
 
 def complement_nth_bit(symbol, bit_pos):

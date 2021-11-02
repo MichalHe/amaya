@@ -7,8 +7,8 @@ from typing import Union
 @pytest.fixture
 def bdd_tfn():
     manager = BDD()
-    manager.declare('x', 'y', 'z')
-    alphabet = LSBF_Alphabet.from_variable_names(('x', 'y', 'z'))
+    manager.declare('1', '2', '3')
+    alphabet = LSBF_Alphabet.from_variable_ids([1, 2, 3])
     return SparseBDDTransitionFunction(manager, alphabet)
 
 @pytest.fixture

@@ -28,7 +28,7 @@ def ineq_with_single_mod_term() -> RelationSetup:
                         modulo_term_coeficients=[1],
                         absolute_part=1,
                         operation='<=')
-    alphabet = LSBF_Alphabet.from_variable_names(['x'])
+    alphabet = LSBF_Alphabet.from_variable_ids([1])
     variable_id_pairs = [('x', 1)]
     return (variable_id_pairs, alphabet, relation)
 
@@ -58,7 +58,7 @@ def ineq_with_multiple_modulo_contraints() -> RelationSetup:
                         modulo_term_coeficients=[1, 1],
                         absolute_part=4,
                         operation='<=')
-    alphabet = LSBF_Alphabet.from_variable_names(['x'])
+    alphabet = LSBF_Alphabet.from_variable_ids([1])
     variable_id_pairs = [('x', 1)]
     return (variable_id_pairs, alphabet, relation)
 
@@ -128,10 +128,8 @@ def test_with_power_of_two_modulo():
                         modulo_term_coeficients=[1],
                         absolute_part=0,
                         operation='=')
-    alphabet = LSBF_Alphabet.from_variable_names(['x'])
+    alphabet = LSBF_Alphabet.from_variable_ids([1])
     variable_id_pairs = [('x', 1)]
-
-    # import pdb; pdb.set_trace()
     
     nfa = build_presburger_modulo_nfa(relation, variable_id_pairs, alphabet, NFA)
 

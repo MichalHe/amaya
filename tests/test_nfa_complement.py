@@ -1,4 +1,5 @@
-from automatons import NFA, MTBDD_NFA, LSBF_Alphabet, AutomatonType, AutomatonSnapshot
+from automatons import NFA, LSBF_Alphabet, AutomatonType, AutomatonSnapshot
+from mtbdd_automatons import MTBDD_NFA
 import pytest as pt
 from tests.test_nfa_determization import ResolutionState
 
@@ -10,7 +11,7 @@ def mtbdd_nfa1() -> MTBDD_NFA:
     Otherwise it is defacto deterministic - it should be possible to project the
     structure onto the original one.'''
 
-    alphabet = LSBF_Alphabet.from_variable_names([1])
+    alphabet = LSBF_Alphabet.from_variable_ids([1])
     nfa = MTBDD_NFA(alphabet, AutomatonType.NFA)
 
     nfa.add_state(0)

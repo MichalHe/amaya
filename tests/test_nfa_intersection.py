@@ -1,10 +1,11 @@
 import pytest
 from relations_structures import Relation
-from pressburger_algorithms import build_nfa_from_inequality
-from automatons import MTBDD_NFA, LSBF_Alphabet
+from presburger_algorithms import build_nfa_from_linear_inequality
+from mtbdd_automatons import MTBDD_NFA
+from alphabet import LSBF_Alphabet
 from typing import Any
 
-alphabet = LSBF_Alphabet.from_variable_names([1, 2])
+alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
 
 
 @pytest.fixture
@@ -13,9 +14,11 @@ def mtbdd_nfa1() -> MTBDD_NFA:
         absolute_part=0,
         variable_names=['x', 'y'],
         variable_coeficients=[1, -1],
+        modulo_terms=[],
+        modulo_term_coeficients=[],
         operation="<="
     )
-    return build_nfa_from_inequality(ineq, alphabet, MTBDD_NFA)
+    return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, MTBDD_NFA)
 
 
 @pytest.fixture
@@ -24,9 +27,11 @@ def nfa2() -> MTBDD_NFA:
         absolute_part=1,
         variable_names=['x', 'y'],
         variable_coeficients=[1, -1],
+        modulo_terms=[],
+        modulo_term_coeficients=[],
         operation="<="
     )
-    return build_nfa_from_inequality(ineq, alphabet, MTBDD_NFA)
+    return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, MTBDD_NFA)
 
 
 def are_states_same(state_a, state_b):

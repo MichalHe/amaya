@@ -43,6 +43,8 @@ class LSBF_Alphabet():
         :param relation: Relation from which the variables will be extracted and the alphabet will be created.
         :returns: Alphabet for variables in the given relation.
         """
+
+        # TODO(codeboy): Find where is this used and remove it - the alphabet should work only with variable IDs.
         act_symbols, _ = LSBF_Alphabet.generate_compressed_symbols(relation.variable_coeficients)
 
         active_variables = [var for i, var in enumerate(relation.variable_names) if relation.variable_coeficients[i] != 0]
@@ -116,6 +118,7 @@ class LSBF_Alphabet():
         Generate symbols for variable coeficients with don't care bit '*' in place of 
         zero variable coeficients (that is what is meant by compressed).
         """
+        # TODO(codeboy): Rename this -> what does compressed mean?
         nonzero_coefs_pos = [i for i, coef in enumerate(coefs) if coef != 0]
         nonzero_coefs_cnt = len(nonzero_coefs_pos)
 
@@ -148,18 +151,6 @@ class LSBF_Alphabet():
         return act_symbols, symbols
 
     @staticmethod
-    def from_variable_names(variable_names: Tuple[str, ...]) -> LSBF_Alphabet:
-        variable_numbers = list(map(
-            lambda index: index + 1,
-            range(len(variable_names))))
-
-        return LSBF_Alphabet(
-            active_variables=set(variable_names),
-            variable_names={},
-            variable_numbers=variable_numbers
-        )
-
-    @staticmethod
     def from_variable_ids(variable_ids: List[int]) -> LSBF_Alphabet:
         '''Creates a new alphabet from the given variable_name, id pairs.
         The variables list should be sorted by the ID.
@@ -175,6 +166,11 @@ class LSBF_Alphabet():
 
     @property
     def symbols(self):
+        """
+        Symbols of this alphabet.
+
+        Iterator allowing to lazily iterate over the symbols of this alphabet.
+        """
         letter_size = len(self.variable_numbers)
         for i in range(2**letter_size):
             yield number_to_bit_tuple(i, tuple_size=letter_size, pad=0)

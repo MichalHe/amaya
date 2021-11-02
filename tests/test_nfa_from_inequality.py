@@ -1,7 +1,9 @@
 import pytest
 
+from alphabet import LSBF_Alphabet
+from automatons import NFA
 from relations_structures import Relation
-from pressburger_algorithms import build_nfa_from_inequality
+from presburger_algorithms import build_nfa_from_linear_inequality
 
 
 @pytest.fixture
@@ -10,6 +12,8 @@ def ineq() -> Relation:
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
         absolute_part=2,
+        modulo_term_coeficients=[],
+        modulo_terms=[],
         operation='<='
     )
 
@@ -20,12 +24,18 @@ def ineq2() -> Relation:
         variable_names=['x', 'y'],
         variable_coeficients=[-3, 2],
         absolute_part=7,
+        modulo_term_coeficients=[],
+        modulo_terms=[],
         operation='<='
     )
 
 
-def test_nfa_buildup_simple(ineq):
-    nfa = build_nfa_from_inequality(ineq)
+def alphabet() -> LSBF_Alphabet:
+    return LSBF_Alphabet.from_variable_ids([1, 2])
+
+
+def test_nfa_buildup_simple(ineq: Relation, alphabet: LSBF_Alphabet):
+    nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, NFA)
     assert nfa
 
     expected_states = [2, 1, 0, -1, -2, 'FINAL']
