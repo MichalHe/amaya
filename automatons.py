@@ -94,9 +94,15 @@ class LSBF_Alphabet():
     def cylindrify_symbol_of_projected_alphabet(self,
                                                 variables: List[int],
                                                 symbol: Tuple[int, ...]) -> Tuple[Union[str, int], ...]:
-        '''Performs cylindrification on the given symbol that belongs to
+        """
+        Performs cylindrification on the given symbol that belongs to
         some smaller alphabet that resulted from projecting some variables from
-        this one away.'''
+        this one away.
+        :param variables: Which variables are present in the projected alphabet.
+        :param symbol: Symbol from the projected alphabet.
+        :returns: Symbol of this alphabet with don't care bits for variables 
+                  not present in the projected alphabet.
+        """
         alphabet_size = len(self.variable_numbers)
 
         # Create a list of indices where we should put the values from the
@@ -126,6 +132,62 @@ class LSBF_Alphabet():
             else:
                 cylindrified_symbol[i] = '*'
         return tuple(cylindrified_symbol)
+
+
+    def cylindrify_projected_symbol_iter_all(self, symbol: LSBF_AlphabetSymbol, variables: List[int]):
+        """
+        Cylindrify the given projected symbol onto this alphabet and yield all symbols.
+
+        Take the symbol that comes from an alphabet with a subset of variables 
+        and cylindrify it onto this alphabet. In order to know for to variables
+        does the symbol bits belong, a list of the variables of the smaller
+        alphabet is passed.
+
+        :param symbol: Symbol of the alphabet for a subset of variables of this alphabet.
+        :param variables: A sorted list of variables of the smaller alphabet.
+        :returns: Generates all symbols that result from the cylindrification.
+        """
+        alphabet_size = len(self.variable_numbers)
+
+        for rest_bits in range(2**(alphabet_size - len(variables))):
+            variable_index = 0
+            rest_bits_index = alphabet_size - len(variables) - 1
+            cylindrified_symbol = [None] * alphabet_size
+            for i, cylindrified_variable in enumerate(self.variable_numbers):
+                if variable_index == len(variables):
+                    # No more variables in the smaller alphabet, fill the rest with the bits from rest_bits
+                    while rest_bits_index >= 0:
+                        cylindrified_symbol[i] = ((rest_bits & (0x1 << rest_bits_index)) >> rest_bits_index)
+                        i += 1
+                        rest_bits_index -= 1
+                    break
+                if cylindrified_variable == variables[variable_index]:
+                    cylindrified_symbol[i] = symbol[variable_index]
+                    variable_index += 1
+                else:
+                    cylindrified_symbol[i] =  ((rest_bits & (0x1 << rest_bits_index)) >> rest_bits_index)
+                    rest_bits_index -= 1
+            yield cylindrified_symbol
+
+
+    def project_symbol_onto_variables(self, symbol: LSBF_AlphabetSymbol, variables: List[int]) -> LSBF_AlphabetSymbol:
+        """
+        Projects given symbol onto the variables.
+
+        :param symbol: Symbol of this alphabet that should be projected onto given variables.
+        :param variables: The sorted list containing a subset of variables of this alphabet to project the symbol on.
+        :returns: The projected symbol.
+        """
+        projected_symbol = [None] * len(variables)
+        variable_subset_index = 0
+
+        for i, variable in enumerate(self.variable_numbers):
+            if variable_subset_index == len(variables):
+                break  # We've exhausted all variables, don't have to iterate any further.
+            if variable == variables[variable_subset_index]:
+                projected_symbol[variable_subset_index] = symbol[i]
+                variable_subset_index += 1
+        return projected_symbol
 
     @staticmethod
     def generate_compressed_symbols(coefs):

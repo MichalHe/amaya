@@ -520,7 +520,7 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
     return nfa
 
 
-def on_the_fly_intersection(lin_automaton: NFA, modulo_relation: Relation):
+def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[int], modulo_relation: Relation):
     """
     Performs on-the-fly intersection.
 
@@ -555,33 +555,45 @@ def on_the_fly_intersection(lin_automaton: NFA, modulo_relation: Relation):
         value_with_symbol_interp_as_sign = mod_state.value + vector_dot(symbol, mod_state.variable_coeficients)
         return value_with_symbol_interp_as_sign % mod_state.modulo == 0
 
+    # Problems with alphabets - we are iterating over some (a, b, c, x) and the modulo automaton can have (x, y, z) 
+    # we need a function to convert (a, b, c, x) into {(x, 0, 0), ..., (x, 1, 1)}
+    # To do so in an easier manner we identify the intersection of variables used project the symbol (a, b, c, x) onto 
+    # those and then generate (x, y, z) from the projected symbols.
+
+    assert sorted(lin_automaton.used_variables) == lin_automaton.used_variables
+    common_variables = sorted(set(lin_automaton.used_variables).intersection(modulo_relation_variables))
+    alphabet = lin_automaton.alphabet
+    modulo_alphabet_helper = LSBF_Alphabet.from_variable_ids(modulo_relation_variables)
+
     while work_list:
         current_product_state = work_list.pop(-1)
         work_set.remove(current_product_state)
-
-        print(current_product_state)
-
+        
         current_product_state_alias = alias_store.get_alias_for_state(current_product_state)
         current_lin_component, current_mod_component = current_product_state
 
         for post_state, symbol in flat_post(current_lin_component):
-            mod_symbol = (symbol[1], )
-            mod_accepts = mod_accepts_with_symbol(current_mod_component, mod_symbol)
-            lin_is_final = post_state in lin_automaton.final_states
+            mod_symbols = modulo_alphabet_helper.cylindrify_projected_symbol_iter_all(
+                alphabet.project_symbol_onto_variables(symbol, common_variables),
+                common_variables
+                )
+            for mod_symbol in mod_symbols:
+                mod_accepts = mod_accepts_with_symbol(current_mod_component, mod_symbol)
+                lin_is_final = post_state in lin_automaton.final_states
 
-            if mod_accepts and lin_is_final:
-                print('>>> Result', (current_mod_component, current_lin_component))
-                return (current_mod_component, current_lin_component)
+                if mod_accepts and lin_is_final:
+                    print('>>> Result', (current_mod_component, current_lin_component))
+                    return (current_mod_component, current_lin_component)
 
-            mod_post_state = current_mod_component.generate_next(mod_symbol)
-            dest_product_state = (post_state, mod_post_state)
-            dest_product_state_alias = alias_store.get_alias_for_state(dest_product_state)
+                mod_post_state = current_mod_component.generate_next(mod_symbol)
+                dest_product_state = (post_state, mod_post_state)
+                dest_product_state_alias = alias_store.get_alias_for_state(dest_product_state)
 
-            # Check whether we should process this state again.
-            in_result = dest_product_state_alias in result.states
-            in_worklist = dest_product_state in work_set  # Use workset to speed up lookups
-            if not (in_result or in_worklist):
-                work_list.append(dest_product_state)
-                work_set.add(dest_product_state)
+                # Check whether we should process this state again.
+                in_result = dest_product_state_alias in result.states
+                in_worklist = dest_product_state in work_set  # Use workset to speed up lookups
+                if not (in_result or in_worklist):
+                    work_list.append(dest_product_state)
+                    work_set.add(dest_product_state)
 
-            result.update_transition_fn(current_product_state_alias, symbol, dest_product_state_alias)
+                result.update_transition_fn(current_product_state_alias, symbol, dest_product_state_alias)
