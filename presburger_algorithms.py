@@ -555,9 +555,9 @@ def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[
         value_with_symbol_interp_as_sign = mod_state.value + vector_dot(symbol, mod_state.variable_coeficients)
         return value_with_symbol_interp_as_sign % mod_state.modulo == 0
 
-    # Problems with alphabets - we are iterating over some (a, b, c, x) and the modulo automaton can have (x, y, z) 
+    # Problems with alphabets - we are iterating over some (a, b, c, x) and the modulo automaton can have (x, y, z)
     # we need a function to convert (a, b, c, x) into {(x, 0, 0), ..., (x, 1, 1)}
-    # To do so in an easier manner we identify the intersection of variables used project the symbol (a, b, c, x) onto 
+    # To do so in an easier manner we identify the intersection of variables used project the symbol (a, b, c, x) onto
     # those and then generate (x, y, z) from the projected symbols.
 
     assert sorted(lin_automaton.used_variables) == lin_automaton.used_variables
@@ -565,12 +565,15 @@ def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[
     alphabet = lin_automaton.alphabet
     modulo_alphabet_helper = LSBF_Alphabet.from_variable_ids(modulo_relation_variables)
 
+    processed_states_counter = 0
     while work_list:
         current_product_state = work_list.pop(-1)
         work_set.remove(current_product_state)
-        
+
         current_product_state_alias = alias_store.get_alias_for_state(current_product_state)
         current_lin_component, current_mod_component = current_product_state
+
+        result.add_state(current_product_state_alias)
 
         for post_state, symbol in flat_post(current_lin_component):
             mod_symbols = modulo_alphabet_helper.cylindrify_projected_symbol_iter_all(
@@ -583,6 +586,7 @@ def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[
 
                 if mod_accepts and lin_is_final:
                     print('>>> Result', (current_mod_component, current_lin_component))
+                    print('Overall processed states:', processed_states_counter)
                     return (current_mod_component, current_lin_component)
 
                 mod_post_state = current_mod_component.generate_next(mod_symbol)
@@ -592,8 +596,10 @@ def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[
                 # Check whether we should process this state again.
                 in_result = dest_product_state_alias in result.states
                 in_worklist = dest_product_state in work_set  # Use workset to speed up lookups
-                if not (in_result or in_worklist):
+
+                if not in_result and not in_worklist:
                     work_list.append(dest_product_state)
                     work_set.add(dest_product_state)
 
                 result.update_transition_fn(current_product_state_alias, symbol, dest_product_state_alias)
+        processed_states_counter += 1
