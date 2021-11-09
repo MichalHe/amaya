@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 from typing import (
+    Any,
     Set,
     Dict,
     Tuple,
@@ -129,6 +130,10 @@ class MTBDD_NFA(NFA):
         logger.debug('Is pruning enabled? {0}'.format(self.fast_prunining_enabled))
         if self.fast_prunining_enabled:
             logger.debug('Is early safe pruning possible? self={0} other={1}'.format(self.is_safe_to_quick_prune_intersection_states(), other.is_safe_to_quick_prune_intersection_states()))
+
+        # @Note(codeboy): This is a debug call, remove it.
+        # MTBDDTransitionFn.transition_fn.get_states_in_mtbdd_leaves()
+
         hightest_state = self.renumber_states(start_from=0)
         other.renumber_states(start_from=hightest_state)
         logger.debug('Intersection state renumbering done.')
@@ -221,13 +226,15 @@ class MTBDD_NFA(NFA):
         self.transition_fn.do_pad_closure(self.initial_states, self.final_states)
 
     def determinize(self):
-        '''Performs in-place determinization of the automaton. No
-        determinization is performed if the automaton is already marked as a
+        """
+        Performs in-place determinization of the automaton.
+
+        No determinization is performed if the automaton is already marked as a
         DFA.
 
-        The determinized automaton has a transition for every alphabet symbol
-        in every state - after determinization a completion with a trapstate is
-        performed.  '''
+        The resulting automaton is complete - a transition to trapstate is
+        added where needed.
+        """
 
         if self.automaton_type & AutomatonType.DFA:
             return self
@@ -373,6 +380,7 @@ class MTBDD_NFA(NFA):
 
     def do_projection(self, var: int, skip_pad_closure: bool = False):
         logger.info(f'Performing MTBDD NFA projection on variable: {var}. Currently employed variables: {self.used_variables}')
+
         self.transition_fn.project_variable_away(var)
 
         logger.debug(f'Variable projected away, proceeding to padding closure. Should skip pad closure?: {skip_pad_closure}')
@@ -504,7 +512,9 @@ class MTBDD_NFA(NFA):
         )
 
     def remove_nonfinishing_states(self):
-        '''Removes states from which is not reachable any acceptable state.'''
+        """
+        Remove states from which there is no reachable accepting state.
+        """
         logger.debug('Removing automaton nonfinishing states.')
         mtbdd_transition_fn: MTBDDTransitionFn = self.transition_fn  # type: ignore
         adjacency_matrix = mtbdd_transition_fn.build_automaton_adjacency_matrix(self.initial_states)

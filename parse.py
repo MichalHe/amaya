@@ -1025,8 +1025,12 @@ def evaluate_binary_conjunction_expr(expr: List,
             operand_mod = next_operand.is_conguence_equality()
             doing_intersect = reduction_operation == ParsingOperation.NFA_INTERSECT
             if operand_mod and doing_intersect:
-                modulo_variables = sorted(map(lambda pair: pair[1], ctx.get_multiple_variable_ids(next_operand.get_used_variables())))
-                pa.on_the_fly_intersection(reduction_result, modulo_variables, next_operand)
+                pass
+                # FIXME(codeboy): This is temporary - remove the comments after
+                # the MTBDD bug was fixed.
+
+                # modulo_variables = sorted(map(lambda pair: pair[1], ctx.get_multiple_variable_ids(next_operand.get_used_variables())))
+                # pa.on_the_fly_intersection(reduction_result, modulo_variables, next_operand)
 
         next_operand_automaton = get_automaton_for_operand(next_operand, ctx, _depth)
 

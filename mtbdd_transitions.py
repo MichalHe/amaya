@@ -163,6 +163,13 @@ mtbdd_wrapper.amaya_mtbdd_deref.argtypes = (
 
 mtbdd_wrapper.amaya_sylvan_gc.argtypes = ()
 
+mtbdd_wrapper.amaya_get_states_in_mtbdd_leaves.argtypes = (
+    ct.POINTER(ct.c_ulong),   # Array of MTBBDs
+    ct.c_uint32,              # The number of passed MTBDDs
+    ct.POINTER(ct.c_uint32),  # The size of returned array with states
+)
+mtbdd_wrapper.amaya_get_states_in_mtbdd_leaves.restype = ct.POINTER(ct.c_int64)  # States
+
 mtbdd_wrapper.amaya_sylvan_clear_cache.argtypes = ()
 mtbdd_wrapper.amaya_sylvan_clear_cache.restype = None
 
@@ -306,11 +313,16 @@ class MTBDDTransitionFn():
         return set(dest_)
 
     def rename_states(self, mappings: Dict[int, int]):
-        '''Renames all states referenced within stored mtbdds with the
-        provided mapping.
+        """
+        Renames all states referenced within stored mtbdds using the provided
+        mapping.
 
-        Requires all referenced states to be present in the mapping.
-        '''
+        Requires all states present in the leaf sets of the MTBDDs to be present
+        in this mapping, otherwise assertion in the C++ side will cause
+        termination.
+
+        :param mappings: A dictionary mapping old states to its new names.
+        """
         flat_mapping_size = 2*len(mappings)
         arr = (c_side_state_type * flat_mapping_size)()
 
@@ -336,9 +348,14 @@ class MTBDDTransitionFn():
         )
         logger.debug('Done.')
 
-        # The renamed mtbdds do already have their refs increased to 1
+        # @Note(codeboy): The renamed mtbdds do already have their refs
+        # increased to 1, so there is not need to manually increase the
+        # refcount
 
-        # We still need to replace the actual origin states within self.mtbdds
+        # We've received an array of new mtbdds (they have renamed states in
+        # the sets inside the leaves). Now we need to reacreate the transition
+        # function which returns a transition MTBDD for every state to contain
+        # the renamed states (origins)
         new_mtbdds = dict()
         for i, state_old_mtbdd_pair in enumerate(self.mtbdds.items()):
             state, old_mtbdd = state_old_mtbdd_pair
@@ -947,10 +964,11 @@ class MTBDDTransitionFn():
 
     @staticmethod
     def remove_states_from_mtbdd_transitions(mtbdds: List[ct.c_ulong], removed_states: Iterable[int]) -> List[ct.c_ulong]:
-        '''Removes the specified states from given transition mtbdds.
-        Returns:
-            The list of transition mtbdds without the removed states, in the same order as given.
-        '''
+        """
+        Removes the specified states from given transition mtbdds.
+
+        :returns:  The list of transition mtbdds without the removed states, in the same order as given.
+        """
 
         _mtbdds = (ct.c_ulong * len(mtbdds))(*mtbdds)
         _mtbdds_cnt = ct.c_uint32(len(mtbdds))
@@ -1050,3 +1068,32 @@ class MTBDDTransitionFn():
     @staticmethod
     def call_clear_cachce():
         mtbdd_wrapper.amaya_sylvan_clear_cache()
+
+    @staticmethod
+    def get_states_in_mtbdd_leaves(mtbdds: List[int]) -> List[int]:
+        """
+        Calls the C side to retrieve a list of states that are present in the
+        leaves of given MTBDDs.
+
+        :param mtbdds: MTBDDs whose leaves will be searched for states.
+        :returns: The list of unique states present in the leaves of given MTBBDs.
+
+        MTBDD wrapper.
+        """
+
+        _mtbdds = (ct.c_ulong * len(mtbdds))(*mtbdds)
+        _mtbdd_cnt = ct.c_uint32(len(mtbdds))
+
+        # Output parameters of the calls
+        _out_state_cnt = ct.c_uint32()
+
+        _out_states = mtbdd_wrapper.amaya_get_states_in_mtbdd_leaves(
+            _mtbdds,
+            _mtbdd_cnt,
+            ct.byref(_out_state_cnt)
+        )
+
+        states_in_leaves = []
+
+        for i in range(_out_state_cnt.value):
+            states_in_leaves.append(_out_states[i])
