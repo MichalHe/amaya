@@ -3,14 +3,24 @@ from relations_structures import Relation
 from presburger_algorithms import build_nfa_from_linear_inequality
 from mtbdd_automatons import MTBDD_NFA
 from alphabet import LSBF_Alphabet
-from typing import Any
+from automatons import NFA
+from typing import (
+    Dict,
+    List,
+    Tuple
+)
+from tests.test_nfa_determization import ResolutionState
 
 alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+VariablesIDPairs = List[Tuple[str, int]]
 
 
-@pytest.fixture
-def mtbdd_nfa1() -> MTBDD_NFA:
-    ineq = Relation(
+@pytest.fixture()
+def relation1() -> Tuple[Relation, VariablesIDPairs]:
+    """
+    Returns the relation encoding: x - y <= 0.
+    """
+    relation = Relation(
         absolute_part=0,
         variable_names=['x', 'y'],
         variable_coeficients=[1, -1],
@@ -18,126 +28,233 @@ def mtbdd_nfa1() -> MTBDD_NFA:
         modulo_term_coeficients=[],
         operation="<="
     )
-    return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, MTBDD_NFA)
+
+    variable_ids_pairs: VariablesIDPairs = [('x', 1), ('y', 2)]
+    return (relation, variable_ids_pairs)
 
 
-@pytest.fixture
-def nfa2() -> MTBDD_NFA:
-    ineq = Relation(
+@pytest.fixture()
+def relation2() -> Tuple[Relation, VariablesIDPairs]:
+    relation = Relation(
         absolute_part=1,
         variable_names=['x', 'y'],
-        variable_coeficients=[1, -1],
+        variable_coeficients=[1, 1],
         modulo_terms=[],
         modulo_term_coeficients=[],
         operation="<="
     )
-    return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, MTBDD_NFA)
+
+    variable_ids_pairs: VariablesIDPairs = [('x', 1), ('y', 2)]
+    return (relation, variable_ids_pairs)
 
 
-def are_states_same(state_a, state_b):
-    if not len(state_a) == len(state_b):
-        return False
+def check_relation1_automaton(nfa: NFA):
+    assert len(nfa.states) == 3
+    assert len(nfa.initial_states) == 1
+    assert len(nfa.final_states) == 1
 
-    for a in state_a:
-        if a not in state_b:
-            return False
+    initial_state = next(iter(nfa.initial_states))
+    final_state = next(iter(nfa.final_states))
 
-    return True
+    state_0 = ResolutionState()
+    state_m1 = ResolutionState()
+    state_f = ResolutionState()
 
+    state_0.bind(initial_state)
+    state_f.bind(final_state)
 
-def test_nfa_intersection_mtbdd(mtbdd_nfa1: MTBDD_NFA, nfa2: MTBDD_NFA):
-    assert len(mtbdd_nfa1.final_states) == 1
-    assert len(nfa2.final_states) == 1
-
-    nfa1_final_state_bt = next(iter(mtbdd_nfa1.final_states))
-    nfa2_final_state_bt = next(iter(nfa2.final_states))
-
-    nfa1_translation = dict()
-    nfa2_translation = dict()
-
-    def state_name_translated(automaton_id: int, old_name: Any, new_name: int):
-        if automaton_id == id(mtbdd_nfa1):
-            nfa1_translation[old_name] = new_name
-        else:
-            nfa2_translation[old_name] = new_name
-
-    mtbdd_nfa1._debug_state_rename = state_name_translated
-    nfa2._debug_state_rename = state_name_translated
-
-    metastate_map = {}
-    metastate_inv_map = {}
-    nfa_intersection = mtbdd_nfa1.intersection(nfa2, metastate_map=metastate_map)
-    assert nfa_intersection
-
-    for state, metastate in metastate_map.items():
-        metastate_inv_map[metastate] = state
-
-    expected_final_metastate = (nfa1_translation[nfa1_final_state_bt],
-                                nfa2_translation[nfa2_final_state_bt])
-    expected_final_state = metastate_inv_map[expected_final_metastate]
-
-    assert len(nfa_intersection.final_states) == 1
-    assert expected_final_state in nfa_intersection.final_states
-
-    assert len(nfa1_translation) > 0 and len(nfa2_translation) > 0
-
-    # Those are manually calculated expected intersection states
-    # States overcome various transformations during intersection eval:
-    # 1. state renumbering
-    # 2. metastate to int translation
-    # We need to apply the process onto the expected states aswell
-    expected_states = [
-        (0, 1),
-        (0, 0),
-        (-1, -1),
-        (-1, 0),
-        (nfa1_final_state_bt, nfa2_final_state_bt)
-    ]
-
-    translated_expected_states = []
-    for left, right in expected_states:
-        renumbered_metastate = (nfa1_translation[left], nfa2_translation[right])
-        int_state = metastate_inv_map[renumbered_metastate]
-        translated_expected_states.append(int_state)
-
-    for ts in translated_expected_states:
-        assert ts in nfa_intersection.states
-
-    es = translated_expected_states
     expected_transitions = [
-        (es[0], (0, 1), es[0]),
-        (es[0], (1, 1), es[1]),
-        (es[0], (0, 0), es[1]),
-        (es[0], (1, 0), es[3]),
-        (es[1], (0, 1), es[1]),
-        (es[1], (0, 0), es[1]),
-        (es[1], (1, 1), es[1]),
-        (es[2], (0, 1), es[1]),
-        # Test final state reachableness
-        (es[2], (1, 0), expected_final_state),
-        (es[0], (1, 0), expected_final_state),
-        (es[0], (0, 0), expected_final_state),
-        (es[0], (1, 1), expected_final_state),
+        (state_0, (0, 0), state_0),
+        (state_0, (0, 1), state_0),
+        (state_0, (1, 1), state_0),
+        (state_0, (1, 0), state_m1),
+
+        (state_m1, (0, 0), state_m1),
+        (state_m1, (1, 0), state_m1),
+        (state_m1, (1, 1), state_m1),
+        (state_m1, (0, 1), state_0),
     ]
 
-    transitions = list(nfa_intersection.transition_fn.iter())
-
-    for et in expected_transitions:
-        assert et in transitions
-
-    # Test whether states of shape ('final', int) are present
-    expected_states_deadend = [
-        (0, nfa2_final_state_bt),
-        (-1, nfa2_final_state_bt),
-        (nfa1_final_state_bt, 0),
-        (nfa1_final_state_bt, -1),
+    expected_accepting_symbols = [
+        (state_0, [(0, 0), (1, 0), (1, 1)]),
+        (state_m1, [(1, 0)])
     ]
 
-    esdt = []
-    for left, right in expected_states_deadend:
-        renumbered_metastate = (nfa1_translation[left], nfa2_translation[right])
-        int_state = metastate_inv_map[renumbered_metastate]
-        esdt.append(int_state)
+    for origin, symbol, destination in expected_transitions:
+        dest_states = set(nfa.get_transition_target(origin.get(), symbol)) - nfa.final_states
+        destination.bind(next(iter(dest_states)))
 
-    for e_state in esdt:
-        assert e_state in nfa_intersection.states
+    for state, final_symbols in expected_accepting_symbols:
+        for symbol in final_symbols:
+            dest_states = nfa.get_transition_target(state.get(), symbol)
+            final_dest_states = set(dest_states).intersection(set(nfa.final_states))
+            assert len(final_dest_states) == 1
+            assert {state_f.get()} == final_dest_states
+
+
+def check_relation2_automaton(nfa: NFA):
+    assert len(nfa.states) == 5
+    assert len(nfa.initial_states) == 1
+    assert len(nfa.final_states) == 1
+
+    initial_state = next(iter(nfa.initial_states))
+
+    states = dict((i, ResolutionState()) for i in [1, 0, -1, -2])
+
+    states[1].bind(initial_state)
+
+    expected_transitions = [
+        (1, (0, 0), 0),
+        (1, (0, 1), 0),
+        (1, (1, 0), 0),
+        (1, (1, 1), -1),
+
+        (0, (0, 0), 0),
+        (0, (0, 1), -1),
+        (0, (1, 0), -1),
+        (0, (1, 1), -1),
+
+        (-1, (0, 0), -1),
+        (-1, (0, 1), -1),
+        (-1, (1, 0), -1),
+        (-1, (1, 1), -2),
+
+        (-2, (0, 0), -1),
+        (-2, (0, 1), -2),
+        (-2, (1, 0), -2),
+        (-2, (1, 1), -2),
+    ]
+
+    for origin, symbol, destination in expected_transitions:
+        _origin = states[origin].get()
+        dest_states = set(nfa.get_transition_target(_origin, symbol))
+        dest_nonfinal_states = dest_states - nfa.final_states
+
+        assert len(dest_nonfinal_states) == 1
+        _destination = states[destination]
+        _destination.bind(next(iter(dest_nonfinal_states)))
+
+    expected_accepting_symbols = [
+        (1, [(0, 0), (0, 1), (1, 0), (1, 1)]),
+        (0, [(0, 0), (0, 1), (1, 0), (1, 1)]),
+        (-1, [(0, 1), (1, 0), (1, 1)]),
+        (-2, [(1, 1)]),
+    ]
+
+    for state, accepting_symbols in expected_accepting_symbols:
+        for accepting_symbol in accepting_symbols:
+            dest_states = set(nfa.get_transition_target(state, accepting_symbol))
+            dest_final_states = nfa.final_states.intersection(dest_states)
+            assert len(dest_final_states) == 1
+
+
+def check_intersection_automaton(nfa: NFA):
+    """
+    Verifies that the intersection automaton has the expected structure.
+    """
+    assert len(nfa.states) == 8  # We believe that the nonfinishing states were removed.
+    assert len(nfa.initial_states) == 1
+    assert len(nfa.final_states) == 1
+
+    state_names = [(0, 1), (-1, -1), (0, 0), (-1, 0), (-1, -2), (0, -1), (0, -2)]
+    states: Dict[Tuple[int, int], ResolutionState] = dict((state, ResolutionState()) for state in state_names)
+
+    initial_state = next(iter(nfa.initial_states))
+    states[(0, 1)].bind(initial_state)
+
+    expected_transitions = [
+        ((0, 1), (0, 0), (0, 0)),
+        ((0, 1), (0, 1), (0, 0)),
+        ((0, 1), (1, 0), (-1, 0)),
+        ((0, 1), (1, 1), (0, -1)),
+
+        ((0, 0), (0, 0), (0, 0)),
+        ((0, 0), (0, 1), (0, -1)),
+        ((0, 0), (1, 0), (-1, -1)),
+        ((0, 0), (1, 1), (0, -1)),
+
+        ((-1, 0), (0, 0), (-1, 0)),
+        ((-1, 0), (0, 1), (0, -1)),
+        ((-1, 0), (1, 0), (-1, -1)),
+        ((-1, 0), (1, 1), (-1, -1)),
+
+        ((-1, -1), (0, 0), (-1, -1)),
+        ((-1, -1), (0, 1), (0, -1)),
+        ((-1, -1), (1, 0), (-1, -1)),
+        ((-1, -1), (1, 1), (-1, -2)),
+
+        ((-1, -2), (0, 0), (-1, -1)),
+        ((-1, -2), (0, 1), (0, -2)),
+        ((-1, -2), (1, 0), (-1, -2)),
+        ((-1, -2), (1, 1), (-1, -2)),
+
+        ((0, -1), (0, 0), (0, -1)),
+        ((0, -1), (0, 1), (0, -1)),
+        ((0, -1), (1, 0), (-1, -1)),
+        ((0, -1), (1, 1), (0, -2)),
+
+        ((0, -2), (0, 0), (0, -1)),
+        ((0, -2), (0, 1), (0, -2)),
+        ((0, -2), (1, 0), (-1, -2)),
+        ((0, -2), (1, 1), (0, -2)),
+    ]
+
+    for origin, symbol, destination in expected_transitions:
+        _origin = states[origin].get()
+        dest_states = set(nfa.get_transition_target(_origin, symbol))
+        dest_nonfinal_states = dest_states - nfa.final_states
+
+        assert len(dest_nonfinal_states) == 1
+        _destination = states[destination]
+        _destination.bind(next(iter(dest_nonfinal_states)))
+
+    all_symbols = {(0, 0), (0, 1), (1, 0), (1, 1)}
+    expected_accepting_symbols = [
+        ((0, 1), [(0, 0), (1, 0), (1, 1)]),
+        ((-1, 0), [(1, 0)]),
+        ((0, 0), [(0, 0), (1, 0), (1, 1)]),
+        ((0, 0), [(0, 0), (1, 0), (1, 1)]),
+        ((-1, -1), [(1, 0)]),
+        ((-1, -2), []),
+        ((0, -1), [(1, 0), (1, 1)]),
+        ((0, -2), [(1, 1)]),
+    ]
+
+    for state, accepting_symbols in expected_accepting_symbols:
+        _state = states[state].get()
+        for accepting_symbol in accepting_symbols:
+            dest_states = set(nfa.get_transition_target(_state, accepting_symbol))
+            dest_final_states = nfa.final_states.intersection(dest_states)
+            assert len(dest_final_states) == 1
+
+        for nonaccepting_symbol in all_symbols.difference(set(accepting_symbols)):
+            dest_states = set(nfa.get_transition_target(_state, nonaccepting_symbol))
+            dest_final_states = nfa.final_states.intersection(dest_states)
+            assert len(dest_final_states) == 0
+
+
+def test_mtbdd_intersection_on_atoms(relation1: Tuple[Relation, VariablesIDPairs],
+                                     relation2: Tuple[Relation, VariablesIDPairs]):
+
+    nfa1 = build_nfa_from_linear_inequality(relation1[0], relation1[1], alphabet, MTBDD_NFA)
+    nfa2 = build_nfa_from_linear_inequality(relation2[0], relation2[1], alphabet, MTBDD_NFA)
+
+    check_relation1_automaton(nfa1)
+    check_relation2_automaton(nfa2)
+
+    product_nfa = nfa1.intersection(nfa2)
+
+    check_intersection_automaton(product_nfa)
+
+
+def test_native_intersection_on_atoms(relation1: Tuple[Relation, VariablesIDPairs],
+                                      relation2: Tuple[Relation, VariablesIDPairs]):
+
+    nfa1 = build_nfa_from_linear_inequality(relation1[0], relation1[1], alphabet, NFA)
+    nfa2 = build_nfa_from_linear_inequality(relation2[0], relation2[1], alphabet, NFA)
+
+    check_relation1_automaton(nfa1)
+    check_relation2_automaton(nfa2)
+
+    product_nfa = nfa1.intersection(nfa2)
+    check_intersection_automaton(product_nfa)
