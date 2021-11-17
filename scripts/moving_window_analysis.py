@@ -87,7 +87,7 @@ def draw_scatter(datapoints: List[DataPoint]):
         y.append(datapoint.execution_time)
         xtick_labels.append(str(datapoint.primes))
 
-    plt.scatter(x, y)
+    plt.scatter(x, y, marker='1')
     plt.ylabel('[s]')
     plt.xlabel('primes')
     plt.xticks(ticks=x, labels=xtick_labels, rotation=70)
