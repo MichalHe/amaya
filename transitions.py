@@ -571,6 +571,7 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                     queue.append(reachable_state)
 
         unreachable_states = states - reachable_states
+        logger.info(f'Removed {len(unreachable_states)}/{len(states)}')
         if unreachable_states:
             self.data = remove_all_transitions_that_contain_states(self.data, unreachable_states)
 

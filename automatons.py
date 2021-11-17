@@ -36,7 +36,6 @@ from visualization import AutomatonVisRepresentation
 from alphabet import LSBF_Alphabet, LSBF_AlphabetSymbol
 
 
-
 AutomatonState = TypeVar('AutomatonState')
 S = TypeVar('S')
 
@@ -52,6 +51,7 @@ class AutomatonType(IntFlag):
     NFA = 0x02
     TRIVIAL = 0x04
     BOOL = 0x08
+
 
 @dataclass
 class NFA(Generic[AutomatonState]):
@@ -133,7 +133,7 @@ class NFA(Generic[AutomatonState]):
         used_variable_ids = sorted(set(self.used_variables + other.used_variables))
         projected_alphabet = list(self.alphabet.gen_projection_symbols_onto_variables(used_variable_ids))
 
-        logger.debug('Automata use the following vvariables: self={0} other={1} result={2}'.format(
+        logger.debug('Automata use the following variables: self={0} other={1} result={2}'.format(
             self.used_variables,
             other.used_variables,
             used_variable_ids
@@ -146,6 +146,7 @@ class NFA(Generic[AutomatonState]):
         for initial_state in work_queue:
             resulting_nfa.add_initial_state(initial_state)
 
+        states_processed_cnt = 0
         while work_queue:
             current_state: Tuple[int, int] = work_queue.pop(-1)
             resulting_nfa.add_state(current_state)
@@ -179,13 +180,16 @@ class NFA(Generic[AutomatonState]):
 
                         if not resulting_nfa.has_state_with_value(produced_intersection_metastate) and produced_intersection_metastate not in work_queue:
                             work_queue.append(produced_intersection_metastate)
+            states_processed_cnt += 1
 
         resulting_nfa.used_variables = used_variable_ids
 
         resulting_nfa.remove_nonfinishing_states()
 
         assert resulting_nfa.used_variables
-        logger.info(f'Intersection done. Result has {len(resulting_nfa.states)} states.')
+        logger.info('Intersection done. States processed: %d. Result has %d states.',
+                    states_processed_cnt,
+                    len(resulting_nfa.states))
         return resulting_nfa
 
     def union(self, other: NFA[S]) -> NFA[int]:

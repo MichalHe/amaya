@@ -169,11 +169,14 @@ class MTBDD_NFA(NFA):
             [self.transition_fn.automaton_id, other.transition_fn.automaton_id]
 
         work_set = set(work_queue)
+        processed_states_cnt = 0
         while work_queue:
             cur_state = work_queue.pop(-1)
             work_set.remove(cur_state)
             cur_metastate = metastate_map[cur_state]
-            logger.debug(f'MTBDD NFA Intersection: Processing metastate: {cur_metastate}, remaining in work queue: {len(work_queue)}')
+            logger.debug('MTBDD NFA Intersection: Processing metastate: %s, remaining in work queue: %d',
+                         cur_state,
+                         len(work_queue))
 
             if cur_state in int_nfa.states:
                 continue  # Each state can be processed only once
@@ -206,11 +209,12 @@ class MTBDD_NFA(NFA):
                 gen_state, gen_metastate = gm
                 metastate_map[gen_state] = gen_metastate
 
-                if gen_state not in work_set:
+                if gen_state not in work_set and gen_state not in work_queue:
                     work_queue.append(gen_state)
                     work_set.add(gen_state)
 
             int_nfa.transition_fn.mtbdds[cur_state] = cur_int_mtbdd
+            processed_states_cnt += 1
 
         MTBDDTransitionFn.end_intersection()
         int_nfa.applied_operations_info = self.applied_operations_info + ['intersection']
@@ -219,7 +223,9 @@ class MTBDD_NFA(NFA):
 
         int_nfa.remove_nonfinishing_states()
 
-        logger.debug('Exiting MTBDD NFA intersection procedure.')
+        logger.info('MTBDD NFA Intersection done. Processed states %d. Result has %d states.',
+                    processed_states_cnt,
+                    len(int_nfa.states))
         return int_nfa
 
     def perform_pad_closure(self):
@@ -325,20 +331,16 @@ class MTBDD_NFA(NFA):
         word cannot never be contained in a language encoding presburger
         formula over \\mathcal{Z}.  '''
 
-        dfa = self.determinize()
+        # dfa = self.determinize()
+        assert self.automaton_type == AutomatonType.DFA
 
-        new_final_states = dfa.states - dfa.final_states
+        new_final_states = self.states - self.final_states
+        self.final_states = new_final_states
 
-        # The initial states can never become final - the language cannot
-        # contain empty word.
-        if not self.automaton_type & AutomatonType.TRIVIAL:
-            new_final_states -= dfa.initial_states
-        dfa.final_states = new_final_states
-
-        dfa.applied_operations_info += ['complement']
+        self.applied_operations_info += ['complement']
         # Do not need to set used_variables here as the determinized automaton
         # already has them set
-        return dfa
+        return self
 
     def add_trap_state(self):
         '''Creates a new state - the trapstate and for every state that
@@ -406,6 +408,7 @@ class MTBDD_NFA(NFA):
                 return MTBDD_NFA.trivial_accepting(self.alphabet)
 
         self.applied_operations_info.append('projection')
+        self.automaton_type = AutomatonType.NFA
         return self
 
     @staticmethod
