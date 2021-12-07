@@ -10,6 +10,8 @@ import json
 FROBENIUS_FORMULA_GENERATOR_PATH = './frobenius_generator.py'
 Z3_CMD = ['z3', '-smt2']
 CVC5_CMD = ['cvc5']
+AMAYA_CMD = ['python3', '../amaya.py', 'get-sat']
+AMAYA_MTBDD_CMD = ['python3', '../amaya.py', '--backend', 'MTBDD', 'get-sat']
 
 
 @dataclass
@@ -71,9 +73,9 @@ def run_solver_on_formula(solver_with_args: List[str],
                             stderr=subprocess.PIPE,
                             timeout=timeout_secs)
 
-    assert result.returncode == 0, 'Solver finished with nonzero return code'
+    assert result.returncode == 0, f'Solver finished with nonzero return code stderr={result.stderr}, stdoout={result.stdout}'
 
-    logging.debug(f'Done. Measured execution time: {result.stderr}s')
+    logging.debug(f'Done. Measured execution time: {result.stderr.strip()}s')
     return float(result.stderr)
 
 
@@ -158,15 +160,26 @@ arg_parser.add_argument('-w',
                         type=int,
                         default=3,
                         help='The size of the moving window')
-arg_parser.add_argument('solver', choices=['z3', 'cvc5'])
+
+arg_parser.add_argument('-d',
+                        '--debug',
+                        action='store_true',
+                        default=False,
+                        help='Debug output.')
+arg_parser.add_argument('solver', choices=['z3', 'cvc5', 'amaya', 'amaya-mtbdd'])
 args = arg_parser.parse_args()
 
 if args.solver == 'z3':
     solver = Z3_CMD
 elif args.solver == 'cvc5':
-    # Since we have only 2 options, we could've used else. This setup is here
-    # for future extensions
     solver = CVC5_CMD
+elif args.solver == 'amaya':
+    solver = AMAYA_CMD
+elif args.solver == 'amaya-mtbdd':
+    solver = AMAYA_MTBDD_CMD
+
+if args.debug:
+    logging.getLogger().setLevel(logging.DEBUG)
 
 primes = read_primes_file()
 data_points = perform_moving_window_analysis(solver, primes, args.window_size, args.grace, timeout=args.timeout)
