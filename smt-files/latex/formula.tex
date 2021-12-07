@@ -1,0 +1,71 @@
+\documentclass{article}
+\usepackage[legalpaper, landscape, margin=2in]{geometry}
+\usepackage{xcolor}
+\usepackage{amsmath}
+
+
+\begin{document}
+	Formula file: \texttt{Problem10\_label59\_true-unreach-call.c\_69.smt2}
+
+	Two asserts present: $\phi, \psi$
+
+	Assert $\phi$:
+	\begin{flalign}
+		\phi &= \phi_1 \bigvee \phi_2 \\
+		%
+		\phi_1 &= 
+			3 \le x
+			\land
+			\exists u, w
+				\left(
+					23 \le w   							    \color{red} \land \color{black}
+					(u \; mod \; 299993) \le v + 300007     \color{red} \land \color{black}
+					0 \le u 							    \color{red} \land \color{black}
+					5w + 517989 \le u 					
+				\right) \\
+		%
+		\phi_2 &= 
+			3 \le x
+			\land
+			\exists w, y
+				\left(
+					(y \; mod \; 299993) \le v + 600000 \color{red} \land \color{black}
+					23 \le w   							\color{red} \land \color{black}
+					(y \; mod \; 299993) \not= 0 		\color{red} \land \color{black}
+					y < 0 								\color{red} \land \color{black}
+					5w + 517989 \le u 					
+				\right)
+	\end{flalign}
+
+	Assert $\psi$:
+	\begin{flalign}
+		\psi &= \psi_1 \bigvee \psi_2 \\
+		%
+		\psi_1 &=
+			3 \le x \land 
+			\exists y 
+				\left( 
+					z \le y 							\color{red} \land \color{black}
+					(y\;mod\;299993) \le v + 600000 	\color{red} \land \color{black}
+					(y\;mod\;299993) \not= 0 			\color{red} \land \color{black}
+					y < 0                               
+			\right) \\
+		%
+		\psi_2 &=
+			3 \le x \land 
+			\exists y 
+				\left( 
+					z \le y 							\color{red} \land \color{black}
+					0 \le y 							\color{red} \land \color{black}
+					(y\;mod\;299993) \le v + 300007
+			\right) 
+	\end{flalign}
+
+	\begin{equation}
+		\color{red}
+			z \le y \land 
+			0 \le y \land 
+			(y\;mod\;299993) \le v + 300007
+	\end{equation}
+
+\end{document}
