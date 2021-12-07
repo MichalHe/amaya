@@ -74,6 +74,14 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode) -> AST_Node:
 
 
 def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AST_NaryNode, int]], None, None]:
+    """
+    Iterate over AST subtrees present in the given root_node.
+
+    Some subtress such as bindings in (forall) and (exists) are not iterated.
+    :param root_node: Root node which subtrees will be yielded.
+    :returns: Funcion is generating tuples containing the subtree node and
+              a tuple containing a parent and index which points to the subtree.
+    """
     if type(root_node) != list:
         return root_node
 
