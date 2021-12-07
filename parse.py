@@ -770,7 +770,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
                                             evaluation_config: EvaluationConfig,
                                             emit_introspect: IntrospectHandle = lambda nfa, op: None
                                             ) -> Tuple[NFA, Dict[str, str]]:
-    '''
+    """
     Parses the given SMT2 source code and runs the evaluation procedure.
 
     If multiple `assert` statements are found in the AST then the AST is modified
@@ -782,7 +782,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
                             produced during the evaluation procedure (in the order they are created).
     :returns: A tuple of the form (NFA, Dict) where NFA is the result of the evaluation
               of assert tree, and Dict is the smt-info collected when parsing.
-    '''
+    """
 
     tokens = lex(source_text)
     ast = build_syntax_tree(tokens)
@@ -817,15 +817,19 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     preprocessing.preprocess_ast(assert_tree_to_evaluate)  # Preprocessing is performed in place
 
     assert_tree_to_evaluate = preprocessing.reduce_relation_asts_to_evaluable_leaves(assert_tree_to_evaluate)
+
     # We are interested only in the number of different variables found in the
     # assert tree
-    get_all_used_variables(assert_tree_to_evaluate, eval_ctx)
+    all_vars = get_all_used_variables(assert_tree_to_evaluate, eval_ctx)
+    vars_with_ids = [(var_name, var_id) for var_name, var_id, _ in all_vars]
 
     # Generate consequent IDs to which the variable names will be bound at
     # later stages
-    variable_ids = list(range(1, eval_ctx.next_available_variable_id))
-    logger.info(f'Identified {len(variable_ids)} different variables in the assertion tree. Creating the overall alphabet.')
-    alphabet = LSBF_Alphabet.from_variable_ids(variable_ids)
+
+    logger.info(f'Identified {len(vars_with_ids)} different variables in'
+                'the assertion tree. Creating the overall alphabet.')
+
+    alphabet = LSBF_Alphabet.from_variable_id_pairs(vars_with_ids)
     logger.info(f'The created overall alphabet: {alphabet}')
 
     eval_ctx = EvaluationContext(evaluation_config, emit_introspect, alphabet=alphabet)
@@ -877,6 +881,9 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
     assert relation.operation in ['<=', '=']
     operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(relation.operation)
 
+    # Congruence relations of the form a.x ~ k must be handled differently - it
+    # is necessary to reorder the modulo term inside, not the nonmodular
+    # variables
     if relation.is_conguence_equality():
         logger.debug(f'Given relation: {relation} is congruence equivalence. Reordering variables.')
         modulo_term = relation.modulo_terms[0]
@@ -892,6 +899,11 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
                                          modulo=modulo_term.constant)
 
         logger.debug(f'Reordered modulo term from: {modulo_term} to {modulo_term_ordered}')
+
+        # The alphabet might have only variable IDs but no names, inject
+        # the variable names so that we can do vizualization properly
+        ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
+
         nfa = pa.build_presburger_modulo_nfa(relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.BUILD_NFA_FROM_CONGRUENCE)
         return nfa
@@ -907,6 +919,10 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
         var_names, var_coefs = utils.reorder_variables_according_to_ids(
                 variable_id_pairs,
                 (relation.variable_names, relation.variable_coeficients))
+
+        # The alphabet might have only variable IDs but no names, inject
+        # the variable names so that we can do vizualization properly
+        ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
 
         reordered_relation = Relation(variable_names=var_names,
                                       variable_coeficients=var_coefs,
@@ -924,14 +940,8 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
     # Finalization - increment variable usage counter and bind variable ID to a name in the alphabet (lazy binding)
     # as the variable IDs could not be determined beforehand.
     for var_name, var_id in variable_id_pairs:
-        assert ctx.alphabet
-        if var_id not in ctx.alphabet.variable_names:
-            ctx.alphabet.bind_variable_name_to_id(var_name, var_id)
-        else:
-            assert ctx.alphabet.variable_names[var_id] == var_name
-
         var_info = ctx.lookup_variable(var_name)
-        assert var_info
+        assert var_info, 'Failed to retrieve variable info from evaluation context.'
         var_info.usage_count += 1
 
     return nfa

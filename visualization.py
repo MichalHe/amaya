@@ -85,15 +85,16 @@ Transition = Tuple[IntOrStr, TransitionSymbols, IntOrStr]
 
 @dataclass
 class AutomatonVisRepresentation:
-    '''A class describing the visual representation of the automaton.'''
+    """A class describing the visual representation of the automaton."""
     initial_states: Set[IntOrStr]
     final_states:   Set[IntOrStr]
     states:         Set[IntOrStr]
     transitions:    List[Transition]
     variable_names: Tuple[str, ...]
+    variable_ids:   Tuple[int, ...]
 
     def into_graphviz(self) -> Digraph:
-        '''Transforms the stored automaton represenation into graphviz (/dot).'''
+        """Transforms the stored automaton represenation into graphviz (dot)."""
         graph = Digraph('automaton',
                         strict=True,
                         graph_attr={
@@ -123,14 +124,13 @@ class AutomatonVisRepresentation:
         return graph
 
     def compress_symbols(self):
-        '''Peforms transition sets compression using plain BDDs.'''
+        """Peforms transition sets compression using plain BDDs."""
         from dd.autoref import BDD
         manager = BDD()
 
-        variables = [chr(ord('a') + i) for i in range(len(self.variable_names))]
+        bdd_unique_vars = [chr(ord('a') + i) for i in range(len(self.variable_names))]
 
-        manager.declare(*tuple(variables))
-        self.variable_names = variables
+        manager.declare(*tuple(bdd_unique_vars))
 
         compressed_transitions: List[Transition] = []
 
@@ -140,9 +140,9 @@ class AutomatonVisRepresentation:
                 symbol_literals = []
                 for i, bit in enumerate(transition_symbol):
                     if bit == 0:
-                        symbol_literals.append(f'!{self.variable_names[i]}')
+                        symbol_literals.append(f'!{bdd_unique_vars[i]}')
                     elif bit == 1:
-                        symbol_literals.append(f'{self.variable_names[i]}')
+                        symbol_literals.append(f'{bdd_unique_vars[i]}')
                 if symbol_literals:
                     clause = ' & '.join(symbol_literals)
                     bdd |= manager.add_expr(clause)

@@ -7,6 +7,7 @@ from typing import (
     Any,
     Tuple,
     Generator,
+    Iterable,
     Union,
     Optional
 )
@@ -205,9 +206,13 @@ class LSBF_Alphabet():
 
     @staticmethod
     def from_variable_ids(variable_ids: List[int]) -> LSBF_Alphabet:
-        '''Creates a new alphabet from the given variable_name, id pairs.
+        """
+        Creates a new alphabet from the given variable_name, id pairs.
+
         The variables list should be sorted by the ID.
-        '''
+        """
+
+        assert False, "This factory method should not be used anymore."
         variable_names: Dict[int, str] = dict()
         variable_ids = sorted(variable_ids)
 
@@ -215,6 +220,25 @@ class LSBF_Alphabet():
             active_variables=set(),
             variable_names=variable_names,
             variable_numbers=variable_ids
+        )
+
+    @staticmethod
+    def from_variable_id_pairs(var_id_pairs: Iterable[Tuple[str, int]]) -> LSBF_Alphabet:
+        """
+        Creates a new alphabet from the given variables with their identifiers.
+        """
+        var_ids: List[int] = []
+        var_id_to_names: Dict[int, str] = {}
+        for var_name, var_id in var_id_pairs:
+            var_ids.append(var_id)
+            var_id_to_names[var_id] = var_name
+
+        var_ids = sorted(var_ids)
+
+        return LSBF_Alphabet(
+            active_variables=set(),
+            variable_names=var_id_to_names,
+            variable_numbers=var_ids,
         )
 
     @property
@@ -228,5 +252,20 @@ class LSBF_Alphabet():
         for i in range(2**letter_size):
             yield number_to_bit_tuple(i, tuple_size=letter_size, pad=0)
 
-    def bind_variable_name_to_id(self, variable_name: str, variable_id: int):
-        self.variable_names[variable_id] = variable_name
+    def assert_variable_names_to_ids_match(self,
+                                           variable_id_pairs: Iterable[Tuple[str, int]]):
+        """
+        Checks that the given variables with their given IDs binding is present
+        in the alphabet and is correct.
+
+        The checks are performed via assertions, therefore, does not returns
+        anything.
+        """
+        for var_name, var_id in variable_id_pairs:
+            msg = (f'Given variable id: "{var_id}" is not known to the alphabet'
+                   f'. Known ids: {self.variable_numbers}')
+            assert var_id in self.variable_names, msg
+            msg = ('Given variable name is bound to a different variable.'
+                   f'Binding present {var_id}->"{self.variable_names[var_id]}",'
+                   f' tried binding: {var_id}->"{var_name}.')
+            assert self.variable_names[var_id] == var_name, msg

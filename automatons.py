@@ -480,7 +480,7 @@ class NFA(Generic[AutomatonState]):
         return nfa
 
     def get_visualization_representation(self) -> AutomatonVisRepresentation:
-        '''Retrieves the information necessary to visualize this automaton.'''
+        """Retrieves the information necessary to visualize this automaton."""
 
         # The transition information needed is already stored in the correct form
         # inside the transition function, however it might change in the future
@@ -493,14 +493,15 @@ class NFA(Generic[AutomatonState]):
         for state_pair, symbols in _transitions.items():
             transitions.append((state_pair[0], symbols, state_pair[1]))
 
-        # TODO(temporary hack)
-        var_names = list(map(lambda id: 'v' + str(id), self.alphabet.variable_numbers))
+        var_ids: List[int] = tuple(self.alphabet.variable_numbers)
+        var_names: Tuple[str] = tuple(self.alphabet.variable_names[var_id] for var_id in var_ids)
 
         return AutomatonVisRepresentation(
             states=set(self.states),
             final_states=set(self.final_states),
             initial_states=set(self.initial_states),
             variable_names=var_names,
+            variable_ids=var_ids,
             transitions=transitions
         )
 
