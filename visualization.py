@@ -156,7 +156,7 @@ class AutomatonVisRepresentation:
                 # Model is a dictionary of the support variables of our bdd to
                 # their assignment (some vars - do not care bits) might be
                 # missing
-                for v in self.variable_names:
+                for v in bdd_unique_vars:
                     if v in model:
                         symbol.append(int(model[v]))
                     else:
