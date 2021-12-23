@@ -81,7 +81,17 @@ argparser.add_argument('--debug',
 argparser.add_argument('--domain',
                        choices=['integers', 'naturals'],
                        default='integers',
-                       help='Selects the domain for the automatons constructed from atomic presburger formulae. NATURALS support is very questionable currently.')
+                       help=('Selects the domain for the automatons constructed'
+                             'from atomic presburger formulae. NATURALS support'
+                             'is very questionable currently.'))
+
+argparser.add_argument('-M',
+                       '--minimize-eagerly',
+                       action='store_true',
+                       dest='minimize_eagerly',
+                       default=False,
+                       help=('Minimize the automatons eagerly, after automaton operation is performed.'
+                             'Requires `naive` backend to be used.'))
 
 subparsers = argparser.add_subparsers(help='Runner operation')
 get_sat_subparser = subparsers.add_parser('get-sat')
@@ -166,7 +176,8 @@ solution_domain = parse.SolutionDomain.INTEGERS
 if args.domain == 'naturals':
     solution_domain = parse.SolutionDomain.NATURALS
 
-evaluation_config = parse.EvaluationConfig(solution_domain, backend_type)
+
+evaluation_config = parse.EvaluationConfig(solution_domain, backend_type, minimize_eagerly=args.minimize_eagerly)
 
 
 def ensure_dump_destination_valid(path: str):

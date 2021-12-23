@@ -542,6 +542,12 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                 self.data[origin][dest] = set(map(symbol_projection_func, self.data[origin][dest]))
 
     def iter(self) -> Generator[Tuple[StateType, Symbol, StateType], None, None]:
+        """
+        Iterate over the stored transitions.
+
+        Does not perform compressed symbol expansion - e.g. if (q_a, (*, 0), q_b) is present,
+        then the iterator yields only one transition.
+        """
         for origin in self.data:
             for dest in self.data[origin]:
                 for sym in self.data[origin][dest]:

@@ -504,6 +504,42 @@ class NFA(Generic[AutomatonState]):
             variable_ids=var_ids,
             transitions=transitions
         )
+    
+    def minimize(self) -> NFA:
+        """Minimize using the Brzozowski NFA minimization procedure."""
+
+        def reverse_automaton(nfa: NFA) -> NFA:
+            """Reverse the automaton. Resulting NFA accepts the reverse language."""
+            reverse_nfa: NFA = NFA(nfa.alphabet, AutomatonType.NFA)
+            reverse_nfa.states = set(nfa.states)
+            reverse_nfa.initial_states = set(nfa.final_states)
+            reverse_nfa.final_states = set(nfa.initial_states)
+            reverse_nfa.used_variables = sorted(nfa.used_variables)
+        
+            for source, symbol, destination in nfa.transition_fn.iter():
+                reverse_nfa.update_transition_fn(destination, symbol, source)
+            return reverse_nfa
+
+        logger.info(
+            'Performing Brzozowski minimalization, input size: {0}. Reversing the automaton.'.format(
+                len(self.states)))
+
+        reverse_nfa = reverse_automaton(self)
+        
+        logger.info('Determinizing the reversed automaton.')
+        determinized_reverse_nfa = reverse_nfa.determinize()
+        logger.info(f'Determinized reversed automaton size: {len(determinized_reverse_nfa.states)}.')
+
+        logger.info('Reversing the resulting DFA.')
+
+        nfa = reverse_automaton(determinized_reverse_nfa)
+        logger.info(f'Automaton size: {len(nfa.states)}.')
+
+        logger.info('Determinizing the automaton.')
+        minimal_dfa = nfa.determinize()
+        logger.info(f'Automaton size: {len(minimal_dfa.states)}')
+
+        return minimal_dfa
 
 
 @dataclass

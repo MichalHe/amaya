@@ -60,6 +60,7 @@ class ParsingOperation(Enum):
     BUILD_DFA_FROM_INEQ = 'build_dfa_from_ineq'
     BUILD_DFA_FROM_SHARP_INEQ = 'build_dfa_from_ineq'
     BUILD_DFA_FROM_EQ = 'build_dfa_from_ineq'
+    MINIMIZE = 'minimization'
 
 
 class VariableType(IntEnum):
@@ -109,6 +110,7 @@ class EvaluationConfig:
     solution_domain: SolutionDomain
     backend_type: BackendType
     print_operation_runtime: bool = False
+    minimize_eagerly: bool = False
 
 
 class EvaluationContext:
@@ -1013,6 +1015,30 @@ def get_automaton_for_operand(operand_value: Union[str, List],
         return nfa
 
 
+def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
+    """
+    Wrap the NFA.minimize with introspection emission, timings and logging, if
+    eager minimization is configured.
+    
+    :param nfa: Automaton to minimize.
+    :param ctx: Evaluation context that will store information about measured timings.
+    :returns: Minimized DFA equivalent to the given NFA.
+    """
+    if not ctx.execution_config.minimize_eagerly:
+        return nfa
+
+    ctx.stats_operation_starts(ParsingOperation.MINIMIZE, nfa, None)
+    minimized_dfa = nfa.minimize()
+    logger.info(
+        'Minimization applied. Result size: {0} ({1} before minimization).'.format(
+            len(minimized_dfa.states),
+            len(nfa.states)
+    ))
+    ctx.stats_operation_ends(minimized_dfa)
+    ctx.emit_evaluation_introspection_info(minimized_dfa, ParsingOperation.MINIMIZE)
+    return minimized_dfa
+
+
 def evaluate_binary_conjunction_expr(expr: List,
                                      ctx: EvaluationContext,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
@@ -1044,9 +1070,15 @@ def evaluate_binary_conjunction_expr(expr: List,
 
         next_operand_automaton = get_automaton_for_operand(next_operand, ctx, _depth)
 
+        # Apply the provided reduction function.
         ctx.stats_operation_starts(reduction_operation, reduction_result, next_operand_automaton)
         reduction_result = reduction_fn(reduction_result, next_operand_automaton)
         ctx.stats_operation_ends(reduction_result)
+
+        # The introspection information needs to be emitted before minimization.
+        ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
+
+        reduction_result = minimize_automaton_if_configured(reduction_result, ctx) 
 
         emit_evaluation_progress_info(f' >> {reduction_operation}(lhs, rhs) (result size: {len(reduction_result.states)}, automaton_type={reduction_result.automaton_type})', _depth)
         ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
@@ -1109,12 +1141,11 @@ def evaluate_not_expr(not_expr: List,
         ctx.stats_operation_ends(operand)
         emit_evaluation_progress_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
 
-    # TODO(psyco): Here we should check, whether the automaton is Complete
-    # (Determinism is not enough)
-
     ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
     operand = operand.complement()
     ctx.stats_operation_ends(operand)
+
+    operand = minimize_automaton_if_configured(operand, ctx)
 
     emit_evaluation_progress_info(f' >> complement(operand) - (result size: {len(operand.states)})', _depth)
 
@@ -1172,6 +1203,8 @@ def evaluate_exists_expr(exists_expr: List,
         logger.debug(f'Variable {var_id} projected away.')
 
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
+
+    nfa = minimize_automaton_if_configured(nfa, ctx)
 
     emit_evaluation_progress_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
 
@@ -1297,7 +1330,9 @@ def run_evaluation_procedure(root,  # NOQA
             raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}')
 
         evaluation_function = evaluation_functions[node_name]
-        return evaluation_function(root, ctx, _debug_recursion_depth)
+        
+        result = evaluation_function(root, ctx, _debug_recursion_depth)
+        return result
 
 
 def expand_multivariable_bindings(assertion_tree):
