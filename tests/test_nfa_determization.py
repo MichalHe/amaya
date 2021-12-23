@@ -9,6 +9,7 @@ from automatons import (
     NFA,
 )
 from mtbdd_automatons import MTBDD_NFA
+from tests.conftest import ResolutionState
 
 alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
 
@@ -45,28 +46,6 @@ def translate_transitions(transitions, translate):  # translate is function
 
         translated.append((source_translated, symbol, dest_translated))
     return translated
-
-
-class ResolutionState:
-    def __init__(self):
-        self.automaton_state = None
-
-    def bind(self, real_automaton_state):
-        if self.automaton_state is not None:
-            if self.automaton_state != real_automaton_state:
-                raise ValueError('Attempting to rebind automaton state value! Current: {0} New {1}'.format(
-                    self.automaton_state, real_automaton_state
-                ))
-        else:
-            self.automaton_state = real_automaton_state
-
-    def is_bound(self):
-        return self.automaton_state is not None
-
-    def get(self):
-        if self.automaton_state is None:
-            raise ValueError('Attempting to read from resolvent state without assigning the value first.')
-        return self.automaton_state
 
 
 def do_simple_nfa_determinization_tests(simple_nfa: NFA[Union[int, str]]):

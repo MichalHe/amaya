@@ -1,4 +1,9 @@
 class ResolutionState:
+    """
+    Class enabling description of the structure of automata with low level 
+    of nondeterminism from initial state deeper into the structure and validating
+    that an automaton matches the description.
+    """
     def __init__(self):
         self.automaton_state = None
 
