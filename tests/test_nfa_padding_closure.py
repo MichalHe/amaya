@@ -20,7 +20,7 @@ def mk_simple_nfa(factory: AutomatonFactory) -> NFA:
         0, 1, 2, final_state
     ]
 
-    alphabet = LSBF_Alphabet.from_variable_ids([1])
+    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1)])
 
     nfa: NFA = factory(alphabet, AutomatonType.NFA)
     nfa.states = set(states)
@@ -43,7 +43,7 @@ def mk_simple_nfa(factory: AutomatonFactory) -> NFA:
 def mk_multipath_nfa(factory: AutomatonFactory) -> NFA:
     final_state = 4
     states = [0, 1, 2, 3, final_state]
-    alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
     multipath_nfa = factory(alphabet, AutomatonType.NFA)
 
     multipath_nfa.states = set(states)
@@ -71,7 +71,7 @@ def mk_multipath_nfa(factory: AutomatonFactory) -> NFA:
 
 def mk_advanced_nfa(factory: AutomatonFactory) -> NFA:
     states = [-1, 0, 1, 2, 3, 4, 5, 6]
-    alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
     advanced_nfa = NFA(alphabet=alphabet, automaton_type=AutomatonType.NFA)
 
     final_state = 6
