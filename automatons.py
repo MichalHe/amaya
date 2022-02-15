@@ -332,7 +332,7 @@ class NFA(Generic[AutomatonState]):
 
     def perform_pad_closure(self):
         '''Performs inplace padding closure. See file automaton_algorithms.py:padding_closure'''
-        automaton_algorithms.pad_closure(self)
+        automaton_algorithms.pad_closure2(self)
 
     def get_symbols_leading_from_state_to_state(self,
                                                 from_state: AutomatonState,

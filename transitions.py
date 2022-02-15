@@ -588,6 +588,24 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                                          traversal_history, current_state,
                                          initial_states)
 
+    def get_state_pre_with_symbol(self, state: StateType, symbol) -> Generator[StateType, None, None]:
+        """
+        Returns an iterable with all states S for which a transition (S, symbol, state) exists.
+        """
+        for origin in self.data:
+            if state in self.data[origin]:
+                if symbol in self.data[origin][state]:
+                    yield origin
+    
+    def get_state_post_with_symbol(self, state: StateType, symbol) -> Generator[StateType, None, None]:
+        """
+        Returns an iterable with all states S for which a transition (state, symbol, S) exists.
+        """
+        if state in self.data:
+            for S in self.data[state]:
+                if symbol in self.data[state][S]:
+                    yield S
+
 
 class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
     def __init__(self, manager: BDD, alphabet):

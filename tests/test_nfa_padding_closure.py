@@ -1,4 +1,8 @@
-from typing import Callable
+import itertools
+from typing import (
+    Callable,
+    Tuple,
+)
 import pytest
 
 from alphabet import LSBF_Alphabet
@@ -117,26 +121,41 @@ def real_nfa() -> NFA:
     return presburger_algorithms.build_nfa_from_linear_equality(equality, [1, 2], alphabet, NFA)
 
 
-def do_simple_padding_closure_tests(nfa: NFA):
+def do_pad_closure_and_get_final_states(nfa: NFA) -> Tuple[Tuple[int, ...], int]:
+    """
+    Call NFA.pad_closure and return the original final states and the final state added by the pad closure.
+    """
+    original_final_states = tuple(nfa.final_states)
     nfa.perform_pad_closure()
-
-    sigma = (0,)
-    final_state = 3
-    expected_transitions = [
-        (0, sigma, final_state),
-        (1, sigma, final_state),
-        (2, sigma, final_state),
-    ]
-
-    for expected_transition in expected_transitions:
-        origin, symbol, _ = expected_transition
-        assert final_state in nfa.get_transition_target(origin, symbol)
+    new_final_state = next((s for s in nfa.final_states if s not in original_final_states), None)
+    assert new_final_state is not None
+    return (original_final_states, new_final_state)
 
 
-def test_mdbdd_simple_finality_propagation():
+def do_simple_padding_closure_tests(nfa: NFA):
+    original_final_states, new_final_state = do_pad_closure_and_get_final_states(nfa)
+    original_final_state = original_final_states[0]
+
+    padding_symbol = (0,)
+
+    original_transitions = (
+        (0, padding_symbol, 1),
+        (1, padding_symbol, 2),
+        (2, padding_symbol, original_final_state)
+    )
+
+    added_transitions = (
+        (0, padding_symbol, new_final_state),
+        (1, padding_symbol, new_final_state),
+    )
+
+    for expected_transition in itertools.chain(original_transitions, added_transitions):
+        origin, symbol, dest = expected_transition
+        assert dest in nfa.get_transition_target(origin, symbol)
+
+
+def test_mtbdd_simple_finality_propagation():
     simple_nfa = mk_simple_nfa(MTBDD_NFA)
-    # Expect finallity propagation via sigma to every state
-
     do_simple_padding_closure_tests(simple_nfa)
 
 
@@ -146,22 +165,23 @@ def test_simple_finality_propagation():
 
 
 def do_multipath_propagation_tests(multipath_nfa: NFA):
-    multipath_nfa.perform_pad_closure()
+    original_final_states, new_final_state = do_pad_closure_and_get_final_states(multipath_nfa)
+    original_final_state = original_final_states[0]
 
-    final_state = 4
     sigma_1 = (0, 0)
     sigma_2 = (1, 1)
     expected_trans = [
-        (1, sigma_1, final_state),
-        (1, sigma_2, final_state),
-        (0, sigma_1, final_state),
-
         # Original transitions
         (0, sigma_1, 1),
         (1, sigma_1, 2),
-        (2, sigma_1, final_state),
+        (2, sigma_1, original_final_state),
         (1, sigma_2, 3),
-        (3, sigma_2, final_state)
+        (3, sigma_2, original_final_state),
+
+        # Transitions added by pad close
+        (1, sigma_1, new_final_state),
+        (1, sigma_2, new_final_state),
+        (0, sigma_1, new_final_state),
     ]
 
     transition_size = 0
@@ -186,7 +206,8 @@ def test_mtbdd_multipath_propagation_tests():
 
 def do_advanced_propagation_tests(nfa: NFA):
     transitions_before_padding = list(nfa.transition_fn.iter())
-    nfa.perform_pad_closure()
+    original_final_states, new_final_state = do_pad_closure_and_get_final_states(nfa)
+    original_final_state = original_final_states[0]
 
     sigma_0 = (0, 0)
     sigma_1 = (0, 1)
@@ -194,22 +215,22 @@ def do_advanced_propagation_tests(nfa: NFA):
     # Expected_transitions
     final_state = 6
     expected_transitions = [
-        (2, sigma_0, final_state),
-        (2, sigma_1, final_state),
-        (1, sigma_0, final_state),
-        (0, sigma_0, final_state),
-        (-1, sigma_0, final_state),
-        (0, sigma_1, final_state),
-        (0, sigma_2, final_state),
+        (2, sigma_0, new_final_state),
+        (2, sigma_1, new_final_state),
+        (1, sigma_0, new_final_state),
+        (0, sigma_0, new_final_state),
+        (0, sigma_1, new_final_state),
+        (0, sigma_2, new_final_state),
+        (-1, sigma_0, new_final_state),
     ]
 
     all_transitions = expected_transitions + transitions_before_padding
 
-    tc = 0
+    transition_cnt = 0
     for t in nfa.transition_fn.iter():
         assert t in all_transitions
-        tc += 1
-    assert tc == len(all_transitions)
+        transition_cnt += 1
+    assert transition_cnt == len(all_transitions)
 
 
 def test_advanced_propagation():
@@ -222,8 +243,12 @@ def test_mtbdd_advanced_propagation():
     do_advanced_propagation_tests(nfa)
 
 
-def x_test_real_pressburger_automaton_after_projection(real_nfa: NFA):
-    '''*Not performed currently* - the MTBDD NFAs do not fully support variable projection.'''
+@pytest.mark.skip()
+def test_real_pressburger_automaton_after_projection(real_nfa: NFA):
+    """
+    Note:
+        *Not performed at the moment* - the MTBDD NFAs do not fully support variable projection.
+    """
     final_state = list(real_nfa.final_states)[0]
     sigma_0 = (0, '*')  # NOQA
     sigma_1 = (1, '*')  # NOQA

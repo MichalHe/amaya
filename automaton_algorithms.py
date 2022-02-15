@@ -1,15 +1,18 @@
 from typing import (
     Set,
     List,
+    Optional,
 )
 
 
 def pad_closure(nfa):
-    '''Performs inplace padding closure.
+    """
+    Performs inplace padding closure.
 
-    Why is in a standalone function and not withing a NFA? - Because it utilizes the internal structure of
-    transition function too much, therefore it makes it inconvenient when switching transition function implementations.  
-    '''
+    Why is in a standalone function and not withing a NFA?:
+        Because it utilizes the internal structure of transition function too much,
+        therefore it makes it inconvenient when switching transition function implementations.  
+    """
     finishing_set: Set = set()
     for final_state in nfa.final_states:
         finishing_states = nfa.transition_fn.get_states_with_post_containing(final_state)
@@ -47,6 +50,55 @@ def pad_closure(nfa):
                 # We need to check all states that could reach 'potential' -- they can now become finishing
                 if potential_state not in work_queue and potential_state != current_state:
                     work_queue.append(potential_state)
+
+
+
+def pad_closure2(nfa):
+    """
+    Ensure that the automaton satisfies the saturation property.
+
+    Saturation property:
+        Given a word `w_1 \\dots w_n p` with the last symbol `p`, every word 
+        created by repeating the padding symbol `p` should be accepted.
+    """
+
+    # Add a new final state so that the modifications to the automaton structure will not cause overapproximations
+    new_final_state: Optional[int] = None
+
+    for symbol in nfa.alphabet.symbols:
+        states = set()
+        work_list = []
+        # Start by collecting all states that have a transition to a final state
+        for final_state in nfa.final_states:
+            for pre_state in nfa.transition_fn.get_state_pre_with_symbol(final_state, symbol):
+                if pre_state not in states:
+                    states.add(pre_state)
+                    work_list.append(pre_state)
+
+        # Collect all final states reaching a final state via words consisiting of repeated `symbol`
+        while work_list:
+            state = work_list.pop(-1)
+            for pre_state in nfa.transition_fn.get_state_pre_with_symbol(state, symbol):
+                if pre_state not in states:
+                    states.add(pre_state)
+                    work_list.append(pre_state)
+        
+        for state in states:
+            has_transition_to_final = False
+            # Check whether there exists a transition to the final state via the symbol
+            for post_state in nfa.transition_fn.get_state_post_with_symbol(state, symbol):
+                if post_state in nfa.final_states:
+                    has_transition_to_final = True
+                    break
+            if not has_transition_to_final:
+
+                # Maybe no new final states has been generated yet, generate it
+                if new_final_state is None:
+                    new_final_state = max(nfa.states) + 1
+                    nfa.add_state(new_final_state)
+                    nfa.add_final_state(new_final_state)
+
+                nfa.update_transition_fn(state, symbol, new_final_state)
 
 
 from transitions import SparseBDDTransitionFunction
