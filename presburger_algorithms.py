@@ -28,12 +28,6 @@ NFA_AutomatonStateType = Union[int, str]
 NFA_AlphabetSymbolType = Tuple[int, ...]
 
 
-def add_trap_state_to_automaton(automaton: NFA, trap_state_name='TRAP'):
-    automaton.add_state(trap_state_name)
-    universal_symbol = tuple(['*' for v in automaton.alphabet.variable_names])
-    automaton.update_transition_fn(trap_state_name, universal_symbol, trap_state_name)
-
-
 def build_dfa_from_inequality(ineq: Relation) -> DFA:
     '''Builds DFA with Lang same as solutions to the inequation over N'''
     logger.debug(f'Building DFA (over N) to inequation: {ineq}')
@@ -75,42 +69,66 @@ def build_dfa_from_inequality(ineq: Relation) -> DFA:
     return dfa
 
 
-def build_dfa_from_equality(eq: Relation) -> DFA:
-    alphabet = LSBF_Alphabet.from_inequation(eq)
-    dfa: DFA[DFA_AutomatonStateType] = DFA(
-        alphabet=alphabet,
-        automaton_type=AutomatonType.DFA
-    )
+def add_trap_state_to_automaton(automaton: NFA, trap_state: Optional[int] = None) -> int:
+    """
+    Add a nonaccepting state with selfloop over all alphabet symbols to the given automaton.
+
+    :param automaton: Automaton to which a trap state will be added
+    :param trap_state: The value of the trapstate
+    :returns: The value of the added trap state
+    """
+    if trap_state is None:
+        trap_state = max(automaton.states) + 1
+
+    automaton.add_state(trap_state)
+    universal_symbol = tuple('*' for v in automaton.alphabet.variable_numbers)
+    automaton.update_transition_fn(trap_state, universal_symbol, trap_state)
+    return trap_state
+
+
+def build_dfa_from_linear_equality(eq: Relation,
+                                   eq_var_id_pairs: List[Tuple[str, int]],
+                                   alphabet: LSBF_Alphabet,
+                                   constr: AutomatonConstructor) -> DFA:
+    """
+    Construct a DFA with language that is the solution space of the given equation 
+    encoded in 2's complement.  
+    """
+    dfa: DFA[DFA_AutomatonStateType] = DFA(alphabet=alphabet, automaton_type=AutomatonType.DFA)
     dfa.add_initial_state(eq.absolute_part)
+
     work_queue: List[DFA_AutomatonStateType] = [eq.absolute_part]
 
+    trap_state: Optional[int] = None
     while work_queue:
-        currently_processed_state = work_queue.pop()
-        dfa.add_state(currently_processed_state)
+        current_state = work_queue.pop()
+        dfa.add_state(current_state)
 
-        # Check whether current state satisfies property that it accepts an
-        # empty word
-        if currently_processed_state == 0:
-            dfa.add_final_state(currently_processed_state)
+        # Check whether current state satisfies property that it accepts an empty word -> state is final
+        if current_state == 0:
+            dfa.add_final_state(current_state)
 
+        # TODO: Iterate over the alphabet projected onto the variables that are actually present in the equality
         for alphabet_symbol in alphabet.symbols:
             dot = vector_dot(alphabet_symbol, eq.variable_coeficients)
-            next_value = currently_processed_state - dot
+            next_value = current_state - dot
 
             if next_value % 2 == 0:
                 next_state = int(next_value/2)
 
-                # Add newly discovered transition
-                dfa.update_transition_fn(currently_processed_state, alphabet_symbol, next_state)
+                # Add the newly discovered transition
+                dfa.update_transition_fn(current_state, alphabet_symbol, next_state)
 
                 if not dfa.has_state_with_value(next_state):
                     if next_state not in work_queue:
                         work_queue.append(next_state)
             else:
-                trap_state = 'TRAP'
-                if not dfa.has_state_with_value(trap_state):
-                    add_trap_state_to_automaton(dfa, trap_state_name=trap_state)
-                dfa.update_transition_fn(currently_processed_state, alphabet_symbol, trap_state)
+                # This means the the input tape and the absolute part differ in the currently read bit,
+                # therefore, they cannot be equal -> no transition along the current symbol. However,
+                # we would like the automaton to be complete, therefore add a trap state for such transitions
+                if has_trap_state is None:
+                    trap_state = add_trap_state_to_automaton(dfa)
+                dfa.update_transition_fn(current_state, alphabet_symbol, trap_state)
 
     return dfa
 
