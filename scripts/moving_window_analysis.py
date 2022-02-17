@@ -8,14 +8,21 @@ import json
 
 
 FROBENIUS_FORMULA_GENERATOR_PATH = './frobenius_generator.py'
-Z3_CMD = ['z3', '-smt2']
-CVC5_CMD = ['cvc5']
-AMAYA_CMD = ['python3', '../amaya.py', 'get-sat']
-AMAYA_MTBDD_CMD = ['python3', '../amaya.py', '--backend', 'MTBDD', 'get-sat']
+
+SMT_SOLVERS = {
+    'z3': ['z3', '-smt2'],
+    'cvc4': ['cvc4'],
+    'cvc5': ['cvc5'],
+    'amaya': ['python3', '../amaya.py', 'get-sat'] ,
+    'amaya-mtbdd': ['python3', '../amaya.py', '--backend', 'MTBDD', 'get-sat'],
+}
 
 
 @dataclass
 class DataPoint(object):
+    """
+    Class holding collection of facts and statistics about one solver execution.
+    """
     window_start_index: int
     primes: int
     execution_status: str
@@ -32,6 +39,11 @@ class DataPoint(object):
 
 
 def read_primes_file(filename='primes.csv') -> List[int]:
+    """
+    Reads and returns the primes present in the given file.
+
+    The primes are expected to be at the first line and should be separated by comma.
+    """
     # All primes are present on 1 line and are separated by commas
     with open(filename, 'r') as primes_file:
         primes_line = primes_file.readline()
@@ -47,14 +59,18 @@ def generate_frobenius_formula_for_primes(primes: List[int], formula_dst: str = 
     The resulting formula is then written to a file specified by formula_dst argument.
     """
 
-    generator_argument = ','.join(map(str, primes))
     logging.debug(f'Spawning formula generator for: {primes}')
-    subprocess_result = subprocess.run(['python3', FROBENIUS_FORMULA_GENERATOR_PATH, generator_argument], stdout=subprocess.PIPE, text=True)
-    assert subprocess_result.returncode == 0, 'The problem generator finished with nonzero return code.'
+
+    generator_arg = ','.join(map(str, primes))
+    subprocess_result = subprocess.run(['python3', FROBENIUS_FORMULA_GENERATOR_PATH, generator_arg], 
+                                       stdout=subprocess.PIPE, text=True)
+
+    fail_desc = 'The script generating the frobenius coin problem formula in SMT2 finished with nonzero return code.'
+    assert subprocess_result.returncode == 0, fail_desc
 
     with open(formula_dst, 'w') as formula_file:
         formula_file.write(subprocess_result.stdout)
-    logging.debug(f'Formula written to {formula_dst}.')
+    logging.debug(f'The frobenius problem formula has been written to {formula_dst}.')
 
 
 def run_solver_on_formula(solver_with_args: List[str],
@@ -73,13 +89,21 @@ def run_solver_on_formula(solver_with_args: List[str],
                             stderr=subprocess.PIPE,
                             timeout=timeout_secs)
 
-    assert result.returncode == 0, f'Solver finished with nonzero return code stderr={result.stderr}, stdoout={result.stdout}'
+    fail_desc = (f'Solver finished with nonzero exit code.',
+                 '>>stderr: \n{result.stderr}\n' 
+                 '>>stdout: \n{result.stdout}')
+    assert result.returncode == 0, fail_desc
+    
+    runtime = float(result.stderr.strip())
 
-    logging.debug(f'Done. Measured execution time: {result.stderr.strip()}s')
-    return float(result.stderr)
+    logging.debug(f'Done. Runtime: {runtime}s')
+    return runtime
 
 
 def draw_scatter(datapoints: List[DataPoint]):
+    """
+    Creates a matplotlib scatter chart displaying the measured runtimes and shows it on the screen.
+    """
     x: List[float] = []
     y: List[float] = []
     xtick_labels: List[str] = []
@@ -102,7 +126,10 @@ def perform_moving_window_analysis(solver: List[str],
                                    grace_count: int = 3,
                                    timeout=60):
     """
-    Creates a windows of the given size and moves it over the given list of primes
+    Measure runtime of a given solven for instances of the Frobenius coin problem 
+    with the `window_size` coins until the solver times out.
+
+    Creates a windows of the given size and moves it over the given list of primes.
     The primes in the window are used to generate a frobenius coin problem formula
     that is fed to the given solver, checking where is the point in which the solver
     starts to time out.
@@ -166,17 +193,10 @@ arg_parser.add_argument('-d',
                         action='store_true',
                         default=False,
                         help='Debug output.')
-arg_parser.add_argument('solver', choices=['z3', 'cvc5', 'amaya', 'amaya-mtbdd'])
+arg_parser.add_argument('solver', choices=list(SMT_SOLVERS.keys()))
 args = arg_parser.parse_args()
 
-if args.solver == 'z3':
-    solver = Z3_CMD
-elif args.solver == 'cvc5':
-    solver = CVC5_CMD
-elif args.solver == 'amaya':
-    solver = AMAYA_CMD
-elif args.solver == 'amaya-mtbdd':
-    solver = AMAYA_MTBDD_CMD
+solver = SMT_SOLVERS[args.solver]
 
 if args.debug:
     logging.getLogger().setLevel(logging.DEBUG)
