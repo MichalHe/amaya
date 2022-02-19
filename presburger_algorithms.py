@@ -98,35 +98,35 @@ def build_dfa_from_linear_equality(eq: Relation,
     dfa.add_initial_state(eq.absolute_part)
 
     work_queue: List[DFA_AutomatonStateType] = [eq.absolute_part]
-
+    
+    # We need to work only with alphabet symbols differing in the tracks of variables present in the relation
+    active_alphabet = list(alphabet.gen_projection_symbols_onto_variables(eq_var_id_pairs))
     trap_state: Optional[int] = None
     while work_queue:
         current_state = work_queue.pop()
         dfa.add_state(current_state)
 
-        # Check whether current state satisfies property that it accepts an empty word -> state is final
+        # Check whether the current state is accepting (condition: accepts an empty word)
         if current_state == 0:
             dfa.add_final_state(current_state)
 
-        # TODO: Iterate over the alphabet projected onto the variables that are actually present in the equality
-        for alphabet_symbol in alphabet.symbols:
+        for alphabet_symbol in active_alphabet:
             dot = vector_dot(alphabet_symbol, eq.variable_coeficients)
             next_value = current_state - dot
 
             if next_value % 2 == 0:
-                next_state = int(next_value/2)
+                next_state = int(next_value / 2)
 
                 # Add the newly discovered transition
                 dfa.update_transition_fn(current_state, alphabet_symbol, next_state)
 
-                if not dfa.has_state_with_value(next_state):
-                    if next_state not in work_queue:
-                        work_queue.append(next_state)
+                if not (dfa.has_state_with_value(next_state) or next_state in work_queue):
+                    work_queue.append(next_state)
             else:
                 # This means the the input tape and the absolute part differ in the currently read bit,
                 # therefore, they cannot be equal -> no transition along the current symbol. However,
-                # we would like the automaton to be complete, therefore add a trap state for such transitions
-                if has_trap_state is None:
+                # we would like the automaton to be complete, therefore add a trap state for such transitions.
+                if trap_state is None:
                     trap_state = add_trap_state_to_automaton(dfa)
                 dfa.update_transition_fn(current_state, alphabet_symbol, trap_state)
 
