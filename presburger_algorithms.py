@@ -22,49 +22,57 @@ from relations_structures import Relation
 import math
 
 
+# TODO: Make automata not be generic anymore (hardcode ints)
 DFA_AlphabetSymbolType = Tuple[int, ...]
 DFA_AutomatonStateType = int
-NFA_AutomatonStateType = Union[int, str]
+
 NFA_AlphabetSymbolType = Tuple[int, ...]
+NFA_AutomatonStateType = int
 
 
-def build_dfa_from_inequality(ineq: Relation) -> DFA:
-    '''Builds DFA with Lang same as solutions to the inequation over N'''
-    logger.debug(f'Building DFA (over N) to inequation: {ineq}')
+def build_dfa_from_linear_inequality(ineq: Relation,
+                                     ineq_var_id_pairs: List[Tuple[str, int]],
+                                     alphabet: LSBF_Alphabet,
+                                     automaton_constr: AutomatonConstructor) -> DFA:
+    """
+    Construct an automaton accepting ineq solutions encoded in 2's complement binary encoding.
 
-    alphabet = LSBF_Alphabet.from_inequation(ineq)
-    dfa: DFA[DFA_AutomatonStateType] = DFA(
-        alphabet=alphabet,
-        automaton_type=AutomatonType.DFA
-    )
+    :param ineq: Inequation that will have its solutions accepted by the created automaton. 
+    :param ineq_var_id_pairs: Variables present in the given inequation with their unique IDs. These pairs should be
+                              ordered according to the variable ID (ascending).
+    :param alphabet: Alphabet for the created automaton.
+    :param automaton_constr: Constructor for the automaton.
+    """
+    logger.debug(f'Building DFA encoding the solutions of the inequation: {ineq}')
+
+    dfa: DFA[DFA_AutomatonStateType] = DFA(alphabet=alphabet, automaton_type=AutomatonType.DFA)
     dfa.add_initial_state(ineq.absolute_part)
 
     work_queue: List[DFA_AutomatonStateType] = [ineq.absolute_part]
 
-    logger.info(f'Generated alphabet for automaton: {alphabet}')
+    # We need to work only with alphabet symbols differing in the tracks of variables present in the relation
+    active_alphabet = list(alphabet.gen_projection_symbols_onto_variables(ineq_var_id_pairs))
 
     while work_queue:
         currently_processed_state = work_queue.pop()
         dfa.add_state(currently_processed_state)
 
-        # Check whether current state satisfies property that it accepts an
-        # empty word
+        # Check whether current state is final
         if currently_processed_state >= 0:
             dfa.add_final_state(currently_processed_state)
 
-        # @Optimize: iterate over act symbols projection
-        for alphabet_symbol in alphabet.symbols:
-            dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
+        # FIXME: Change how we hande alphabets - iterate only over the projected symbols
+        for symbol in active_alphabet:
+            dot = vector_dot(symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
             # Add newly discovered transition
-            dfa.update_transition_fn(currently_processed_state, alphabet_symbol, next_state)
+            dfa.update_transition_fn(currently_processed_state, symbol, next_state)
 
-            if not dfa.has_state_with_value(next_state):
-                if next_state not in work_queue:
-                    work_queue.append(next_state)
+            if not (dfa.has_state_with_value(next_state) or next_state in work_queue):
+                work_queue.append(next_state)
 
-    logger.debug(f'Extracted dfa: {dfa}')
+    logger.debug(f'The constructed DFA: {dfa}')
 
     return dfa
 
@@ -101,6 +109,7 @@ def build_dfa_from_linear_equality(eq: Relation,
     
     # We need to work only with alphabet symbols differing in the tracks of variables present in the relation
     active_alphabet = list(alphabet.gen_projection_symbols_onto_variables(eq_var_id_pairs))
+
     trap_state: Optional[int] = None
     while work_queue:
         current_state = work_queue.pop()
