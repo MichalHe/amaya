@@ -61,7 +61,6 @@ def build_dfa_from_linear_inequality(ineq: Relation,
         if currently_processed_state >= 0:
             dfa.add_final_state(currently_processed_state)
 
-        # FIXME: Change how we hande alphabets - iterate only over the projected symbols
         for symbol in active_alphabet:
             dot = vector_dot(symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
@@ -75,6 +74,30 @@ def build_dfa_from_linear_inequality(ineq: Relation,
     logger.debug(f'The constructed DFA: {dfa}')
 
     return dfa
+
+
+def build_dfa_from_sharp_linear_inequality(ineq: Relation,
+                                           ineq_var_id_pairs: List[Tuple[str, int]],
+                                           alphabet: LSBF_Alphabet,
+                                           automaton_constr: AutomatonConstructor) -> DFA:
+    """
+    Construct an automaton accepting the solutions (over N) of given ineq encoded in binary. 
+
+    :param ineq: Inequation that will have its solutions accepted by the created automaton. 
+    :param ineq_var_id_pairs: Variables present in the given inequation with their unique IDs. These pairs should be
+                              ordered according to the variable ID (ascending).
+    :param alphabet: Alphabet for the created automaton.
+    :param automaton_constr: Constructor for the automaton.
+    """
+    assert ineq.operation == '<'
+
+    # Since we are dealing with a discrete domain:
+    ineq.absolute_part -= 1
+    ineq.operation = '<='
+
+    ineq_dfa = build_dfa_from_linear_inequality(ineq)
+
+    return ineq_dfa
 
 
 def add_trap_state_to_automaton(automaton: NFA, trap_state: Optional[int] = None) -> int:
@@ -99,8 +122,7 @@ def build_dfa_from_linear_equality(eq: Relation,
                                    alphabet: LSBF_Alphabet,
                                    constr: AutomatonConstructor) -> DFA:
     """
-    Construct a DFA with language that is the solution space of the given equation 
-    encoded in 2's complement.  
+    Construct a DFA with language that is the solution space (over N) of the given equation using binary encoding.
     """
     dfa: DFA[DFA_AutomatonStateType] = DFA(alphabet=alphabet, automaton_type=AutomatonType.DFA)
     dfa.add_initial_state(eq.absolute_part)
@@ -138,37 +160,6 @@ def build_dfa_from_linear_equality(eq: Relation,
                 if trap_state is None:
                     trap_state = add_trap_state_to_automaton(dfa)
                 dfa.update_transition_fn(current_state, alphabet_symbol, trap_state)
-
-    return dfa
-
-
-def build_dfa_from_sharp_inequality(ineq: Relation) -> DFA:
-    alphabet = LSBF_Alphabet.from_inequation(ineq)
-    dfa: DFA[NFA_AutomatonStateType] = DFA(
-        alphabet=alphabet,
-        automaton_type=AutomatonType.DFA,
-    )
-    dfa.add_initial_state(ineq.absolute_part)
-
-    work_queue: List[int] = [ineq.absolute_part]
-
-    while work_queue:
-        current_state = work_queue.pop()
-        dfa.add_state(current_state)
-
-        if current_state > 0:
-            dfa.add_final_state(current_state)
-
-        for alphabet_symbol in alphabet.symbols:
-            dot = vector_dot(alphabet_symbol, ineq.variable_coeficients)
-            next_value = current_state - dot
-
-            destination_state = math.floor(0.5 * next_value)
-
-            if not dfa.has_state_with_value(destination_state):
-                work_queue.append(destination_state)
-
-            dfa.update_transition_fn(current_state, alphabet_symbol, destination_state)
 
     return dfa
 
