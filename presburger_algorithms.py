@@ -603,8 +603,6 @@ def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[
                 lin_is_final = post_state in lin_automaton.final_states
 
                 if mod_accepts and lin_is_final:
-                    print('>>> Result', (current_mod_component, current_lin_component))
-                    print('Overall processed states:', processed_states_counter)
                     return (current_mod_component, current_lin_component)
 
                 mod_post_state = current_mod_component.generate_next(mod_symbol)
