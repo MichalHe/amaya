@@ -1,16 +1,7 @@
 from __future__ import annotations
-import presburger_algorithms as pa
-from ast_relations import (
-    ModuloTerm,
-    Relation,
-    expand_relation_on_ite,
-    try_retrieve_variable_if_literal,
-)
-
-from automatons import NFA, AutomatonType, LSBF_Alphabet
-from log import logger
-from logging import INFO
+from enum import IntEnum, Enum
 from dataclasses import dataclass
+from logging import INFO
 import time
 from typing import (
     List,
@@ -22,14 +13,27 @@ from typing import (
     Callable,
     Optional,
 )
-from enum import IntEnum, Enum
-import utils
-from utils import number_to_bit_tuple
 
+from ast_relations import (
+    ModuloTerm,
+    Relation,
+    expand_relation_on_ite,
+    try_retrieve_variable_if_literal,
+)
+from automatons import (
+    AutomatonType, 
+    LSBF_Alphabet,
+    NFA, 
+)
+from log import logger
+import presburger.constructions.naturals as relations_to_dfa
+import presburger.constructions.integers as relations_to_nfa
 import preprocessing
 from ast_definitions import (
-        AST_NaryNode,
-        NodeEncounteredHandlerStatus)
+    AST_NaryNode,
+    NodeEncounteredHandlerStatus,
+)
+import utils
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
@@ -671,7 +675,7 @@ def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNod
     # Generate the expanded ite-expression
     expanded_expr = ['or']
     for i in range(2**len(ite_control_variables)):
-        control_variables_bit_values = number_to_bit_tuple(i, len(ite_control_variables))
+        control_variables_bit_values = utils.number_to_bit_tuple(i, len(ite_control_variables))
         # Convert the bit values into corresponing formulas:
         # (A=0, B=0, C=1) --> ~A, ~B, C
         variable_literals = [variable if variable_bit else ['not', variable] for variable, variable_bit in zip(ite_control_variables, control_variables_bit_values)]
@@ -858,16 +862,12 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
     '''
     building_handlers: Dict[SolutionDomain, Dict[str, Tuple[ParsingOperation, Callable]]] = {
         SolutionDomain.INTEGERS: {
-            '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ,
-                   pa.build_nfa_from_linear_inequality),
-            '=':  (ParsingOperation.BUILD_NFA_FROM_EQ,
-                   pa.build_nfa_from_linear_equality)
+            '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ, relations_to_nfa.build_nfa_from_linear_inequality),
+            '=':  (ParsingOperation.BUILD_NFA_FROM_EQ, relations_to_nfa.build_nfa_from_linear_equality)
         },
         SolutionDomain.NATURALS: {
-            '<=': (ParsingOperation.BUILD_DFA_FROM_INEQ,
-                   pa.build_dfa_from_inequality),
-            '=':  (ParsingOperation.BUILD_DFA_FROM_EQ,
-                   pa.build_dfa_from_sharp_inequality)
+            '<=': (ParsingOperation.BUILD_DFA_FROM_INEQ, relations_to_dfa.build_dfa_from_linear_inequality),
+            '=':  (ParsingOperation.BUILD_DFA_FROM_EQ, relations_to_dfa.build_dfa_from_linear_equality)
         }
     }
 
