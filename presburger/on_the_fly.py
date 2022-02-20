@@ -1,25 +1,17 @@
 from __future__ import annotations
 from typing import (
     List,
-    Dict,
-    Generator,
     Tuple,
-    Union,
-    Set,
-    Callable,
-    Optional
 )
-from log import logger
-from utils import vector_dot
+
 from automatons import (
     DFA,
     NFA,
     LSBF_Alphabet,
     AutomatonType,
 )
-from dataclasses import dataclass
+from log import logger
 from relations_structures import Relation
-import math
 
 
 def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[int], modulo_relation: Relation):
