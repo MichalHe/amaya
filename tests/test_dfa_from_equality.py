@@ -4,7 +4,7 @@ from typing import Dict, Set
 from alphabet import LSBF_Alphabet
 from automatons import DFA
 from tests.conftest import ResolutionState
-import presburger_algorithms as pa
+from presburger.constructions.naturals import build_dfa_from_linear_equality
 from relations_structures import Relation
 
 import pytest
@@ -30,7 +30,7 @@ def test_eq_to_dfa_simple(equation: Relation):
     var_id_pairs = [(var, i+1) for i, var in enumerate(equation.variable_names)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(var_id_pairs)
     alphabet_symbols = set(alphabet.symbols)
-    dfa = pa.build_dfa_from_linear_equality(equation, var_id_pairs, alphabet, DFA)
+    dfa = build_dfa_from_linear_equality(equation, var_id_pairs, alphabet, DFA)
     
     s4 = ResolutionState('4')
     s2 = ResolutionState('2')

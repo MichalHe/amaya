@@ -1,6 +1,6 @@
 from alphabet import LSBF_Alphabet
 from automatons import DFA
-from presburger_algorithms import build_dfa_from_linear_inequality
+from presburger.constructions.naturals import build_dfa_from_linear_inequality
 from relations_structures import Relation
 from tests.conftest import ResolutionState
 
@@ -18,7 +18,7 @@ def ineq() -> Relation:
     )
 
 
-def test_dfa_from_sharp_indeq_simple(ineq: Relation):
+def test_dfa_from_sharp_ineq_simple(ineq: Relation):
     var_id_pairs = [(var, i + 1) for i, var in enumerate(ineq.variable_names)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(var_id_pairs)
     dfa = build_dfa_from_linear_inequality(ineq, var_id_pairs, alphabet, DFA)
