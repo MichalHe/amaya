@@ -176,8 +176,8 @@ def identify_tracks_used_by_ineq_components(relation_variables: List[str], relat
     Identifies tracks used by the individual components of the relation.
 
     The relation has exactly one nonmodular compoment and zero or more modular components.
-    The returned list has always the first entry indices used by the nonmodular component and the rest by the modular ones
-    in the same order as stored in the relation.
+    The returned list has always the first entry indices used by the nonmodular component and the rest by the modular 
+    ones in the same order as stored in the relation.
 
     :param relation_variables: The variables used in the whole relation, *sorted*.
     :param relation: The relation itself.
@@ -297,7 +297,8 @@ def create_multicomponent_initial_state_from_relation(relation: Relation) -> Int
                                                              modulo=modulo_term.modulo,
                                                              variable_coeficients=modulo_term.variable_coeficients)
                                     for modulo_term in relation.modulo_terms]
-    linear_component = LinearStateComponent(value=relation.absolute_part, variable_coeficients=tuple(relation.variable_coeficients))
+    linear_component = LinearStateComponent(value=relation.absolute_part,
+                                            variable_coeficients=tuple(relation.variable_coeficients))
     initial_state = tuple([linear_component] + modulo_term_state_components)
     return initial_state
 
@@ -327,7 +328,7 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
     f_transitions = []
 
     work_list: List[LinearStateComponent] = [initial_state]
-    work_set: Set[LinearStateComponent] = set(work_list)  # Seed up checking whether a state is already present in the work_list
+    work_set: Set[LinearStateComponent] = set(work_list)  # Seed up checking the presence in the work_list
 
     relation_variable_ids = list(map(lambda pair: pair[1], relation_variable_with_ids))
     projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(relation_variable_ids))
@@ -350,7 +351,8 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
                 work_list.append(destination_state)
                 work_set.add(destination_state)
 
-            cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(relation_variable_ids, alphabet_symbol)
+            cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(relation_variable_ids,
+                                                                                   alphabet_symbol)
             nfa.update_transition_fn(current_state.value,
                                      cylindrified_symbol,
                                      destination_state.value)
@@ -375,8 +377,12 @@ def build_nfa_from_linear_inequality(ineq: Relation,
                                      ineq_variables_ordered: List[Tuple[str, int]],
                                      alphabet: LSBF_Alphabet,
                                      automaton_constr: AutomatonConstructor) -> NFA[NFA_AutomatonStateType]:
+    """
+    Construct an NFA accepting the solutions of given inequation encoded using 2's complement.
+    """
 
-    initial_state = IneqLinearStateComponent(value=ineq.absolute_part, variable_coeficients=tuple(ineq.variable_coeficients))
+    initial_state = IneqLinearStateComponent(value=ineq.absolute_part,
+                                             variable_coeficients=tuple(ineq.variable_coeficients))
 
     def is_transition_final(source: LinearStateComponent,
                             symbol: Tuple[int, ...],
@@ -403,9 +409,9 @@ def build_nfa_from_linear_equality(eq: Relation,
                                    eq_variables_ordered: List[int],
                                    alphabet: LSBF_Alphabet,
                                    automaton_constr: AutomatonConstructor) -> NFA:
-    '''
-    Builds NFA representing the solution space of given equality.
-    '''
+    """
+    Construct an NFA accepting the solutions of given equation encoded using 2's complement.
+    """
 
     nfa = automaton_constr(
         alphabet=alphabet,
