@@ -22,54 +22,6 @@ from relations_structures import Relation
 import math
 
 
-# TODO: Make automata not be generic anymore (hardcode ints)
-DFA_AlphabetSymbolType = Tuple[int, ...]
-DFA_AutomatonStateType = int
-
-
-
-NFA_AlphabetSymbolType = Tuple[int, ...]
-NFA_AutomatonStateType = int
-AutomatonConstructor = Callable[[LSBF_Alphabet, AutomatonType], NFA]
-
-
-def project_symbol_onto_tracks(symbol: Tuple[int, ...], track_indices: List[int]) -> Tuple[int, ...]:
-    return tuple(symbol[i] for i in track_indices)
-
-
-def identify_tracks_used_by_ineq_components(relation_variables: List[str], relation: Relation) -> List[List[int]]:
-    '''
-    Identifies tracks used by the individual components of the relation.
-
-    The relation has exactly one nonmodular compoment and zero or more modular components.
-    The returned list has always the first entry indices used by the nonmodular component and the rest by the modular 
-    ones in the same order as stored in the relation.
-
-    :param relation_variables: The variables used in the whole relation, *sorted*.
-    :param relation: The relation itself.
-    :returns: Collection of lists containing indices used by the components.
-    '''
-
-    component_tracks: List[List[int]] = []
-
-    nonmodular_track_indices = []
-    for track_index, variable_id_pair in enumerate(relation_variables):
-        variable, _ = variable_id_pair
-        if variable in relation.variable_names:
-            nonmodular_track_indices.append(track_index)
-    component_tracks.append(nonmodular_track_indices)
-
-    # For every modulo term, identify the tracks that should be used from the  symbols of the projected alphabet
-    for modulo_term in relation.modulo_terms:
-        tracks_used = []
-        for track_index, variable_id_pair in enumerate(relation_variables):
-            variable, _ = variable_id_pair
-            if variable in modulo_term.variables:
-                tracks_used.append(track_index)
-        component_tracks.append(tracks_used)
-    return component_tracks
-
-
 def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[int], modulo_relation: Relation):
     """
     Performs on-the-fly intersection.
