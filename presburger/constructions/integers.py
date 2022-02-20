@@ -1,23 +1,28 @@
 from __future__ import annotations
+from dataclasses import dataclass
+import math
 from typing import (
-    List,
+    Callable,
     Dict,
+    List,
+    Optional,
+    Set,
     Tuple,
     Union,
-    Set,
-    Callable,
-    Optional
+)
+
+from automatons import (
+    AutomatonType,
+    LSBF_Alphabet,
+    NFA,
 )
 from log import logger
-from utils import vector_dot
-from automatons import (
-    NFA,
-    LSBF_Alphabet,
-    AutomatonType,
+from presburger.definitions import(
+    AutomatonConstructor,
+    NFA_AutomatonStateType,
 )
-from dataclasses import dataclass
 from relations_structures import Relation
-import math
+from utils import vector_dot
 
 
 @dataclass(frozen=True)

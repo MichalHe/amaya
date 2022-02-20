@@ -1,18 +1,23 @@
 from __future__ import annotations
+import math
 from typing import (
     List,
     Tuple,
     Optional
 )
-from log import logger
-from utils import vector_dot
+
 from automatons import (
     DFA,
     LSBF_Alphabet,
     AutomatonType,
 )
+from log import logger
+from presburger.definitions import (
+    AutomatonConstructor,
+    DFA_AutomatonStateType
+)
 from relations_structures import Relation
-import math
+from utils import vector_dot
 
 
 def build_dfa_from_linear_inequality(ineq: Relation,
