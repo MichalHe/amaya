@@ -79,16 +79,18 @@ class PresburgerExpr:
         )
 
     def __mul__(self, other: PresburgerExpr):
-        # In PA one must be constant
-        const_expr: PresburgerExpr = self
-        non_const_expr: PresburgerExpr = other
+        # In Presburger arithmetic, only multiplication by a constant is allowed
 
-        if self.variables:
-            if other.variables or other.modulo_terms:
-                raise ValueError(f'Atempting to multiply variables by variables, which is forbidden in PA: {self} * {other}')
-            else:
-                const_expr = other
-                non_const_expr = self
+        # Determine which operand is constant
+        if self.is_constexpr():
+            const_expr: PresburgerExpr = self
+            non_const_expr: PresburgerExpr = other
+        elif other.is_constexpr():
+            const_expr: PresburgerExpr = other
+            non_const_expr: PresburgerExpr = self
+        else:
+            # Both must be non-const
+            raise ValueError(f'Atempting to multiply variables by variables, which is forbidden in PA: {self} * {other}')
 
         new_variables: Dict[str, int] = dict()
         for var_name, var_value in non_const_expr.variables.items():
@@ -106,7 +108,7 @@ class PresburgerExpr:
 
     @staticmethod
     def from_single_modulo_term(modulo_term: ModuloTerm) -> PresburgerExpr:
-        """Wraps the given modulo term into PresburgerExpr."""
+        """Wraps the given modulo term in PresburgerExpr."""
         return PresburgerExpr(absolute_part=0, variables={}, modulo_terms={modulo_term: 1})
 
     def is_constexpr(self) -> bool:
@@ -118,7 +120,8 @@ def evaluate_expression(expr) -> PresburgerExpr:
     """
     Evaluates the given expression AST and returns the (normalized) result.
 
-    Example: [+ [* 10 x] y] --> 10x + y
+    Example:
+        expr=[+ [* 10 x] y] ----> 10x + y
     """
     if not type(expr) == list:
         # It is an atom, which is either int, or variable
@@ -158,45 +161,54 @@ def evaluate_expression(expr) -> PresburgerExpr:
         try:
             return operand1 * operand2
         except ValueError:
-            raise ValueError(f'Error while evaluating {expr} -- attempting to multiply variables by variables, which is forbidden in PA.')
+            err = (f'Error while evaluating {expr} -- attempting to multiply'
+                   'variables by variables, which is forbidden in PA.')
+            raise ValueError(err)
     elif operation == 'mod':
+        # (mod (+ x y) 10)
         variables_expr = evaluate_expression(expr[1])
-        modulo = evaluate_expression(expr[2])  # The modulo might be entire AST but must be a constexpr
+        modul = evaluate_expression(expr[2])  # The modulo might not be a literal (constant), but must be a const expr
 
-        assert modulo.is_constexpr(), 'The modulo term does not have a constant as a right operand: {0}'.format(
-            modulo
-        )
+        assert modul.is_constexpr(), f'The modulo term does not have a constant as a right operand: {modul}'
 
-        modulo_term = ModuloTerm.from_expression(variables_expr, modulo.absolute_part)
+        modulo_term = ModuloTerm.from_expression(variables_expr, modul.absolute_part)
         return PresburgerExpr.from_single_modulo_term(modulo_term)
 
     else:
         raise ValueError(f'Unsupported operation type: {operation} in expr: {expr}')
 
 
-def normalize_atomic_presburger_formula(op: str, lhs_expr: PresburgerExpr, rhs_expr: PresburgerExpr) -> Relation:
-    '''Takes an automic formula of form:
-            <variables_and_constants2> <op> <variables_and_constants2>,
-        and produces output in form of:
-            <VARIABLES> <= <ABS>, when op is `<=` or `>=`
-            <VARIABLES> < <ABS>, when op is `<` or `>`
-    '''
+def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr, rhs_expr: PresburgerExpr) -> Relation:
+    """
+    Takes an automic formula of form: <expr> <op> <expr>, and produces output in the <VARIABLES> ~ <ABS> form 
+    where ~ is `<=` or `>=`.
 
-    if op == '<=' or op == '<':
+    :param rel_type: Relation type, one of {<=, <, =, >, >=}
+    :param lhs_expr: The expression that is present on the left-hand side
+    :param rhs_expr: The expression that is present on the right-hand side
+    :returns: Relation that has variables on left side and absolute part on the right side.
+              Relation type is one of {<=, <, =}, so they can be used in the Presburger constructions right away.
+    """
+
+    # Craft an unified expr according to the used relation type that will have all variables and constants on one side
+    if rel_type in ('<=', '<'):
         unified_expr = lhs_expr - rhs_expr
-    elif op == '>=' or op == '>':
+    elif rel_type in ('>=', '>'):
         unified_expr = rhs_expr - lhs_expr
-    elif op == '=':
+    elif rel_type == '=':
         # It does not matter, equation can be rotated around = without problems
         unified_expr = rhs_expr - lhs_expr
+    else:
+        raise ValueError(f'Attempting to normalize a relation of unknown type: {rel_type}.')
 
     # Now the unified expr has form of <everything> <= 0 or <everything> < 0
     logger.debug(f'(unified expr): {unified_expr}{op}0')
 
-    # Deduce resulting ineqation relation op after rearangement
-    if op in ['<', '>']:
+    # Deduce resulting relation type after rearangements - the expression might have to be rotated
+    # in order to have the constant on the right side
+    if op in ('<', '>'):
         rel_op = '<'
-    elif op in ['<=', '>=']:
+    elif op in ('<=', '>='):
         rel_op = '<='
     elif op == '=':
         rel_op = '='
@@ -204,9 +216,9 @@ def normalize_atomic_presburger_formula(op: str, lhs_expr: PresburgerExpr, rhs_e
     relation_variable_names = []
     relation_variable_coeficients = []
 
-    relation_abs = -unified_expr.absolute_part  # move it to the right side
+    relation_abs = -unified_expr.absolute_part  # Move the absolute part the right side
 
-    # Keep variables in alphabetical order - speeds up projections
+    # Keep variables in the alphabetical order (required to as it is used to speed up projections)
     sorted_vars = sorted(unified_expr.variables.keys())
     for var_name in sorted_vars:
         var_coef = unified_expr.variables[var_name]
@@ -229,6 +241,11 @@ def normalize_atomic_presburger_formula(op: str, lhs_expr: PresburgerExpr, rhs_e
 
 
 def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Relation:
+    """
+    Construct a Relation from the given relation AST.
+
+    The returned relation is normalized.
+    """
     # (<= 2 ?X)  <=> [<=, 2, ?X]
     logger.debug(f'Extracting relation from: {ast}')
     assert(len(ast) == 3)
@@ -250,7 +267,8 @@ def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Rel
                 coefs.append(coef)
                 var_names.append(var_name)
             else:
-                logger.info(f'Removing the variable variable_name="{var_name}" from atomic fromula - the variable has a coeficient 0.')
+                info = f'Removing the variable "{var_name}" from the atomic formula - the variable has a coeficient 0.'
+                logger.info(info)
                 logger.debug(f'Ast: {ast}')
         normalized_expr.variable_coeficients = coefs
         normalized_expr.variable_names = var_names
