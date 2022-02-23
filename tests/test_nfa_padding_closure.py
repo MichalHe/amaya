@@ -7,8 +7,9 @@ import pytest
 
 from alphabet import LSBF_Alphabet
 from automatons import (
+    AutomatonType,
+    AutomatonSnapshot,
     NFA,
-    AutomatonType
 )
 from mtbdd_automatons import MTBDD_NFA
 from relations_structures import Relation
@@ -119,6 +120,32 @@ def real_nfa() -> NFA:
                         modulo_terms=[])
     alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
     return build_nfa_from_linear_equality(equality, [1, 2], alphabet, NFA)
+
+
+@pytest.fixture()
+def nfa_no_modif_needed(constr: AutomatonFactory) -> NFA:
+    """Constructs the automaton using the given factory that does not need repairing."""
+    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
+    nfa = constr(alphabet=alphabet, automaton_type=AutomatonType.NFA)
+    
+    nfa.states = {0, 1, 2, 100}
+
+    transitions = (
+        (0, (0, 0), 1),
+        (0, (1, 0), 2),
+
+        (1, (1, 0), 1),
+        (1, (1, 0), 100),
+        
+        (2, (1, 1), 100),
+    )
+
+    for s in transitions:
+        nfa.update_transition_fn(*s)
+
+    nfa.initial_states = {0}
+    nfa.final_states = {100}
+    return nfa
 
 
 def do_pad_closure_and_get_final_states(nfa: NFA) -> Tuple[Tuple[int, ...], int]:
@@ -272,3 +299,12 @@ def test_real_pressburger_automaton_after_projection(real_nfa: NFA):
     dfa = dfa.complement()
     for state in real_nfa.states - real_nfa.final_states:
         assert not real_nfa.get_symbols_leading_from_state_to_state(state, 'FINAL')
+
+
+@pytest.mark.parametrize('constr', (NFA, MTBDD_NFA))
+def test_no_pad_closure_needed(constr, nfa_no_modif_needed: NFA):
+    snapshot_before = AutomatonSnapshot.create_snapshot(nfa_no_modif_needed)
+    nfa_no_modif_needed.perform_pad_closure()
+    snapshot_after =  AutomatonSnapshot.create_snapshot(nfa_no_modif_needed)
+
+    assert snapshot_before == snapshot_after
