@@ -67,17 +67,18 @@ mtbdd_wrapper.amaya_mtbdd_get_state_post.restype = ct.POINTER(c_side_state_type)
 
 
 mtbdd_wrapper.amaya_begin_pad_closure.argtypes = (
-    ct.POINTER(c_side_state_type),      # Array with final states.
-    ct.c_uint32                         # Number of final states
+    c_side_state_type,              # The final state to be added if the saturation property was broken.
+    ct.POINTER(c_side_state_type),  # Array with final states.
+    ct.c_uint32                     # Number of final states
 )
 
 mtbdd_wrapper.amaya_end_pad_closure.argtypes = ()
 
 mtbdd_wrapper.amaya_mtbdd_do_pad_closure.argtypes = (
-    c_side_state_type,                  # Left state
-    ct.c_ulong,                         # MTBDD left
-    c_side_state_type,                  # Right state
-    ct.c_ulong,                         # MTBDD right
+    c_side_state_type,   # Left state
+    ct.c_ulong,          # MTBDD left
+    c_side_state_type,   # Right state
+    ct.c_ulong,          # MTBDD right
 )
 mtbdd_wrapper.amaya_mtbdd_do_pad_closure.restype = ct.c_ulong  # New mtbdd
 
@@ -507,42 +508,50 @@ class MTBDDTransitionFn():
                 reversed_adjacency_matrix[destination_state].add(origin_state)
         return reversed_adjacency_matrix
 
-    def do_pad_closure(self, initial_states: Iterable[int], final_states: List[int]):
-        '''Performs padding closure on the underlying automatic structure.
+    def do_pad_closure(self, initial_states: Iterable[int], final_states: List[int]) -> bool:
+        """
+        Ensures padding closure is satisfied.
 
-        The operation is performed in-situ and no new MTBDDs are created, therefor
-        no reference manipulation is required.
-        '''
-        # Initialize the working queue with all states, that have some final
-        # state in their Post
+        Padding closure:
+            Every solution encoding obtained by repeating the sign bit (last one) is accepted.
+
+        The operation is performed in-situ and no new MTBDDs are created, therefore,
+        no reference counting manipulation is required.
+
+        :returns: True if the saturation property needed fixing.
+        """
+        # We need adjacency matrix so that we can add the predecessors of the states
+        # for which the transition to a final state was added to the work list
         adjacency_matrix = self.build_automaton_adjacency_matrix(initial_states)
         reversed_adjacency_matrix = MTBDDTransitionFn.reverse_adjacency_matrix(adjacency_matrix)
 
-        # We dont wanna start with final states directly, instead start with their
-        # predecesors
-        final_states_predecesors: Set[int] = set()
+        # Do not start with the final states, instead, start with their predecessors
+        final_states_predecessors: Set[int] = set()
         for fs in final_states:
-            final_states_predecesors.update(reversed_adjacency_matrix[fs])
+            final_states_predecessors.update(reversed_adjacency_matrix[fs])
 
-        work_queue = list(final_states_predecesors)
-        work_set = set(work_queue)
+        work_list = list(final_states_predecessors)
+        work_set = set(work_list)
 
         stat_operations_skipped = 0
         stat_closures_succeeded_cnt = 0
 
-        MTBDDTransitionFn.call_begin_pad_closure(final_states)
+        # FIXME: the hardcoded 100 needs to be a param
+        MTBDDTransitionFn.call_begin_pad_closure(100, final_states)
 
-        while work_queue:
-            logger.debug(f'Padding closure: remaining in work queue: {len(work_queue)}')
+        new_final_state_added: bool = False
+        while work_list:
+            logger.debug(f'Padding closure: remaining in work queue: {len(work_list)}')
 
-            state = work_queue.pop()
+            state = work_list.pop()
             work_set.remove(state)
 
             state_pre_list = reversed_adjacency_matrix[state]
             for pre_state in state_pre_list:
 
-                # Skip if no MTBDDs
+                # Skip if there are no transitions from the pre-state of from the current state
                 if pre_state not in self.mtbdds or state not in self.mtbdds:
+                    # TODO: Can this even happen?
                     stat_operations_skipped += 1
                     continue
 
@@ -561,11 +570,14 @@ class MTBDDTransitionFn():
 
                     stat_closures_succeeded_cnt += 1  # @DeleteMe
 
+                    new_final_state_added = True
+
                     if pre_state not in work_set:
-                        work_queue.append(pre_state)
+                        work_list.append(pre_state)
                         work_set.add(pre_state)
 
         MTBDDTransitionFn.call_end_pad_closure()
+        return new_final_state_added
 
     def _do_pad_closure_single(self, left_state: int, right_state: int, final_states: List[int]) -> bool:
         '''(left_state) --A--> (right_state) --B--> final_states'''
@@ -594,13 +606,21 @@ class MTBDDTransitionFn():
         return bool(was_modified)
 
     @staticmethod
-    def call_begin_pad_closure(final_states: List[int]):
-        '''Performs the call to the C side which initializes structures used when performing pad closure.'''
+    def call_begin_pad_closure(new_final_state: int, final_states: List[int]):
+        """
+        Performs a call to the C side which initializes structures used when performing pad closure.
 
-        final_states_arr = (c_side_state_type * len(final_states))(*list(final_states))
-        final_states_cnt = ct.c_uint32(len(final_states))
+        :param new_final_state: The value of the final state to be added if the saturation property was broken.
+        :param final_states:    Final states of the automaton.
+        """
 
-        mtbdd_wrapper.amaya_begin_pad_closure(final_states_arr, final_states_cnt)
+        _new_final_state = c_side_state_type(new_final_state)
+        _final_states_arr = (c_side_state_type * len(final_states))(*final_states)
+        _final_states_cnt = ct.c_uint32(len(final_states))
+
+        mtbdd_wrapper.amaya_begin_pad_closure(_new_final_state,
+                                              _final_states_arr,
+                                              _final_states_cnt)
 
     @staticmethod
     def call_do_pad_closure(left_state: int,

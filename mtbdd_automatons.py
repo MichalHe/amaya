@@ -229,7 +229,9 @@ class MTBDD_NFA(NFA):
         return int_nfa
 
     def perform_pad_closure(self):
-        self.transition_fn.do_pad_closure(self.initial_states, self.final_states)
+        saturation_prop_repaired = self.transition_fn.do_pad_closure(self.initial_states, self.final_states)
+        if saturation_prop_repaired:
+            self.final_states.add(100)
 
     def determinize(self):
         """
