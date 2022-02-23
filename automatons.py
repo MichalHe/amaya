@@ -556,6 +556,16 @@ class AutomatonSnapshot:
         states = set(nfa.states)
         transitions = list(nfa.transition_fn.iter())
         return AutomatonSnapshot(states, final_states, initial_states, transitions)
-
+    
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, AutomatonSnapshot):
+            return False
+        
+        return all((
+            self.states == other.states,
+            self.final_states == other.final_states,
+            self.initial_states == self.initial_states,
+            sorted(self.transitions) == sorted(other.transitions),
+        ))
 
 DFA = NFA
