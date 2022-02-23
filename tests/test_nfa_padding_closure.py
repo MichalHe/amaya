@@ -12,7 +12,7 @@ from automatons import (
 )
 from mtbdd_automatons import MTBDD_NFA
 from relations_structures import Relation
-import presburger_algorithms
+from presburger.constructions.integers import build_nfa_from_linear_equality
 
 
 AutomatonFactory = Callable[[LSBF_Alphabet, AutomatonType], NFA]
@@ -118,7 +118,7 @@ def real_nfa() -> NFA:
                         modulo_term_coeficients=[], 
                         modulo_terms=[])
     alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
-    return presburger_algorithms.build_nfa_from_linear_equality(equality, [1, 2], alphabet, NFA)
+    return build_nfa_from_linear_equality(equality, [1, 2], alphabet, NFA)
 
 
 def do_pad_closure_and_get_final_states(nfa: NFA) -> Tuple[Tuple[int, ...], int]:
@@ -149,8 +149,7 @@ def do_simple_padding_closure_tests(nfa: NFA):
         (1, padding_symbol, new_final_state),
     )
 
-    for expected_transition in itertools.chain(original_transitions, added_transitions):
-        origin, symbol, dest = expected_transition
+    for origin, symbol, dest in itertools.chain(original_transitions, added_transitions):
         assert dest in nfa.get_transition_target(origin, symbol)
 
 
