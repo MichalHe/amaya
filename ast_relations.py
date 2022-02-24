@@ -202,15 +202,15 @@ def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr,
         raise ValueError(f'Attempting to normalize a relation of unknown type: {rel_type}.')
 
     # Now the unified expr has form of <everything> <= 0 or <everything> < 0
-    logger.debug(f'(unified expr): {unified_expr}{op}0')
+    logger.debug(f'(unified expr): {unified_expr}{rel_type}0')
 
     # Deduce resulting relation type after rearangements - the expression might have to be rotated
     # in order to have the constant on the right side
-    if op in ('<', '>'):
+    if rel_type in ('<', '>'):
         rel_op = '<'
-    elif op in ('<=', '>='):
+    elif rel_type in ('<=', '>='):
         rel_op = '<='
-    elif op == '=':
+    elif rel_type == '=':
         rel_op = '='
 
     relation_variable_names = []
