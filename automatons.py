@@ -434,10 +434,13 @@ class NFA(object):
 
     @classmethod
     def for_bool_variable(cls, overall_alphabet: LSBF_Alphabet, var_id: int, var_value: bool):
-        '''Builds an equivalent automaton encoding the provided bool variable.
-
+        """
+        Builds an automaton accepting words representing the given bool variable having given value.
+        
+        The accepted words for a variable being True have only 1s (at least one), and similarly, all 0s for 
+        the variable being False.
         The resulting autmaton is not complete (must be completed before complement).
-        '''
+        """
 
         automaton_type = AutomatonType.DFA | AutomatonType.BOOL
 
