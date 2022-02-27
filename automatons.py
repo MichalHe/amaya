@@ -53,6 +53,9 @@ class NFA(object):
     # intersecion/union; takes (automaton_id: int, old_state: int, new_state: int)
     _debug_state_rename: Optional[Callable[[int, int, int], None]] = None
 
+    used_variables: List[int] = field(default_factory=list)
+    """Variable IDs that are free in the formula represented by this automaton."""
+
     def __init__(self,
                  alphabet: LSBF_Alphabet,
                  automaton_type=AutomatonType.NFA,
@@ -60,7 +63,7 @@ class NFA(object):
                  final_states: Optional[Set[int]] = None,
                  states: Optional[Set[int]] = None,
                  transition_fn: Optional[SparseSimpleTransitionFunction] = None,
-                 used_variables: List[int] = []):
+                 used_variables: Optional[List[int]] = None):
 
         self.alphabet = alphabet
         self.automaton_type = automaton_type
@@ -70,8 +73,7 @@ class NFA(object):
         self.transition_fn = transition_fn if transition_fn is not None else SparseSimpleTransitionFunction()
 
         self.extra_info: Dict[str, Any] = dict()
-        # FIXME: Do not use the default parameter - might cause mutability issues
-        self.used_variables = used_variables
+        self.used_variables = used_variables if used_variables is not None else []
 
     def update_transition_fn(self, from_state: int, via_symbol: LSBF_AlphabetSymbol, to_state: int):
         self.transition_fn.insert_transition(from_state, via_symbol, to_state)
@@ -427,7 +429,6 @@ class NFA(object):
 
         self_loop_symbol = tuple('*' for i in len(alphabet.variable_numbers))
         nfa.update_transition_fn(state, self_loop_symbol, state)
-        nfa.alphabet.active_variables = set()
 
         return nfa
 
