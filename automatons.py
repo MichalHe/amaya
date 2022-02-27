@@ -1,39 +1,37 @@
 from __future__ import annotations
-import functools
 from collections import defaultdict
 from dataclasses import (
     dataclass,
     field
 )
+import functools
 from enum import IntFlag
 from typing import (
-    Set,
-    Dict,
-    Tuple,
-    List,
-    TypeVar,
-    Generic,
-    Optional,
+    Any,
     Callable,
-    Any
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
 )
 
+from alphabet import (
+    LSBF_Alphabet,
+    LSBF_AlphabetSymbol
+)
+import automaton_algorithms
 from log import logger
+from transitions import (
+    calculate_variable_bit_position,
+    SparseSimpleTransitionFunction
+)
 from utils import (
     carthesian_product,
     create_enumeration_state_translation_map,
     get_default_if_none,
 )
-
-import automaton_algorithms
-
-from transitions import (
-    calculate_variable_bit_position,
-    SparseSimpleTransitionFunction
-)
-
 from visualization import AutomatonVisRepresentation
-from alphabet import LSBF_Alphabet, LSBF_AlphabetSymbol
 
 
 class AutomatonType(IntFlag):
