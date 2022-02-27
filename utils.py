@@ -128,11 +128,3 @@ def reorder_variables_according_to_ids(variable_id_pairs: List[Tuple[str, int]],
         coeficients_ordered.append(variable_to_coef_map.get(var))
     
     return (variables_ordered, coeficients_ordered)
-    
-
-K = TypeVar('K')
-def get_default_if_none(maybe_none: Optional[K], default: Callable[[], K]) -> K:
-    if maybe_none is None:
-        return default()
-    else:
-        return maybe_none

@@ -29,7 +29,6 @@ from transitions import (
 from utils import (
     carthesian_product,
     create_enumeration_state_translation_map,
-    get_default_if_none,
 )
 from visualization import AutomatonVisRepresentation
 
@@ -65,11 +64,10 @@ class NFA(object):
 
         self.alphabet = alphabet
         self.automaton_type = automaton_type
-        # FIXME: Remove this and use python conditionals directly
-        self.final_states = get_default_if_none(final_states, set)
-        self.states = get_default_if_none(states, set)
-        self.initial_states = get_default_if_none(initial_states, set)
-        self.transition_fn = get_default_if_none(transition_fn, SparseSimpleTransitionFunction)
+        self.final_states = final_states if final_states is not None else set()
+        self.states = states if states is not None else set()
+        self.initial_states = initial_states if initial_states is not None else set()
+        self.transition_fn = transition_fn if transition_fn is not None else SparseSimpleTransitionFunction()
 
         self.extra_info: Dict[str, Any] = dict()
         # FIXME: Do not use the default parameter - might cause mutability issues
