@@ -36,16 +36,6 @@ from visualization import AutomatonVisRepresentation
 from alphabet import LSBF_Alphabet, LSBF_AlphabetSymbol
 
 
-AutomatonState = TypeVar('AutomatonState')
-S = TypeVar('S')
-
-TransitionFn = Dict[AutomatonState,
-                    Dict[
-                        LSBF_AlphabetSymbol,
-                        Set[AutomatonState]
-                    ]]
-
-
 class AutomatonType(IntFlag):
     DFA = 0x01
     NFA = 0x02
@@ -54,68 +44,63 @@ class AutomatonType(IntFlag):
 
 
 @dataclass
-class NFA(Generic[AutomatonState]):
+class NFA(object):
     alphabet:       LSBF_Alphabet
     transition_fn:  SparseSimpleTransitionFunction
     automaton_type: AutomatonType = AutomatonType.NFA
-    initial_states: Set[Any] = field(default_factory=set)
-    final_states:   Set[Any] = field(default_factory=set)
-    states:         Set[Any] = field(default_factory=set)
+    initial_states: Set[int] = field(default_factory=set)
+    final_states:   Set[int] = field(default_factory=set)
+    states:         Set[int] = field(default_factory=set)
 
     # Debug handle to listen to any state renaming happening during
-    # intersecion/union; takes (automaton_id, old_state(int, str),
-    # new_state(int))
-    _debug_state_rename: Optional[Callable[[int, AutomatonState, int], None]] = None
+    # intersecion/union; takes (automaton_id: int, old_state: int, new_state: int)
+    _debug_state_rename: Optional[Callable[[int, int, int], None]] = None
 
     def __init__(self,
                  alphabet: LSBF_Alphabet,
                  automaton_type=AutomatonType.NFA,
-                 initial_states: Optional[Set] = None,
-                 final_states: Optional[Set] = None,
-                 states: Optional[Set] = None,
+                 initial_states: Optional[Set[int]] = None,
+                 final_states: Optional[Set[int]] = None,
+                 states: Optional[Set[int]] = None,
                  transition_fn: Optional[SparseSimpleTransitionFunction] = None,
                  used_variables: List[int] = []):
 
         self.alphabet = alphabet
         self.automaton_type = automaton_type
+        # FIXME: Remove this and use python conditionals directly
         self.final_states = get_default_if_none(final_states, set)
         self.states = get_default_if_none(states, set)
         self.initial_states = get_default_if_none(initial_states, set)
         self.transition_fn = get_default_if_none(transition_fn, SparseSimpleTransitionFunction)
 
         self.extra_info: Dict[str, Any] = dict()
+        # FIXME: Do not use the default parameter - might cause mutability issues
         self.used_variables = used_variables
 
-    def update_transition_fn(self,
-                             from_state: AutomatonState,
-                             via_symbol: LSBF_AlphabetSymbol,
-                             to_state: AutomatonState
-                             ):
+    def update_transition_fn(self, from_state: int, via_symbol: LSBF_AlphabetSymbol, to_state: int):
         self.transition_fn.insert_transition(from_state, via_symbol, to_state)
 
-    def add_state(self, state: Any):
+    def add_state(self, state: int):
         self.states.add(state)
 
-    def add_final_state(self, state: Any):
+    def add_final_state(self, state: int):
         self.final_states.add(state)
 
-    def add_initial_state(self, state: Any):
+    def add_initial_state(self, state: int):
         self.initial_states.add(state)
 
-    def has_state_with_value(self, state: Any) -> bool:
+    def has_state_with_value(self, state: int) -> bool:
         return state in self.states
 
-    def has_final_state_with_value(self, value: Any) -> bool:
+    def has_final_state_with_value(self, value: int) -> bool:
         return value in self.final_states
 
-    def get_transition_target(self,
-                              origin: Any,
-                              via_symbol: LSBF_AlphabetSymbol
-                              ) -> Tuple[Any, ...]:
+    def get_transition_target(self, origin: int, via_symbol: LSBF_AlphabetSymbol) -> Tuple[int, ...]:
         # FIXME: Remove this cast.
+        # TODO: Rename this function to be get post or similar
         return tuple(self.transition_fn.get_transition_target(origin, via_symbol))
 
-    def intersection(self, other: NFA[S]):
+    def intersection(self, other: NFA):
         if self.alphabet != other.alphabet:
             assert False
 
@@ -192,7 +177,7 @@ class NFA(Generic[AutomatonState]):
                     len(resulting_nfa.states))
         return resulting_nfa
 
-    def union(self, other: NFA[S]) -> NFA[int]:
+    def union(self, other: NFA) -> NFA:
         if self.alphabet != other.alphabet:
             assert False
 
@@ -204,7 +189,7 @@ class NFA(Generic[AutomatonState]):
         initial_states = self_renamed.initial_states.union(other_renamed.initial_states)
         final_states = self_renamed.final_states.union(other_renamed.final_states)
 
-        union_nfa: NFA[int] = NFA(
+        union_nfa = NFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.NFA,
             initial_states=initial_states,
@@ -218,12 +203,14 @@ class NFA(Generic[AutomatonState]):
 
     def determinize(self):
         '''Performs NFA -> DFA using the powerset construction'''
+
+        # FIXME: This should map the states to int right away so that all automata have the same state type
         self._rename_own_states()
 
-        working_queue: List[Tuple[AutomatonState, ...]] = [tuple(self.initial_states)]
-        _final_states_raw = self.final_states
+        working_queue: List[Tuple[int, ...]] = [tuple(self.initial_states)]
+        _final_states_raw = self.final_states  # FIXME: Remove this
 
-        determinized_automaton: DFA[Tuple[AutomatonState, ...]] = DFA(
+        determinized_automaton: DFA = DFA(
             alphabet=self.alphabet,
             automaton_type=AutomatonType.DFA)
         determinized_automaton.add_initial_state(working_queue[0])
@@ -231,7 +218,7 @@ class NFA(Generic[AutomatonState]):
         projected_alphabet_symbols = list(self.alphabet.gen_projection_symbols_onto_variables(self.used_variables))
 
         while working_queue:
-            unexplored_dfa_state: Tuple[AutomatonState, ...] = working_queue.pop(-1)
+            unexplored_dfa_state: Tuple[int, ...] = working_queue.pop(-1)
             logger.debug(f'Determinization for {unexplored_dfa_state}, remaining in work queue: {len(working_queue)}')
 
             determinized_automaton.add_state(unexplored_dfa_state)
@@ -241,7 +228,7 @@ class NFA(Generic[AutomatonState]):
                 determinized_automaton.add_final_state(unexplored_dfa_state)
 
             for symbol in projected_alphabet_symbols:
-                reachable_states: List[AutomatonState] = list()
+                reachable_states: List[int] = []
 
                 cylindrified_symbol = self.alphabet.cylindrify_symbol_of_projected_alphabet(self.used_variables,
                                                                                             symbol)
@@ -251,8 +238,7 @@ class NFA(Generic[AutomatonState]):
                     if out_states:
                         reachable_states += list(out_states)
 
-                # FIXME: Some form of a restriction to AutomatonState type is needed in order to support SupportsLessThan type
-                dfa_state: Tuple[AutomatonState, ...] = tuple(set(sorted(reachable_states)))  # type: ignore
+                dfa_state = tuple(set(sorted(reachable_states)))  # type: ignore
 
                 if dfa_state and not determinized_automaton.has_state_with_value(dfa_state):
                     if dfa_state not in working_queue:
@@ -284,7 +270,7 @@ class NFA(Generic[AutomatonState]):
 
         _, state_name_translation = create_enumeration_state_translation_map(self.states, debug_fn, start_from=0)
 
-        def translate(state: AutomatonState) -> int:
+        def translate(state: int) -> int:
             return state_name_translation[state]
 
         self.states = set(map(translate, self.states))
@@ -294,6 +280,7 @@ class NFA(Generic[AutomatonState]):
         self.transition_fn.rename_states(state_name_translation)
 
     def do_projection(self, variable_id: int, skip_pad_closure: bool = False) -> Optional[NFA]:
+        # FIXME: This cannot return None, fix the type 
         resulting_alphabet_var_count = len(self.used_variables) - 1
 
         if resulting_alphabet_var_count == 0:
@@ -307,10 +294,7 @@ class NFA(Generic[AutomatonState]):
 
         else:
             # Cross out the projected variable
-            new_nfa: NFA[AutomatonState] = NFA(
-                alphabet=self.alphabet,
-                automaton_type=AutomatonType.NFA,
-            )
+            new_nfa = NFA(alphabet=self.alphabet, automaton_type=AutomatonType.NFA)
 
             new_nfa.states = set(self.states)
             new_nfa.initial_states = set(self.initial_states)
@@ -325,6 +309,7 @@ class NFA(Generic[AutomatonState]):
 
             if not skip_pad_closure:
                 new_nfa.perform_pad_closure()
+
             new_used_vars = list(self.used_variables)
             new_used_vars.remove(variable_id)
             new_nfa.used_variables = new_used_vars
@@ -334,13 +319,11 @@ class NFA(Generic[AutomatonState]):
         '''Performs inplace padding closure. See file automaton_algorithms.py:padding_closure'''
         automaton_algorithms.pad_closure2(self)
 
-    def get_symbols_leading_from_state_to_state(self,
-                                                from_state: AutomatonState,
-                                                to_state: AutomatonState) -> Set[LSBF_AlphabetSymbol]:
+    def get_symbols_leading_from_state_to_state(self, from_state: int, to_state: int) -> Set[LSBF_AlphabetSymbol]:
         return self.transition_fn.get_symbols_between_states(from_state, to_state)
 
-    def rename_states(self, start_from: int = 0) -> Tuple[int, NFA[int]]:
-        nfa: NFA[int] = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
+    def rename_states(self, start_from: int = 0) -> Tuple[int, NFA]:
+        nfa = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
 
         debug_fn: Optional[functools.partial[None]]
         if self._debug_state_rename is not None:
@@ -348,9 +331,11 @@ class NFA(Generic[AutomatonState]):
         else:
             debug_fn = None
 
-        hightest_state, state_name_translation = create_enumeration_state_translation_map(self.states, debug_fn, start_from=start_from)
+        hightest_state, state_name_translation = create_enumeration_state_translation_map(self.states,
+                                                                                          debug_fn, 
+                                                                                          start_from=start_from)
 
-        def translate(state: AutomatonState) -> int:
+        def translate(state: int) -> int:
             return state_name_translation[state]
 
         nfa.states.update(map(translate, self.states))
@@ -365,15 +350,13 @@ class NFA(Generic[AutomatonState]):
         ''' The complement is done with respect to \\Sigma^{+},
             since empty word encodes nothing.
         '''
-        result: NFA[AutomatonState] = NFA(
-            alphabet=self.alphabet,
-            automaton_type=self.automaton_type
-        )
+        result = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
 
         result.initial_states = set(self.initial_states)
         result.states = set(self.states)
+
+        # FIXME: The trivial automata are handled the same way as normal, remove this
         if self.automaton_type & AutomatonType.TRIVIAL:
-            # In trivial automaton we only need to do alternation.
             result.final_states = result.initial_states - self.final_states
         else:
             result.final_states = self.states - self.final_states
@@ -390,12 +373,11 @@ class NFA(Generic[AutomatonState]):
             else:
                 return (False, [])
 
-        # Implementation of DFS
-        # Implementation for determinized automaton
-        state_stack: List[AutomatonState] = list(self.initial_states)
-        traversal_history: Dict[AutomatonState, AutomatonState] = dict()
+        # Implementation of DFS for a determinized automaton
+        state_stack: List[int] = list(self.initial_states)
+        traversal_history: Dict[int, int] = dict()
 
-        explored_states: Set[AutomatonState] = set()
+        explored_states: Set[int] = set()
         used_word: List[LSBF_AlphabetSymbol] = list()
 
         while state_stack:
@@ -430,8 +412,7 @@ class NFA(Generic[AutomatonState]):
         self.states = reachable_states
 
     def get_state_post(self, state: int) -> List[int]:
-        assert state in self.states, \
-            f'Cannot retrieve post of non automaton state: {state}'
+        assert state in self.states, f'Cannot retrieve post of non automaton state: {state}'
         return self.transition_fn.get_state_post(state)
 
     @staticmethod
@@ -442,13 +423,13 @@ class NFA(Generic[AutomatonState]):
 
     @staticmethod
     def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA:
-        nfa: NFA[str] = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
+        nfa = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
 
         state = 0
         nfa.add_state(state)
         nfa.add_initial_state(state)
 
-        self_loop_symbol = tuple(['*'] * len(alphabet.variable_numbers))
+        self_loop_symbol = tuple('*' for i in len(alphabet.variable_numbers))
         nfa.update_transition_fn(state, self_loop_symbol, state)
         nfa.alphabet.active_variables = set()
 
