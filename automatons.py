@@ -525,6 +525,11 @@ class NFA(object):
 
 @dataclass
 class AutomatonSnapshot:
+    """
+    Debug class representing the automaton in an explicit manner.
+
+    Designed to allow for snapshoting the structure before and after some operation and inspecting the changes.
+    """
     states:         Set[int]
     final_states:   Set[int]
     initial_states: Set[int]
