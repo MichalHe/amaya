@@ -278,7 +278,7 @@ class NFA(object):
         self.transition_fn.rename_states(state_name_translation)
 
     def do_projection(self, variable_id: int, skip_pad_closure: bool = False) -> Optional[NFA]:
-        # FIXME: This cannot return None, fix the type 
+        # FIXME: This cannot return None, fix the type
         resulting_alphabet_var_count = len(self.used_variables) - 1
 
         if resulting_alphabet_var_count == 0:
@@ -330,7 +330,7 @@ class NFA(object):
             debug_fn = None
 
         hightest_state, state_name_translation = create_enumeration_state_translation_map(self.states,
-                                                                                          debug_fn, 
+                                                                                          debug_fn,
                                                                                           start_from=start_from)
 
         def translate(state: int) -> int:
@@ -361,7 +361,7 @@ class NFA(object):
 
         result.transition_fn = self.transition_fn.copy()
 
-        result.used_variables = list(self.used_variables)
+        result.used_variables = sorted(self.used_variables)
         return result
 
     def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
@@ -436,8 +436,8 @@ class NFA(object):
     def for_bool_variable(cls, overall_alphabet: LSBF_Alphabet, var_id: int, var_value: bool):
         """
         Builds an automaton accepting words representing the given bool variable having given value.
-        
-        The accepted words for a variable being True have only 1s (at least one), and similarly, all 0s for 
+
+        The accepted words for a variable being True have only 1s (at least one), and similarly, all 0s for
         the variable being False.
         The resulting autmaton is not complete (must be completed before complement).
         """
@@ -485,7 +485,7 @@ class NFA(object):
             variable_ids=var_ids,
             transitions=transitions
         )
-    
+
     def minimize(self) -> NFA:
         """Minimize using the Brzozowski NFA minimization procedure."""
 
@@ -496,7 +496,7 @@ class NFA(object):
             reverse_nfa.initial_states = set(nfa.final_states)
             reverse_nfa.final_states = set(nfa.initial_states)
             reverse_nfa.used_variables = sorted(nfa.used_variables)
-        
+
             for source, symbol, destination in nfa.transition_fn.iter():
                 reverse_nfa.update_transition_fn(destination, symbol, source)
             return reverse_nfa
@@ -506,7 +506,7 @@ class NFA(object):
                 len(self.states)))
 
         reverse_nfa = reverse_automaton(self)
-        
+
         logger.info('Determinizing the reversed automaton.')
         determinized_reverse_nfa = reverse_nfa.determinize()
         logger.info(f'Determinized reversed automaton size: {len(determinized_reverse_nfa.states)}.')
@@ -521,6 +521,88 @@ class NFA(object):
         logger.info(f'Automaton size: {len(minimal_dfa.states)}')
 
         return minimal_dfa
+
+    def hopcroft_minimization(self) -> NFA:
+        """
+        Minimizes the automaton using the Hopcroft minimization.
+
+        Requires the automaton to be deterministic.
+        """
+        assert self.automaton_type == AutomatonType.DFA
+
+        partitions = {tuple(sorted(self.final_states)), tuple(sorted(self.states - self.final_states))}
+        work_list = list(partitions)
+        
+        alphabet_symbols = tuple(self.alphabet.gen_projection_symbols_onto_variables(sorted(self.used_variables)))
+
+        while work_list:
+            current_partition = work_list.pop(-1)
+            for symbol in alphabet_symbols:
+
+                X = set()
+                for state in current_partition:
+                    a = list(self.transition_fn.get_state_pre_with_symbol(state, symbol))
+                    X.update(a)
+
+                for partition in tuple(partitions):
+                    Y = set(partition)
+                    intersect = X.intersection(Y)
+                    difference = Y - X
+                    if not intersect or not difference:
+                        # The partition split results in one empty set - no refinement can be gained
+                        continue
+
+                    intersect_partition = tuple(sorted(intersect))
+                    difference_partition = tuple(sorted(difference))
+
+                    # Refine the current partition into intersect and difference as we know that these sets
+                    # of states are not equivalent
+                    partitions.remove(current_partition)
+                    partitions.add(intersect_partition)
+                    partitions.add(difference_partition)
+
+                    # Check whether the partition we've just refined is a yet-to-be processed distinguisher
+                    if partition in work_list:
+                        # partition has just became obsole - replace it by the two new distinguishers
+                        work_list.remove(partition)
+                        work_list.append(intersect_partition)
+                        work_list.append(difference_partition)
+                    else:
+                        # It is sufficient to use only the smaller of the new distinguishers
+                        work_list.append(
+                            intersect_partition if len(intersect) < len(difference) else difference_partition
+                        )
+        
+        minimized_nfa = NFA(automaton_type=AutomatonType.DFA, 
+                            alphabet=self.alphabet,
+                            used_variables=self.used_variables)
+        partition_enumeration: Dict[Tuple[int, ...], int] = dict((part, i) for i, part in enumerate(partitions))
+        minimized_nfa.states = set(partition_enumeration.values())
+
+        original_state_to_partition: Dict[int, Tuple[int, ...]]= {}
+        for partition in partitions:
+            for state in partition:
+                original_state_to_partition[state] = partition
+
+        for partition in partitions:
+            min_state = partition_enumeration[partition]
+            partition_state = next(iter(partition))
+
+            for symbol, dest_state in self.transition_fn.get_out_transitions_for_state(partition_state):
+                dest_partition = original_state_to_partition[dest_state]
+                dest_min_state = partition_enumeration[dest_partition]
+
+                minimized_nfa.update_transition_fn(min_state, symbol, dest_min_state)
+            
+            if partition_state in self.final_states:
+                minimized_nfa.add_final_state(min_state)
+            
+            for state in partition:
+                if state in self.initial_states:
+                    minimized_nfa.add_initial_state(min_state)
+                    break
+
+        return minimized_nfa
 
 
 @dataclass
@@ -542,11 +624,11 @@ class AutomatonSnapshot:
         states = set(nfa.states)
         transitions = list(nfa.transition_fn.iter())
         return AutomatonSnapshot(states, final_states, initial_states, transitions)
-    
+
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, AutomatonSnapshot):
             return False
-        
+
         return all((
             self.states == other.states,
             self.final_states == other.final_states,

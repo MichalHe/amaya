@@ -606,6 +606,19 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                 if symbol in self.data[state][S]:
                     yield S
 
+    def get_out_transitions_for_state(self, 
+                                      state: StateType) -> Generator[Tuple[LSBF_AlphabetSymbol, StateType],
+                                                                     None,
+                                                                     None]:
+        """
+        Returns the outgoing transitions (symbol, destination) from the given state.
+        """
+        if state not in self.data:
+            return
+        for dest_state in self.data[state]:
+            for symbol in self.data[state][dest_state]:
+                yield(symbol, dest_state)
+
 
 class SparseBDDTransitionFunction(SparseTransitionFunctionBase[StateType]):
     def __init__(self, manager: BDD, alphabet):
