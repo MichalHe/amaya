@@ -2,22 +2,27 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import (
     Any,
-    Set,
     Dict,
-    Tuple,
-    List,
     Iterable,
+    List,
     Optional,
-    Union
+    Set,
+    Tuple,
+    Union,
 )
 
-from automatons import (
+from alphabet import (
     LSBF_Alphabet,
     LSBF_AlphabetSymbol,
-    AutomatonType,
-    NFA
 )
-from mtbdd_transitions import MTBDDTransitionFn, mtbdd_false
+from automatons import (
+    AutomatonType,
+    NFA,
+)
+from mtbdd_transitions import (
+    MTBDDTransitionFn,
+    mtbdd_false
+)
 from visualization import AutomatonVisRepresentation
 from log import logger
 
