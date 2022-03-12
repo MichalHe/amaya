@@ -3,14 +3,14 @@ from typing import (
     List
 )
 
-from presburger_algorithms import (
+from presburger.constructions.integers import (
     build_presburger_modulo_nfa
 )
 from relations_structures import ModuloTerm, Relation
 
 import pytest
 from automatons import AutomatonType, LSBF_Alphabet, NFA
-from tests.test_nfa_determization import ResolutionState
+from tests.conftest import ResolutionState
 
 RelationSetup = Tuple[List[Tuple[str, int]], LSBF_Alphabet, Relation]
 
@@ -28,8 +28,8 @@ def ineq_with_single_mod_term() -> RelationSetup:
                         modulo_term_coeficients=[1],
                         absolute_part=1,
                         operation='<=')
-    alphabet = LSBF_Alphabet.from_variable_ids([1])
     variable_id_pairs = [('x', 1)]
+    alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
     return (variable_id_pairs, alphabet, relation)
 
 
@@ -58,8 +58,8 @@ def ineq_with_multiple_modulo_contraints() -> RelationSetup:
                         modulo_term_coeficients=[1, 1],
                         absolute_part=4,
                         operation='<=')
-    alphabet = LSBF_Alphabet.from_variable_ids([1])
-    variable_id_pairs = [('x', 1)]
+    variable_id_pairs = [('x', 1), ('y', 2)]
+    alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
     return (variable_id_pairs, alphabet, relation)
 
 
@@ -128,8 +128,8 @@ def test_with_power_of_two_modulo():
                         modulo_term_coeficients=[1],
                         absolute_part=0,
                         operation='=')
-    alphabet = LSBF_Alphabet.from_variable_ids([1])
     variable_id_pairs = [('x', 1)]
+    alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
     
     nfa = build_presburger_modulo_nfa(relation, variable_id_pairs, alphabet, NFA)
 
