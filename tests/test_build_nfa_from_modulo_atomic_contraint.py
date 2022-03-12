@@ -3,14 +3,18 @@ from typing import (
     List
 )
 
-from presburger.constructions.integers import (
-    build_presburger_modulo_nfa
+from alphabet import LSBF_Alphabet
+from automatons import (
+    AutomatonType,
+    DFA,
+    NFA,
 )
+from presburger.constructions.integers import build_presburger_modulo_nfa
+from presburger.constructions.naturals import build_presburger_modulo_dfa
 from relations_structures import ModuloTerm, Relation
+from tests.conftest import ResolutionState
 
 import pytest
-from automatons import AutomatonType, LSBF_Alphabet, NFA
-from tests.conftest import ResolutionState
 
 RelationSetup = Tuple[List[Tuple[str, int]], LSBF_Alphabet, Relation]
 
@@ -63,20 +67,32 @@ def ineq_with_multiple_modulo_contraints() -> RelationSetup:
     return (variable_id_pairs, alphabet, relation)
 
 
-def assert_single_mod_term_automaton_structure(nfa: NFA,
-                                               final_state_count: int) -> Tuple[ResolutionState, ResolutionState, ResolutionState]:
+def assert_state_count(nfa: NFA, state_count: int, initial_state_count: int, final_state_count: int):
+    """Asserts that the automaton has correct number of states and produces a nice message if the assertion fails."""
+
+    fail_desc = 'The automaton has wrong number of{0} states - should have {1}, but has {2}.'
+
+    assert len(nfa.initial_states) == initial_state_count, fail_desc.format(
+            ' initial', initial_state_count, len(nfa.initial_states))
+
+    assert len(nfa.states) == state_count, fail_desc.format('', state_count, len(nfa.states))
+
+    assert len(nfa.final_states) == final_state_count, fail_desc.format(
+            ' final', final_state_count, len(nfa.final_states))
+
+
+def assert_single_mod_term_automaton_structure(nfa: NFA, is_domain_naturals=False):
     '''Verifies that the automaton for relation (x mod 3) <OP> 1 has the expected structure.'''
-    assert len(nfa.initial_states), 'The dfa build should have exactly 1 initial state.'
-    assert len(nfa.final_states) == 1, 'The NFA should have exactly 1 final state.'
-    fail_desc = 'The NFA should have a state for every possible remainder - that is 3 + one final state.'
-    assert len(nfa.states) == 4, fail_desc
+
+    exp_state_count = 3 if is_domain_naturals else 4
+    assert_state_count(nfa, exp_state_count, 1, 1)
 
     # States for reminders (rem=reminder)
     rem0 = ResolutionState()
     rem1 = ResolutionState()
     rem2 = ResolutionState()
 
-    rem1.bind(list(nfa.initial_states)[0])
+    rem1.bind(next(iter(nfa.initial_states)))
 
     expected_transitions = [
         (rem1, (0,), rem2),
@@ -90,34 +106,45 @@ def assert_single_mod_term_automaton_structure(nfa: NFA,
     final_state = next(iter(nfa.final_states))
     fail_desc = 'The states should have at max 2 transitons (1 to successor, maybe 1 to final state).'
 
-    print(nfa.extra_info['aliases'].data)
-    print(rem1.get())
-
     for i, expected_transition in enumerate(expected_transitions):
         source, symbol, expected_destination = expected_transition
-        destination = list(filter(lambda state: state != final_state, nfa.get_transition_target(source.get(), symbol)))
+
+        if is_domain_naturals:
+            destination = list(nfa.get_transition_target(source.get(), symbol))
+        else:
+            destination = [
+                state for state in nfa.get_transition_target(source.get(), symbol) if state != final_state
+            ]
+
         assert len(destination) == 1
 
-        print(f'Processing {i}: {source.get()} {destination}')
         expected_destination.bind(destination[0])
-
-    expected_transitions_to_final_state = [
-        (rem0, (0, )),
-        (rem2, (1, ))
-    ]
-    for source, symbol in expected_transitions_to_final_state:
-        assert final_state in nfa.get_transition_target(source.get(), symbol)
+    
+    if is_domain_naturals:
+        assert rem0.get() in nfa.final_states
+    else:
+        expected_transitions_to_final_state = [
+            (rem0, (0, )),
+            (rem2, (1, ))
+        ]
+        for source, symbol in expected_transitions_to_final_state:
+            assert final_state in nfa.get_transition_target(source.get(), symbol)
     
 
-def test_equality_with_single_modulo_constaint(eq_with_single_mod_term: RelationSetup):
+@pytest.mark.parametrize('domain', ('naturals', 'integers'))
+def test_equality_with_single_modulo_constaint(domain, eq_with_single_mod_term: RelationSetup):
     variable_id_pairs, alphabet, equation = eq_with_single_mod_term
+    is_domain_naturals = domain == 'naturals'
+    if is_domain_naturals:
+        nfa = build_presburger_modulo_dfa(equation, variable_id_pairs, alphabet, NFA)
+    else:
+        nfa = build_presburger_modulo_nfa(equation, variable_id_pairs, alphabet, DFA)
 
-    nfa = build_presburger_modulo_nfa(equation, variable_id_pairs, alphabet, NFA)
-
-    assert_single_mod_term_automaton_structure(nfa, 1)
+    assert_single_mod_term_automaton_structure(nfa, is_domain_naturals=is_domain_naturals)
 
 
-def test_with_power_of_two_modulo():
+@pytest.mark.parametrize('domain', ('naturals', 'integers'))
+def test_with_power_of_two_modulo(domain):
     modulo_term = ModuloTerm(variables=['x'],
                              variable_coeficients=(1,),
                              constant=0,
@@ -131,11 +158,17 @@ def test_with_power_of_two_modulo():
     variable_id_pairs = [('x', 1)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
     
-    nfa = build_presburger_modulo_nfa(relation, variable_id_pairs, alphabet, NFA)
+    is_domain_naturals = domain == 'naturals'
+    if is_domain_naturals:
+        nfa = build_presburger_modulo_dfa(relation, variable_id_pairs, alphabet, DFA)
+        exp_state_count = 3
+        exp_final_state_count = 3
+    else:
+        nfa = build_presburger_modulo_nfa(relation, variable_id_pairs, alphabet, NFA)
+        exp_state_count = 4
+        exp_final_state_count = 1
 
-    assert len(nfa.states) == 4
-    assert len(nfa.final_states) == 1
-    assert len(nfa.initial_states) == 1
+    assert_state_count(nfa, exp_state_count, initial_state_count=1, final_state_count=exp_final_state_count)
         
     state0_0 = ResolutionState()
     state0_1 = ResolutionState()
@@ -149,14 +182,22 @@ def test_with_power_of_two_modulo():
         (state0_2, (1, ), state0_2),
     ]
 
-    final_state = next(iter(nfa.final_states))
-
+    final_state = next(iter(nfa.final_states))  # Will be used only to filter out the NFA structure (integer solutions)
+     
     for origin, symbol, dest in expected_transitions:
-        destination_set = list(filter(lambda dest: dest != final_state, nfa.get_transition_target(origin.get(), symbol)))
-        assert len(destination_set) == 1
-        dest.bind(destination_set[0])
-
-    assert final_state in nfa.get_transition_target(state0_0.get(), (0,))
-    assert final_state in nfa.get_transition_target(state0_1.get(), (0,))
-    assert final_state in nfa.get_transition_target(state0_2.get(), (0,))
-    assert final_state in nfa.get_transition_target(state0_2.get(), (1,))
+        if is_domain_naturals:
+            destination_list = list(nfa.get_transition_target(origin.get(), symbol))
+        else:
+            destination_list = [d for d in nfa.get_transition_target(origin.get(), symbol) if d != final_state]
+        assert len(destination_list) == 1
+        dest.bind(destination_list[0])
+    
+    if is_domain_naturals:
+        assert state0_0.get() in nfa.final_states
+        assert state0_1.get() in nfa.final_states
+        assert state0_2.get() in nfa.final_states
+    else:
+        assert final_state in nfa.get_transition_target(state0_0.get(), (0,))
+        assert final_state in nfa.get_transition_target(state0_1.get(), (0,))
+        assert final_state in nfa.get_transition_target(state0_2.get(), (0,))
+        assert final_state in nfa.get_transition_target(state0_2.get(), (1,))
