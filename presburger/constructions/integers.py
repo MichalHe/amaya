@@ -18,8 +18,11 @@ from automatons import (
 )
 from log import logger
 from presburger.definitions import(
+    AliasStore,
     AutomatonConstructor,
+    can_build_modulo_automaton,
     NFA_AutomatonStateType,
+    ModuloTermStateComponent,
 )
 from relations_structures import Relation
 from utils import vector_dot
@@ -60,54 +63,10 @@ class EqLinearStateComponent(LinearStateComponent):
                                       variable_coeficients=self.variable_coeficients)
 
 
-@dataclass(frozen=True)
-class ModuloTermStateComponent(object):
-    value: int
-    modulo: int
-    variable_coeficients: Tuple[int, ...]
-
-    def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[ModuloTermStateComponent]:
-        dot = vector_dot(self.variable_coeficients, alphabet_symbol)
-
-        if self.modulo % 2 == 0:
-            if dot % 2 == 0:
-                return ModuloTermStateComponent(
-                    value=dot//2,
-                    modulo=self.modulo//2,
-                    variable_coeficients=self.variable_coeficients
-                )
-            else:
-                return None
-
-        difference = self.value - dot
-        next_value = difference // 2 if difference % 2 == 0 else (difference + self.modulo) // 2
-        next_value = next_value % self.modulo
-        return ModuloTermStateComponent(
-            value=next_value,
-            modulo=self.modulo,
-            variable_coeficients=self.variable_coeficients
-        )
-
-
 # This is used in the formula->NFA procedure. The created NFA has int automaton
 # states
 InterimAutomatonState = Tuple[Union[LinearStateComponent, ModuloTermStateComponent], ...]
 TransitionPredicate = Callable[[InterimAutomatonState, Tuple[int, ...], InterimAutomatonState, Relation], bool]
-
-
-class AliasStore(object):
-    def __init__(self):
-        self.data: Dict[InterimAutomatonState, int] = {}
-        self.counter = 0
-
-    def get_alias_for_state(self, state: InterimAutomatonState):
-        if state in self.data:
-            return self.data[state]
-        else:
-            alias = self.counter
-            self.data[state] = alias
-            self.counter += 1
-            return alias
 
 
 def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateComponent,
@@ -272,11 +231,9 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
     :param nfa: An empty NFA that will have its structure formed to encode the modulo relation.
     '''
 
-    logger.info('Building modulo-DFA for provided relation: {0}'.format(relation))
+    logger.info('Building modulo-NFA for provided relation: {0}'.format(relation))
 
-    assert not relation.variable_names, 'Trying to build modulo automaton from relation with some linear terms.'
-    assert len(relation.modulo_terms) == 1, 'Currently we don\'t know how to build automaton for more than 1 mod term.'
-    assert relation.operation == '=', 'Don\'t know how to build NFA for different relation than equality.'
+    assert can_build_modulo_automaton(relation) 
 
     nfa = automaton_constr(alphabet=alphabet, automaton_type=AutomatonType.NFA)
 
@@ -343,8 +300,11 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
         for source, symbol in transitions_to_final_state:
             nfa.update_transition_fn(source, symbol, final_state)
 
-    logger.info('Done. Built NFA with {0} states, out of which {1} are final.'.format(
-        len(nfa.states), len(nfa.final_states)))
+    logger.info(
+        'Done. Built NFA with {0} states ({1} {2} final).'.format(
+            len(nfa.states), len(nfa.final_states), 'is' if len(nfa.final_states) == 1 else 'are'
+        )
+    )
 
     nfa.used_variables = list(map(lambda pair: pair[1], relation_variables_with_ids))
     nfa.extra_info['aliases'] = alias_store
