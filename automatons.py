@@ -43,11 +43,13 @@ class AutomatonType(IntFlag):
 @dataclass
 class NFA(object):
     alphabet:       LSBF_Alphabet
-    transition_fn:  SparseSimpleTransitionFunction
     automaton_type: AutomatonType = AutomatonType.NFA
+    transition_fn:  SparseSimpleTransitionFunction = field(default_factory=SparseSimpleTransitionFunction)
     initial_states: Set[int] = field(default_factory=set)
     final_states:   Set[int] = field(default_factory=set)
     states:         Set[int] = field(default_factory=set)
+    state_labels:   Dict[int, Any] = field(default_factory=dict)
+    extra_info:     Dict[Any, Any] = field(default_factory=dict)
 
     # Debug handle to listen to any state renaming happening during
     # intersecion/union; takes (automaton_id: int, old_state: int, new_state: int)
@@ -55,25 +57,6 @@ class NFA(object):
 
     used_variables: List[int] = field(default_factory=list)
     """Variable IDs that are free in the formula represented by this automaton."""
-
-    def __init__(self,
-                 alphabet: LSBF_Alphabet,
-                 automaton_type=AutomatonType.NFA,
-                 initial_states: Optional[Set[int]] = None,
-                 final_states: Optional[Set[int]] = None,
-                 states: Optional[Set[int]] = None,
-                 transition_fn: Optional[SparseSimpleTransitionFunction] = None,
-                 used_variables: Optional[List[int]] = None):
-
-        self.alphabet = alphabet
-        self.automaton_type = automaton_type
-        self.final_states = final_states if final_states is not None else set()
-        self.states = states if states is not None else set()
-        self.initial_states = initial_states if initial_states is not None else set()
-        self.transition_fn = transition_fn if transition_fn is not None else SparseSimpleTransitionFunction()
-
-        self.extra_info: Dict[str, Any] = dict()
-        self.used_variables = used_variables if used_variables is not None else []
 
     def update_transition_fn(self, from_state: int, via_symbol: LSBF_AlphabetSymbol, to_state: int):
         self.transition_fn.insert_transition(from_state, via_symbol, to_state)
@@ -483,7 +466,8 @@ class NFA(object):
             initial_states=set(self.initial_states),
             variable_names=var_names,
             variable_ids=var_ids,
-            transitions=transitions
+            transitions=transitions,
+            state_labels=self.state_labels
         )
 
     def minimize(self) -> NFA:

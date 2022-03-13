@@ -1,6 +1,18 @@
 from graphviz import Digraph
-from typing import Callable, Dict, Tuple, List, Union, Set
-from dataclasses import dataclass
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
+from dataclasses import (
+    dataclass,
+    field
+)
 
 
 def compute_html_label_for_symbols(variable_names: List[str], symbols: List[Tuple[int, ...]]):
@@ -92,6 +104,7 @@ class AutomatonVisRepresentation:
     transitions:    List[Transition]
     variable_names: Tuple[str, ...]
     variable_ids:   Tuple[int, ...]
+    state_labels:   Dict[int, Any] = field(default_factory=dict)
 
     def into_graphviz(self) -> Digraph:
         """Transforms the stored automaton represenation into graphviz (dot)."""
