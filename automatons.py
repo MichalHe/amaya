@@ -191,53 +191,64 @@ class NFA(object):
 
         return union_nfa
 
-    def determinize(self) -> NFA:
+    def determinize(self) -> DFA:
         """
         Constructs a DFA having the same language as this automaton (standard subset construction).
         """
 
         # FIXME: This should map the states to int right away so that all automata have the same state type
-        working_queue: List[Tuple[int, ...]] = [tuple(self.initial_states)]
-        _final_states_raw = self.final_states  # FIXME: Remove this
+        work_list: List[Tuple[int, ...]] = [tuple(sorted(self.initial_states))]
 
-        determinized_automaton: DFA = DFA(
-            alphabet=self.alphabet,
-            automaton_type=AutomatonType.DFA)
-        determinized_automaton.add_initial_state(working_queue[0])
+        determinized_automaton: DFA = DFA(alphabet=self.alphabet, automaton_type=AutomatonType.DFA)
+        label_to_state_number: Dict[Tuple[int, ...], int] = {work_list[0]: 0}
+        determinized_automaton.add_initial_state(0)  # As there is only one initial state we know its label
 
         projected_alphabet_symbols = list(self.alphabet.gen_projection_symbols_onto_variables(self.used_variables))
 
-        while working_queue:
-            unexplored_dfa_state: Tuple[int, ...] = working_queue.pop(-1)
-            logger.debug(f'Determinization for {unexplored_dfa_state}, remaining in work queue: {len(working_queue)}')
+        while work_list:
+            current_metastate_label: Tuple[int, ...] = work_list.pop(-1)
+            current_metastate = label_to_state_number[current_metastate_label]
 
-            determinized_automaton.add_state(unexplored_dfa_state)
+            logger.debug(f'Determinization for {current_metastate}, remaining in work queue: {len(work_list)}')
 
-            intersect = set(unexplored_dfa_state).intersection(_final_states_raw)
-            if intersect:
-                determinized_automaton.add_final_state(unexplored_dfa_state)
+            determinized_automaton.add_state(current_metastate)
+
+            if not self.final_states.isdisjoint(current_metastate_label):
+                determinized_automaton.add_final_state(current_metastate)
 
             for symbol in projected_alphabet_symbols:
                 reachable_states: List[int] = []
 
                 cylindrified_symbol = self.alphabet.cylindrify_symbol_of_projected_alphabet(self.used_variables,
                                                                                             symbol)
-                for state in unexplored_dfa_state:
+                for state in current_metastate_label:
                     # Get all states reacheble from current state via symbol
                     out_states = self.get_transition_target(state, cylindrified_symbol)
-                    if out_states:
-                        reachable_states += list(out_states)
+                    reachable_states.extend(out_states)
 
-                dfa_state = tuple(set(sorted(reachable_states)))  # type: ignore
+                if not reachable_states:
+                    continue
 
-                if dfa_state and not determinized_automaton.has_state_with_value(dfa_state):
-                    if dfa_state not in working_queue:
-                        working_queue.append(dfa_state)
+                next_metastate_label: Tuple[int, ...] = tuple(sorted(set(reachable_states)))
 
-                if dfa_state:
-                    determinized_automaton.update_transition_fn(unexplored_dfa_state, cylindrified_symbol, dfa_state)
+                if next_metastate_label in label_to_state_number:
+                    next_metastate_num = label_to_state_number[next_metastate_label]
+                else:
+                    next_metastate_num = len(label_to_state_number)
+                    label_to_state_number[next_metastate_label] = next_metastate_num
 
-        determinized_automaton.used_variables = self.used_variables
+                if not determinized_automaton.has_state_with_value(next_metastate_num):
+                    if next_metastate_label not in work_list:
+                        work_list.append(next_metastate_label)
+
+                determinized_automaton.update_transition_fn(current_metastate, cylindrified_symbol, next_metastate_num)
+
+        determinized_automaton.used_variables = sorted(self.used_variables)
+
+        for label, state in label_to_state_number.items():
+            rich_label = tuple(self.state_labels.get(component, component) for component in label)
+            determinized_automaton.state_labels[state] = rich_label
+
         determinized_automaton.add_trap_state()
         return determinized_automaton
 
