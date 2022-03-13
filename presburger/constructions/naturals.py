@@ -231,5 +231,6 @@ def build_presburger_modulo_dfa(equality: Relation,
     ))
 
     dfa.used_variables = sorted(var_id_pair[1] for var_id_pair in eq_var_id_pairs)
-    dfa.extra_info['aliases'] = alias_store
+    # Alias store maps the rich information about modulo states to ints, create reverse mapping for debugging purposes
+    dfa.state_labels = dict((state, label) for label, state in alias_store.data.items())
     return dfa

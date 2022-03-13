@@ -306,6 +306,7 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
         )
     )
 
-    nfa.used_variables = list(map(lambda pair: pair[1], relation_variables_with_ids))
+    nfa.used_variables = [var_id_pair[1] for var_id_pair in relation_variables_with_ids]
+    nfa.state_labels = dict((state, label) for label, state in alias_store.data.items())
     nfa.extra_info['aliases'] = alias_store
     return nfa
