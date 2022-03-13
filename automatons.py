@@ -82,19 +82,19 @@ class NFA(object):
         return tuple(self.transition_fn.get_transition_target(origin, via_symbol))
 
     def intersection(self, other: NFA):
-        if self.alphabet != other.alphabet:
-            assert False
+        """
+        Construct automaton accepting the intersection of the languages of this and the other automaton.
+        """
+        assert self.alphabet == other.alphabet
 
         logger.info('Performing automaton intesection. Input automaton sizes: {0} states other {1} states'.format(
             len(self.states), len(other.states)))
 
+        # TODO: We do not need to rename the states as they are kept in the components separated
         self_renamed_highest_state, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
 
-        resulting_nfa: NFA[Tuple[int, int]] = NFA(
-            alphabet=self.alphabet,
-            automaton_type=AutomatonType.NFA
-        )
+        resulting_nfa: NFA = NFA(alphabet=self.alphabet, automaton_type=AutomatonType.NFA)
 
         used_variable_ids = sorted(set(self.used_variables + other.used_variables))
         projected_alphabet = list(self.alphabet.gen_projection_symbols_onto_variables(used_variable_ids))
@@ -106,27 +106,32 @@ class NFA(object):
         ))
 
         # Add all the initial states to the to-be-processed queue
-        work_queue = carthesian_product(self_renamed.initial_states,
-                                        other_renamed.initial_states)
+        work_queue: List[Tuple[int, int]] = carthesian_product(self_renamed.initial_states,
+                                                               other_renamed.initial_states)
+        labels_to_state_number: Dict[Tuple[int, int], int] = dict(
+            (state, i) for i, state in enumerate(work_queue)
+        )
 
         for initial_state in work_queue:
-            resulting_nfa.add_initial_state(initial_state)
+            state_number = labels_to_state_number[initial_state]
+            resulting_nfa.add_initial_state(state_number)
 
         states_processed_cnt = 0
         while work_queue:
-            current_state: Tuple[int, int] = work_queue.pop(-1)
+            current_state_label: Tuple[int, int] = work_queue.pop(-1)
+            # Product states have their numbers assigned as their are discovered during the intersection procedure
+            current_state: int = labels_to_state_number[current_state_label]
+
             resulting_nfa.add_state(current_state)
 
-            logger.debug(f'Processed state {current_state}, remaining in queue {len(work_queue)}')
+            logger.debug(f'Processed state {current_state_label}, remaining in queue {len(work_queue)}')
 
-            # States in work_queue are boxed
-            self_state, others_state = current_state
+            self_state, others_state = current_state_label
 
-            # Check whether intersectin state should be made final
+            # Check whether the product state is final (both components are final in corresponding automata)
             if (self_state in self_renamed.final_states and others_state in other_renamed.final_states):
-                resulting_nfa.add_final_state((self_state, others_state))
+                resulting_nfa.add_final_state(current_state)
 
-            # optimized_intersection: Set[Tuple[LSBF_AlphabetSymbol, Tuple[int, int]]] = set()
             has_self_state_out_transitions = bool(self_renamed.transition_fn.get_state_post(self_state))
             has_other_state_out_transitions = bool(other_renamed.transition_fn.get_state_post(others_state))
 
@@ -137,18 +142,22 @@ class NFA(object):
                     self_destination_set = self_renamed.get_transition_target(self_state, cylindrified_symbol)
                     other_destination_set = other_renamed.get_transition_target(others_state, cylindrified_symbol)
 
-                    for produced_intersection_metastate in carthesian_product(self_destination_set,
-                                                                              other_destination_set):
+                    for next_state_label in carthesian_product(self_destination_set, other_destination_set):
+                        if next_state_label in labels_to_state_number:
+                            next_state = labels_to_state_number[next_state_label]
+                        else:
+                            next_state = len(labels_to_state_number) + 1
+                            labels_to_state_number[next_state_label] = next_state
 
-                        resulting_nfa.update_transition_fn(current_state,
-                                                           cylindrified_symbol,
-                                                           produced_intersection_metastate)
+                        resulting_nfa.update_transition_fn(current_state, cylindrified_symbol, next_state)
 
-                        if not resulting_nfa.has_state_with_value(produced_intersection_metastate) and produced_intersection_metastate not in work_queue:
-                            work_queue.append(produced_intersection_metastate)
+                        if not resulting_nfa.has_state_with_value(next_state) and next_state_label not in work_queue:
+                            work_queue.append(next_state_label)
+
             states_processed_cnt += 1
 
         resulting_nfa.used_variables = used_variable_ids
+        resulting_nfa.state_labels = dict((state, label) for label, state in labels_to_state_number.items())
 
         resulting_nfa.remove_nonfinishing_states()
 
@@ -516,7 +525,7 @@ class NFA(object):
 
         partitions = {tuple(sorted(self.final_states)), tuple(sorted(self.states - self.final_states))}
         work_list = list(partitions)
-        
+
         alphabet_symbols = tuple(self.alphabet.gen_projection_symbols_onto_variables(sorted(self.used_variables)))
 
         while work_list:
@@ -556,8 +565,8 @@ class NFA(object):
                         work_list.append(
                             intersect_partition if len(intersect) < len(difference) else difference_partition
                         )
-        
-        minimized_nfa = NFA(automaton_type=AutomatonType.DFA, 
+
+        minimized_nfa = NFA(automaton_type=AutomatonType.DFA,
                             alphabet=self.alphabet,
                             used_variables=self.used_variables)
         partition_enumeration: Dict[Tuple[int, ...], int] = dict((part, i) for i, part in enumerate(partitions))
@@ -577,10 +586,10 @@ class NFA(object):
                 dest_min_state = partition_enumeration[dest_partition]
 
                 minimized_nfa.update_transition_fn(min_state, symbol, dest_min_state)
-            
+
             if partition_state in self.final_states:
                 minimized_nfa.add_final_state(min_state)
-            
+
             for state in partition:
                 if state in self.initial_states:
                     minimized_nfa.add_initial_state(min_state)
