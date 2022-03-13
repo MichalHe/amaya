@@ -81,7 +81,7 @@ class NFA(object):
         # TODO: Rename this function to be get post or similar
         return tuple(self.transition_fn.get_transition_target(origin, via_symbol))
 
-    def intersection(self, other: NFA):
+    def intersection(self, other: NFA, remove_nonfinishing_states: bool = True):
         """
         Construct automaton accepting the intersection of the languages of this and the other automaton.
         """
@@ -157,9 +157,14 @@ class NFA(object):
             states_processed_cnt += 1
 
         resulting_nfa.used_variables = used_variable_ids
-        resulting_nfa.state_labels = dict((state, label) for label, state in labels_to_state_number.items())
+        for label, state in labels_to_state_number.items():
+            self_state, other_state = label
+            self_state_label = self_renamed.state_labels.get(self_state, self_state)
+            other_state_label = other_renamed.state_labels.get(other_state, other_state)
+            resulting_nfa.state_labels[state] = (self_state_label, other_state_label)
 
-        resulting_nfa.remove_nonfinishing_states()
+        if remove_nonfinishing_states:
+            resulting_nfa.remove_nonfinishing_states()
 
         assert resulting_nfa.used_variables
         logger.info('Intersection done. States processed: %d. Result has %d states.',
