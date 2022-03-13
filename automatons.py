@@ -191,12 +191,12 @@ class NFA(object):
 
         return union_nfa
 
-    def determinize(self):
-        '''Performs NFA -> DFA using the powerset construction'''
+    def determinize(self) -> NFA:
+        """
+        Constructs a DFA having the same language as this automaton (standard subset construction).
+        """
 
         # FIXME: This should map the states to int right away so that all automata have the same state type
-        self._rename_own_states()
-
         working_queue: List[Tuple[int, ...]] = [tuple(self.initial_states)]
         _final_states_raw = self.final_states  # FIXME: Remove this
 
