@@ -129,6 +129,7 @@ def assert_single_mod_term_automaton_structure(nfa: NFA, is_domain_naturals=Fals
         ]
         for source, symbol in expected_transitions_to_final_state:
             assert final_state in nfa.get_transition_target(source.get(), symbol)
+    assert nfa.used_variables == [1]
     
 
 @pytest.mark.parametrize('domain', ('naturals', 'integers'))
@@ -201,3 +202,5 @@ def test_with_power_of_two_modulo(domain):
         assert final_state in nfa.get_transition_target(state0_1.get(), (0,))
         assert final_state in nfa.get_transition_target(state0_2.get(), (0,))
         assert final_state in nfa.get_transition_target(state0_2.get(), (1,))
+
+    assert nfa.used_variables == [1]

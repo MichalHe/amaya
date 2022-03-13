@@ -66,3 +66,4 @@ def test_dfa_from_sharp_ineq_simple(ineq: Relation):
 
     assert len(dfa.final_states) == 3
     assert {s2.get(), s1.get(), s0.get()} == dfa.final_states
+    assert dfa.used_variables == sorted(var_id_pair[1] for var_id_pair in var_id_pairs)

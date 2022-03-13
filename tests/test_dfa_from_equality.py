@@ -75,3 +75,5 @@ def test_eq_to_dfa_simple(equation: Relation):
     assert s0.get() in dfa.final_states
 
     assert len(dfa.states) == 6  # 5 normal plus trap
+
+    assert dfa.used_variables == sorted(var_id_pair[1] for var_id_pair in var_id_pairs)
