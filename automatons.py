@@ -90,10 +90,6 @@ class NFA(object):
         logger.info('Performing automaton intesection. Input automaton sizes: {0} states other {1} states'.format(
             len(self.states), len(other.states)))
 
-        # TODO: We do not need to rename the states as they are kept in the components separated
-        self_renamed_highest_state, self_renamed = self.rename_states()
-        _, other_renamed = other.rename_states(start_from=self_renamed_highest_state)
-
         resulting_nfa: NFA = NFA(alphabet=self.alphabet, automaton_type=AutomatonType.NFA)
 
         used_variable_ids = sorted(set(self.used_variables + other.used_variables))
@@ -106,8 +102,7 @@ class NFA(object):
         ))
 
         # Add all the initial states to the to-be-processed queue
-        work_queue: List[Tuple[int, int]] = carthesian_product(self_renamed.initial_states,
-                                                               other_renamed.initial_states)
+        work_queue: List[Tuple[int, int]] = carthesian_product(self.initial_states, other.initial_states)
         labels_to_state_number: Dict[Tuple[int, int], int] = dict(
             (state, i) for i, state in enumerate(work_queue)
         )
@@ -129,18 +124,18 @@ class NFA(object):
             self_state, others_state = current_state_label
 
             # Check whether the product state is final (both components are final in corresponding automata)
-            if (self_state in self_renamed.final_states and others_state in other_renamed.final_states):
+            if (self_state in self.final_states and others_state in other.final_states):
                 resulting_nfa.add_final_state(current_state)
 
-            has_self_state_out_transitions = bool(self_renamed.transition_fn.get_state_post(self_state))
-            has_other_state_out_transitions = bool(other_renamed.transition_fn.get_state_post(others_state))
+            has_self_state_out_transitions = bool(self.transition_fn.get_state_post(self_state))
+            has_other_state_out_transitions = bool(other.transition_fn.get_state_post(others_state))
 
             if has_self_state_out_transitions and has_other_state_out_transitions:
                 for projected_symbol in projected_alphabet:
                     cylindrified_symbol = self.alphabet.cylindrify_symbol_of_projected_alphabet(used_variable_ids,
                                                                                                 projected_symbol)
-                    self_destination_set = self_renamed.get_transition_target(self_state, cylindrified_symbol)
-                    other_destination_set = other_renamed.get_transition_target(others_state, cylindrified_symbol)
+                    self_destination_set = self.get_transition_target(self_state, cylindrified_symbol)
+                    other_destination_set = other.get_transition_target(others_state, cylindrified_symbol)
 
                     for next_state_label in carthesian_product(self_destination_set, other_destination_set):
                         if next_state_label in labels_to_state_number:
@@ -159,8 +154,8 @@ class NFA(object):
         resulting_nfa.used_variables = used_variable_ids
         for label, state in labels_to_state_number.items():
             self_state, other_state = label
-            self_state_label = self_renamed.state_labels.get(self_state, self_state)
-            other_state_label = other_renamed.state_labels.get(other_state, other_state)
+            self_state_label = self.state_labels.get(self_state, self_state)
+            other_state_label = other.state_labels.get(other_state, other_state)
             resulting_nfa.state_labels[state] = (self_state_label, other_state_label)
 
         if remove_nonfinishing_states:
