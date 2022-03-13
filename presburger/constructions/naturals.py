@@ -64,6 +64,8 @@ def build_dfa_from_linear_inequality(ineq: Relation,
             if not (dfa.has_state_with_value(next_state) or next_state in work_queue):
                 work_queue.append(next_state)
 
+    dfa.used_variables = sorted(var_id_pair[1] for var_id_pair in ineq_var_id_pairs)
+
     logger.debug(f'The constructed DFA: {dfa}')
 
     return dfa
@@ -154,6 +156,8 @@ def build_dfa_from_linear_equality(eq: Relation,
                     trap_state = add_trap_state_to_automaton(dfa)
                 dfa.update_transition_fn(current_state, alphabet_symbol, trap_state)
 
+    dfa.used_variables = sorted(var_id_pair[1] for var_id_pair in eq_var_id_pairs)
+
     return dfa
 
 
@@ -226,6 +230,6 @@ def build_presburger_modulo_dfa(equality: Relation,
         len(dfa.states), len(dfa.final_states), 'is' if len(dfa.final_states) == 1 else 'are'
     ))
 
-    dfa.used_variables = list(map(lambda pair: pair[1], eq_var_id_pairs))
+    dfa.used_variables = sorted(var_id_pair[1] for var_id_pair in eq_var_id_pairs)
     dfa.extra_info['aliases'] = alias_store
     return dfa
