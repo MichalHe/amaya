@@ -78,6 +78,9 @@ class ModuloTermStateComponent(object):
             variable_coeficients=self.variable_coeficients
         )
 
+    def __str__(self) -> str:
+        return f'{self.value} (mod {self.modulo})'
+
 
 class AliasStore(object):
     def __init__(self):
