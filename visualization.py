@@ -115,20 +115,24 @@ class AutomatonVisRepresentation:
                             'ranksep': '1'})
 
         for state in self.states:
+            state_label = str(self.state_labels.get(state, state))
             if state in self.final_states:
-                graph.node(str(state), str(state), shape='doublecircle')
+                graph.node(state_label, state_label, shape='doublecircle')
             else:
-                graph.node(str(state), str(state))
+                graph.node(state_label, state_label)
 
         for state in self.initial_states:
             initial_point_name = f'{state}@Start'
+            initial_state_label = str(self.state_labels.get(state, state))
             graph.node(initial_point_name, shape='point')
-            graph.edge(initial_point_name, str(state))
+            graph.edge(initial_point_name, initial_state_label)
 
         for origin_state, transition_symbols, dest_state in self.transitions:
+            origin_label = str(self.state_labels.get(origin_state, origin_state))
+            dest_label = str(self.state_labels.get(dest_state, dest_state))
             graph.edge(
-                str(origin_state),
-                str(dest_state),
+                origin_label,
+                dest_label,
                 label=compute_html_label_for_symbols(
                     self.variable_names,
                     list(transition_symbols),
