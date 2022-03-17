@@ -81,6 +81,9 @@ class ModuloTermStateComponent(object):
     def __str__(self) -> str:
         return f'{self.value} (mod {self.modulo})'
 
+    def __repr__(self) -> str:
+        return f'c={self.value}'
+
 
 class AliasStore(object):
     def __init__(self):
