@@ -542,11 +542,10 @@ class NFA(object):
         while work_list:
             current_partition = work_list.pop(-1)
             for symbol in alphabet_symbols:
-
-                X = set()
+                X = set()  # Set of all states that can reach current partition via symbol
                 for state in current_partition:
-                    a = list(self.transition_fn.get_state_pre_with_symbol(state, symbol))
-                    X.update(a)
+                    state_pre = self.transition_fn.get_state_pre_with_symbol(state, symbol)
+                    X.update(state_pre)
 
                 for partition in tuple(partitions):
                     Y = set(partition)
@@ -561,7 +560,7 @@ class NFA(object):
 
                     # Refine the current partition into intersect and difference as we know that these sets
                     # of states are not equivalent
-                    partitions.remove(current_partition)
+                    partitions.remove(partition)
                     partitions.add(intersect_partition)
                     partitions.add(difference_partition)
 
@@ -583,7 +582,7 @@ class NFA(object):
         partition_enumeration: Dict[Tuple[int, ...], int] = dict((part, i) for i, part in enumerate(partitions))
         minimized_nfa.states = set(partition_enumeration.values())
 
-        original_state_to_partition: Dict[int, Tuple[int, ...]]= {}
+        original_state_to_partition: Dict[int, Tuple[int, ...]] = {}
         for partition in partitions:
             for state in partition:
                 original_state_to_partition[state] = partition
