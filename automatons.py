@@ -168,8 +168,8 @@ class NFA(object):
         return resulting_nfa
 
     def union(self, other: NFA) -> NFA:
-        if self.alphabet != other.alphabet:
-            assert False
+        """Construct an automaton accepting the union languages of this automaton and the other."""
+        assert self.alphabet == other.alphabet
 
         latest_state_value, self_renamed = self.rename_states()
         _, other_renamed = other.rename_states(start_from=latest_state_value)
