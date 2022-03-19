@@ -196,7 +196,6 @@ class NFA(object):
         Constructs a DFA having the same language as this automaton (standard subset construction).
         """
 
-        # FIXME: This should map the states to int right away so that all automata have the same state type
         work_list: List[Tuple[int, ...]] = [tuple(sorted(self.initial_states))]
 
         determinized_automaton: DFA = DFA(alphabet=self.alphabet, automaton_type=AutomatonType.DFA)
@@ -312,7 +311,7 @@ class NFA(object):
             return new_nfa
 
     def perform_pad_closure(self):
-        '''Performs inplace padding closure. See file automaton_algorithms.py:padding_closure'''
+        """Performs inplace padding closure. See file automaton_algorithms.py:padding_closure"""
         automaton_algorithms.pad_closure2(self)
 
     def get_symbols_leading_from_state_to_state(self, from_state: int, to_state: int) -> Set[LSBF_AlphabetSymbol]:
@@ -347,23 +346,22 @@ class NFA(object):
         return (next_state_name, nfa)
 
     def complement(self) -> NFA:
-        ''' The complement is done with respect to \\Sigma^{+},
-            since empty word encodes nothing.
-        '''
-        result = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
+        """
+        Construct automaton accepting the complement of the language.
 
-        result.initial_states = set(self.initial_states)
-        result.states = set(self.states)
+        The underlying automaton must be deterministic and complete in order for the complement to be correct.
+        """
+        assert self.automaton_type == AutomatonType.DFA, 'Cannot complement nondeterministic automaton'
 
-        # FIXME: The trivial automata are handled the same way as normal, remove this
-        if self.automaton_type & AutomatonType.TRIVIAL:
-            result.final_states = result.initial_states - self.final_states
-        else:
-            result.final_states = self.states - self.final_states
+        result = NFA(alphabet=self.alphabet,
+                     automaton_type=self.automaton_type,
+                     states=set(self.states),
+                     initial_states=set(self.initial_states),
+                     final_states=self.states - self.final_states,  # Swap accepting and nonaccepting states
+                     used_variables=sorted(self.used_variables))
 
         result.transition_fn = self.transition_fn.copy()
 
-        result.used_variables = sorted(self.used_variables)
         return result
 
     def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
