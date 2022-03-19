@@ -506,9 +506,21 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
     def complete_with_trap_state(self, alphabet,
                                  used_variable_ids: List[int],
-                                 states: List,
-                                 trap_state: Any = 'TRAP') -> bool:
-        trap_state_present: bool = False
+                                 states: Iterable[int],
+                                 trap_state: int) -> bool:
+        """
+        Augment the transition relation with transitions to a trap state for any state that is missing
+        an outgoing transition over some alphabet symbol.
+
+        :param alphabt: The overall alphabet.
+        :param used_variable_ids: A list of variable ids used by the automaton. Needed so that only transitions
+                                  via the symbols employed by this automaton are added with the rest of the tracks
+                                  being compressed.
+        :param states: A list of variable ids used by the automaton.
+        :param trap_state: Trap state number.
+        :returns: True if a trapstate was added.
+        """
+        trap_state_added: bool = False
 
         # This is basically the whole alphabet, with nonactive symbols compacted.
         projected_alphabet = alphabet.gen_projection_symbols_onto_variables(used_variable_ids)
@@ -522,15 +534,14 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
             missing_symbols = viable_symbols - out_symbols
 
-            if missing_symbols and not trap_state_present:
+            if missing_symbols and not trap_state_added:
                 universal_symbol = tuple(['*' for v in alphabet.variable_numbers])
                 self.insert_transition(trap_state, universal_symbol, trap_state)
-                trap_state_present = True
+                trap_state_added = True
 
             for missing_symbol in missing_symbols:
-                # WARN: Mutating dictionary while iterating over it.
                 self.insert_transition(origin, missing_symbol, trap_state)
-        return trap_state_present
+        return trap_state_added
 
     def project_bit_away(self, bit_pos: int):
         def do_projection_on_symbol(pos: int, symbol: Symbol) -> Symbol:
@@ -596,7 +607,7 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
             if state in self.data[origin]:
                 if symbol in self.data[origin][state]:
                     yield origin
-    
+
     def get_state_post_with_symbol(self, state: StateType, symbol) -> Generator[StateType, None, None]:
         """
         Returns an iterable with all states S for which a transition (state, symbol, S) exists.
@@ -606,7 +617,7 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                 if symbol in self.data[state][S]:
                     yield S
 
-    def get_out_transitions_for_state(self, 
+    def get_out_transitions_for_state(self,
                                       state: StateType) -> Generator[Tuple[LSBF_AlphabetSymbol, StateType],
                                                                      None,
                                                                      None]:

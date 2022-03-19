@@ -253,13 +253,20 @@ class NFA(object):
         return determinized_automaton
 
     def add_trap_state(self):
-        '''Adds trap (sink) state with transitions to it as needed.
-        The Given automaton should be determinized first.
-        '''
-        trap_state = 'TRAP'
-        states = list(self.states)
-        added_trap_state = self.transition_fn.complete_with_trap_state(self.alphabet, self.used_variables, states, trap_state=trap_state)
-        if added_trap_state:
+        """
+        Augments the automaton structure with a trapstate, making this DFA a complete one.
+
+        A complete DFA has a run for every given word. If there is no run for a given word in the orignal
+        DFA, this function adds it so that it leads to a trapstate that has an universal self loop.
+
+        The automaton should be deterministic.
+        """
+        assert self.automaton_type == AutomatonType.DFA, 'Cannot add a trap state to a nondeterministic automaton.'
+
+        trap_state = max(self.states) + 1
+        trap_state_added = self.transition_fn.complete_with_trap_state(self.alphabet, self.used_variables,
+                                                                       self.states, trap_state)
+        if trap_state_added:
             self.states.add(trap_state)
 
     def _rename_own_states(self):
