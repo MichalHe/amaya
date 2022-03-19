@@ -269,24 +269,6 @@ class NFA(object):
         if trap_state_added:
             self.states.add(trap_state)
 
-    def _rename_own_states(self):
-        debug_fn: Optional[functools.partial[None]]
-        if self._debug_state_rename is not None:
-            debug_fn = functools.partial(self._debug_state_rename, id(self))
-        else:
-            debug_fn = None
-
-        _, state_name_translation = create_enumeration_state_translation_map(self.states, debug_fn, start_from=0)
-
-        def translate(state: int) -> int:
-            return state_name_translation[state]
-
-        self.states = set(map(translate, self.states))
-        self.initial_states = set(map(translate, self.initial_states))
-        self.final_states = set(map(translate, self.final_states))
-
-        self.transition_fn.rename_states(state_name_translation)
-
     def do_projection(self, variable_id: int, skip_pad_closure: bool = False) -> Optional[NFA]:
         # FIXME: This cannot return None, fix the type
         resulting_alphabet_var_count = len(self.used_variables) - 1
