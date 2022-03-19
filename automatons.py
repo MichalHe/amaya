@@ -319,28 +319,32 @@ class NFA(object):
         return self.transition_fn.get_symbols_between_states(from_state, to_state)
 
     def rename_states(self, start_from: int = 0) -> Tuple[int, NFA]:
-        nfa = NFA(alphabet=self.alphabet, automaton_type=self.automaton_type)
+        """
+        Rename the state of this automaton to integers starting from `start_from` assigning states a new unique number.
 
-        debug_fn: Optional[functools.partial[None]]
-        if self._debug_state_rename is not None:
-            debug_fn = functools.partial(self._debug_state_rename, id(self))
-        else:
-            debug_fn = None
+        :param start_from: The integer value given to the first renamed state.
+        """
 
-        hightest_state, state_name_translation = create_enumeration_state_translation_map(self.states,
-                                                                                          debug_fn,
-                                                                                          start_from=start_from)
+        # Create a dictionary mapping the old states to new numbers
+        next_state_name = start_from
+        state_to_new_name: Dict[int, int] = {}
+        for state in self.states:
+            if self._debug_state_rename:
+                self._debug_state_rename(id(self), state, next_state_name)  # Emit debug info about state new name
 
-        def translate(state: int) -> int:
-            return state_name_translation[state]
+            state_to_new_name[state] = next_state_name
+            next_state_name += 1
 
-        nfa.states.update(map(translate, self.states))
-        nfa.initial_states.update(map(translate, self.initial_states))
-        nfa.final_states.update(map(translate, self.final_states))
+        nfa = NFA(alphabet=self.alphabet,
+                  automaton_type=self.automaton_type,
+                  states=set(state_to_new_name[state] for state in self.states),
+                  initial_states=set(state_to_new_name[state] for state in self.initial_states),
+                  final_states=set(state_to_new_name[state] for state in self.final_states))
+
         nfa.transition_fn = self.transition_fn.copy()
-        nfa.transition_fn.rename_states(state_name_translation)
+        nfa.transition_fn.rename_states(state_to_new_name)
 
-        return (hightest_state, nfa)
+        return (next_state_name, nfa)
 
     def complement(self) -> NFA:
         ''' The complement is done with respect to \\Sigma^{+},
