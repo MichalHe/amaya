@@ -269,8 +269,14 @@ class NFA(object):
         if trap_state_added:
             self.states.add(trap_state)
 
-    def do_projection(self, variable_id: int, skip_pad_closure: bool = False) -> Optional[NFA]:
-        # FIXME: This cannot return None, fix the type
+    def do_projection(self, variable_id: int, skip_pad_closure: bool = False) -> NFA:
+        """
+        Project away the given variable track.
+
+        :param variable_id: ID of variable of which should the corresponding tape track be projected away.
+        :param skip_pad_closure: Skip pad_closure after the projection has been performed.
+        :returns: NFA with the given variable track projected away.
+        """
         resulting_alphabet_var_count = len(self.used_variables) - 1
 
         if resulting_alphabet_var_count == 0:
@@ -300,8 +306,8 @@ class NFA(object):
             if not skip_pad_closure:
                 new_nfa.perform_pad_closure()
 
-            new_used_vars = list(self.used_variables)
-            new_used_vars.remove(variable_id)
+            # Assumes that the variables are kept sorted - does not perform sorting again
+            new_used_vars = [var_id for var_id in self.used_variables if var_id != variable_id]
             new_nfa.used_variables = new_used_vars
             return new_nfa
 
