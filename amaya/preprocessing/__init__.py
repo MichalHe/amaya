@@ -4,7 +4,7 @@ import amaya.ast_relations as relations
 from amaya.ast_definitions import AST_NaryNode, AST_Node, AST_Leaf, NodeEncounteredHandler, NodeEncounteredHandlerStatus
 from amaya.relations_structures import Relation, ModuloTerm
 from amaya.preprocessing.ite_preprocessing import expand_ite_expressions_inside_presburger_relation, ite_expansion_handler
-from amaya.log import logger
+from amaya import logger
 
 
 def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode) -> AST_Node:

@@ -25,7 +25,7 @@ from amaya.automatons import (
     LSBF_Alphabet,
     NFA, 
 )
-from amaya.log import logger
+from amaya import logger
 import amaya.presburger.constructions.naturals as relations_to_dfa
 import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing

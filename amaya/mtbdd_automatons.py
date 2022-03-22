@@ -24,7 +24,7 @@ from amaya.mtbdd_transitions import (
     mtbdd_false
 )
 from amaya.visualization import AutomatonVisRepresentation
-from amaya.log import logger
+from amaya import logger
 
 
 class MTBDD_NFA(NFA):

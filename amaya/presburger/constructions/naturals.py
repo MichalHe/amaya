@@ -11,7 +11,7 @@ from amaya.automatons import (
     LSBF_Alphabet,
     AutomatonType,
 )
-from amaya.log import logger
+from amaya import logger
 from amaya.presburger.definitions import (
     AliasStore,
     AutomatonConstructor,

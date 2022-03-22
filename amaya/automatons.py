@@ -20,8 +20,7 @@ from amaya.alphabet import (
     LSBF_Alphabet,
     LSBF_AlphabetSymbol
 )
-from amaya import automaton_algorithms
-from amaya.log import logger
+from amaya import logger, automaton_algorithms
 from amaya.transitions import (
     calculate_variable_bit_position,
     SparseSimpleTransitionFunction

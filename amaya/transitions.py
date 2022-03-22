@@ -19,7 +19,7 @@ from typing import (
 import functools
 from dd.autoref import BDD
 
-from amaya.log import logger
+from amaya import logger
 import amaya.utils
 
 Symbol = Tuple[Union[str, int], ...]

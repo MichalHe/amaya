@@ -5,7 +5,7 @@ from collections import defaultdict
 import pathlib
 import os
 
-from amaya.log import logger
+from amaya import logger
 
 amaya_root_path = pathlib.Path(__file__).parent.absolute()
 mtbdd_wrapper = ct.CDLL(os.path.join(amaya_root_path, 'amaya-mtbdd.so'))

@@ -10,8 +10,8 @@ from automatons import (
     LSBF_Alphabet,
     AutomatonType,
 )
-from log import logger
-from relations_structures import Relation
+from amaya import logger
+from amaya.relations_structures import Relation
 
 
 def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[int], modulo_relation: Relation):

@@ -30,7 +30,7 @@ from dataclasses import dataclass
 import time
 
 from amaya import automatons
-from amaya.log import logger
+from amaya import logger
 from amaya import parse
 
 

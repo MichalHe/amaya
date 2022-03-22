@@ -6,7 +6,7 @@ from typing import (
     Optional,
     Any
 )
-from amaya.log import logger
+from amaya import logger
 from amaya.relations_structures import Relation, ModuloTerm
 from amaya.utils import number_to_bit_tuple
 
