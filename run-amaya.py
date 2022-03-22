@@ -22,15 +22,16 @@ given formula (controlled via the `--backend` option):
 '''
 import argparse as ap
 from enum import Enum
-from log import logger
 import os
-import parse
 import logging
 import sys
-import automatons
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 import time
+
+from amaya import automatons
+from amaya.log import logger
+from amaya import parse
 
 
 class RunnerMode(Enum):

@@ -11,21 +11,21 @@ from typing import (
     Union,
 )
 
-from automatons import (
+from amaya.automatons import (
     AutomatonType,
     LSBF_Alphabet,
     NFA,
 )
-from log import logger
-from presburger.definitions import(
+from amaya.log import logger
+from amaya.presburger.definitions import(
     AliasStore,
     AutomatonConstructor,
     can_build_modulo_automaton,
     NFA_AutomatonStateType,
     ModuloTermStateComponent,
 )
-from relations_structures import Relation
-from utils import vector_dot
+from amaya.relations_structures import Relation
+from amaya.utils import vector_dot
 
 
 @dataclass(frozen=True)

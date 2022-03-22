@@ -7,13 +7,13 @@ from typing import (
     Union,
 )
 
-from alphabet import LSBF_Alphabet
-from automatons import (
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import (
     AutomatonType,
     NFA
 )
-from relations_structures import Relation
-from utils import vector_dot
+from amaya.relations_structures import Relation
+from amaya.utils import vector_dot
 
 
 # TODO: Make automata not be generic anymore (hardcode ints)

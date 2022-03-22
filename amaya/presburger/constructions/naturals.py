@@ -6,21 +6,21 @@ from typing import (
     Optional
 )
 
-from automatons import (
+from amaya.automatons import (
     DFA,
     LSBF_Alphabet,
     AutomatonType,
 )
-from log import logger
-from presburger.definitions import (
+from amaya.log import logger
+from amaya.presburger.definitions import (
     AliasStore,
     AutomatonConstructor,
     can_build_modulo_automaton,
     DFA_AutomatonStateType,
     ModuloTermStateComponent,
 )
-from relations_structures import Relation
-from utils import vector_dot
+from amaya.relations_structures import Relation
+from amaya.utils import vector_dot
 
 
 def build_dfa_from_linear_inequality(ineq: Relation,

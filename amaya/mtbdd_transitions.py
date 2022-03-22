@@ -2,9 +2,10 @@ from __future__ import annotations
 import ctypes as ct
 from typing import Dict, Any, Set, Tuple, Union, List, Iterable, Optional
 from collections import defaultdict
-from log import logger
 import pathlib
 import os
+
+from amaya.log import logger
 
 amaya_root_path = pathlib.Path(__file__).parent.absolute()
 mtbdd_wrapper = ct.CDLL(os.path.join(amaya_root_path, 'amaya-mtbdd.so'))

@@ -101,7 +101,7 @@ def pad_closure2(nfa):
                 nfa.update_transition_fn(state, symbol, new_final_state)
 
 
-from transitions import SparseBDDTransitionFunction
+from amaya.transitions import SparseBDDTransitionFunction
 from typing import Dict
 
 

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Union, List, Callable, Dict
 
-from ast_relations import Relation
+from amaya.ast_relations import Relation
 
 
 AST_Leaf = Union[str, Relation]

@@ -17,9 +17,10 @@ from typing import (
     Generic
 )
 import functools
-import utils
 from dd.autoref import BDD
-from log import logger
+
+from amaya.log import logger
+import amaya.utils
 
 Symbol = Tuple[Union[str, int], ...]
 # State = Union[str, int]

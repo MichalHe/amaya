@@ -11,8 +11,8 @@ from typing import (
     Union,
     Optional
 )
-from utils import number_to_bit_tuple
-from relations_structures import Relation
+from amaya.utils import number_to_bit_tuple
+from amaya.relations_structures import Relation
 
 
 LSBF_AlphabetSymbol = Tuple[Union[int, str], ...]

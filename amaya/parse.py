@@ -14,26 +14,26 @@ from typing import (
     Optional,
 )
 
-from ast_relations import (
+from amaya.ast_relations import (
     ModuloTerm,
     Relation,
     expand_relation_on_ite,
     try_retrieve_variable_if_literal,
 )
-from automatons import (
+from amaya.automatons import (
     AutomatonType, 
     LSBF_Alphabet,
     NFA, 
 )
-from log import logger
-import presburger.constructions.naturals as relations_to_dfa
-import presburger.constructions.integers as relations_to_nfa
-import preprocessing
-from ast_definitions import (
+from amaya.log import logger
+import amaya.presburger.constructions.naturals as relations_to_dfa
+import amaya.presburger.constructions.integers as relations_to_nfa
+from amaya import preprocessing
+from amaya.ast_definitions import (
     AST_NaryNode,
     NodeEncounteredHandlerStatus,
 )
-import utils
+from amaya import utils
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
@@ -142,7 +142,7 @@ class EvaluationContext:
         # Lazy load MTBDD automata module if needed
         self.automata_cls = NFA
         if self.execution_config.backend_type == BackendType.MTBDD:
-            from mtbdd_automatons import MTBDD_NFA
+            from amaya.mtbdd_automatons import MTBDD_NFA
             self.automata_cls = MTBDD_NFA
 
         self.alphabet = alphabet

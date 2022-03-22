@@ -1,6 +1,6 @@
 from typing import Dict, Set
 
-from ast_definitions import AST_Leaf, AST_NaryNode, AST_Node, NodeEncounteredHandlerStatus
+from amaya.ast_definitions import AST_Leaf, AST_NaryNode, AST_Node, NodeEncounteredHandlerStatus
 
 
 def collect_ite_control_variables(ast) -> Set[str]:
@@ -32,7 +32,7 @@ def collect_ite_control_variables(ast) -> Set[str]:
 def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode, 
                                                       is_reeval: bool,
                                                       ctx: Dict) -> NodeEncounteredHandlerStatus:
-    from ast_relations import evaluate_ite_for_var_assignment
+    from amaya.ast_relations import evaluate_ite_for_var_assignment
     ite_control_variables = collect_ite_control_variables(relation_root)
 
     if not ite_control_variables:

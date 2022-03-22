@@ -16,21 +16,21 @@ from typing import (
     Tuple,
 )
 
-from alphabet import (
+from amaya.alphabet import (
     LSBF_Alphabet,
     LSBF_AlphabetSymbol
 )
-import automaton_algorithms
-from log import logger
-from transitions import (
+from amaya import automaton_algorithms
+from amaya.log import logger
+from amaya.transitions import (
     calculate_variable_bit_position,
     SparseSimpleTransitionFunction
 )
-from utils import (
+from amaya.utils import (
     carthesian_product,
     create_enumeration_state_translation_map,
 )
-from visualization import AutomatonVisRepresentation
+from amaya.visualization import AutomatonVisRepresentation
 
 
 class AutomatonType(IntFlag):

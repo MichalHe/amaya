@@ -11,20 +11,20 @@ from typing import (
     Union,
 )
 
-from alphabet import (
+from amaya.alphabet import (
     LSBF_Alphabet,
     LSBF_AlphabetSymbol,
 )
-from automatons import (
+from amaya.automatons import (
     AutomatonType,
     NFA,
 )
-from mtbdd_transitions import (
+from amaya.mtbdd_transitions import (
     MTBDDTransitionFn,
     mtbdd_false
 )
-from visualization import AutomatonVisRepresentation
-from log import logger
+from amaya.visualization import AutomatonVisRepresentation
+from amaya.log import logger
 
 
 class MTBDD_NFA(NFA):
