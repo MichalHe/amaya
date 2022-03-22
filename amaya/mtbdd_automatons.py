@@ -46,6 +46,7 @@ class MTBDD_NFA(NFA):
         self.applied_operations_info = []
         self.used_variables = used_variables
         self.extra_info: Dict[str, Any] = {}
+        self.state_labels: Dict[int, Any] = {}
         MTBDD_NFA.automaton_id_counter += 1
 
     def add_state(self, state: int):
