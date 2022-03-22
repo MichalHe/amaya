@@ -3,15 +3,15 @@ from typing import (
     List
 )
 
-from alphabet import LSBF_Alphabet
-from automatons import (
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import (
     AutomatonType,
     DFA,
     NFA,
 )
-from presburger.constructions.integers import build_presburger_modulo_nfa
-from presburger.constructions.naturals import build_presburger_modulo_dfa
-from relations_structures import ModuloTerm, Relation
+from amaya.presburger.constructions.integers import build_presburger_modulo_nfa
+from amaya.presburger.constructions.naturals import build_presburger_modulo_dfa
+from amaya.relations_structures import ModuloTerm, Relation
 from tests.conftest import ResolutionState
 
 import pytest

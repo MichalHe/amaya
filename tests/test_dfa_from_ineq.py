@@ -1,10 +1,12 @@
-from alphabet import LSBF_Alphabet
-from automatons import DFA
-from presburger.constructions.naturals import build_dfa_from_linear_inequality
-from relations_structures import Relation
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import DFA
+from amaya.presburger.constructions.naturals import build_dfa_from_linear_inequality
+from amaya.relations_structures import Relation
+
 from tests.conftest import ResolutionState
 
 import pytest
+
 
 @pytest.fixture()
 def ineq() -> Relation:

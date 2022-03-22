@@ -1,8 +1,11 @@
 import pytest
 import typing as _t
-from automatons import MTBDD_NFA, LSBF_Alphabet, AutomatonType
 
-alphabet = LSBF_Alphabet.from_variable_names([1, 2, 3])
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import AutomatonType
+from amaya.mtbdd_automatons import MTBDD_NFA
+
+alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2), ('z', 3)])
 
 
 @pytest.fixture

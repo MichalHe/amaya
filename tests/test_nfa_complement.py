@@ -1,18 +1,25 @@
-from automatons import NFA, LSBF_Alphabet, AutomatonType, AutomatonSnapshot
-from mtbdd_automatons import MTBDD_NFA
-import pytest as pt
-from tests.test_nfa_determization import ResolutionState
+from amaya.automatons import (
+    AutomatonType,
+    AutomatonSnapshot,
+    NFA
+)
+from amaya.alphabet import LSBF_Alphabet
+from amaya.mtbdd_automatons import MTBDD_NFA
+from tests.conftest import ResolutionState
+
+import pytest
 
 
-@pt.fixture()
+@pytest.fixture()
 def mtbdd_nfa1() -> MTBDD_NFA:
     '''Creates a simple synthetic nondeterministic automaton.
     Nondeterminism - not every state has a transition for every alphabet symbol.
     Otherwise it is defacto deterministic - it should be possible to project the
     structure onto the original one.'''
 
-    alphabet = LSBF_Alphabet.from_variable_ids([1])
-    nfa = MTBDD_NFA(alphabet, AutomatonType.NFA)
+    variable_id_pairs = [('x', 1)]
+    alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
+    nfa = MTBDD_NFA(alphabet=alphabet, automaton_type=AutomatonType.DFA)
 
     nfa.add_state(0)
     nfa.add_state(1)
@@ -23,6 +30,8 @@ def mtbdd_nfa1() -> MTBDD_NFA:
     zeta0 = (0, )
     nfa.update_transition_fn(0, zeta0, 1)
     nfa.update_transition_fn(1, zeta0, 2)
+    
+    nfa.add_trap_state()
 
     return nfa
 
@@ -36,7 +45,7 @@ def test_nfa_complement(mtbdd_nfa1: NFA):  # NOQA
     # The NFA before completion has 3 states:
     #   0 - initial, 1, 2 - final
     # After determinization a trapstate should be added
-    assert len(compl_nfa.final_states) == 2
+    assert len(compl_nfa.final_states) == 3  # Final states are 0, 1, Trap
     assert len(compl_nfa.initial_states) == 1
 
     state0 = ResolutionState()
@@ -57,7 +66,7 @@ def test_nfa_complement(mtbdd_nfa1: NFA):  # NOQA
         assert len(transition_dest_set) == 1
         dest.bind(transition_dest_set[0])
 
-    assert state0.get() not in compl_nfa.final_states
+    assert state0.get() in compl_nfa.final_states
     assert state1.get() in compl_nfa.final_states
     assert state2.get() not in compl_nfa.final_states
 

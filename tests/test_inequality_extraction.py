@@ -1,7 +1,9 @@
 import pytest
-import parse
-import ast_relations
-from utils import search_tree
+from amaya import (
+    ast_relations,
+    parse
+)
+from amaya.utils import search_tree
 
 
 @pytest.fixture

@@ -1,11 +1,11 @@
 from collections import defaultdict
 from typing import Dict, Set
 
-from alphabet import LSBF_Alphabet
-from automatons import DFA
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import DFA
+from amaya.presburger.constructions.naturals import build_dfa_from_linear_equality
+from amaya.relations_structures import Relation
 from tests.conftest import ResolutionState
-from presburger.constructions.naturals import build_dfa_from_linear_equality
-from relations_structures import Relation
 
 import pytest
 

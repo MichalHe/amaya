@@ -1,5 +1,5 @@
-from alphabet import LSBF_Alphabet
-from automatons import (
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import (
     AutomatonType,
     DFA,
     NFA

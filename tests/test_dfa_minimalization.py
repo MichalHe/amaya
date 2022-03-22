@@ -1,6 +1,6 @@
 import pytest
-from automatons import NFA, AutomatonType
-from alphabet import LSBF_Alphabet
+from amaya.automatons import NFA, AutomatonType
+from amaya.alphabet import LSBF_Alphabet
 from tests.conftest import ResolutionState
 
 
@@ -87,7 +87,7 @@ def test_dfa_minimization(nonminimal_dfa: NFA, expected_minimial_dfa):
     """ 
     Verify that the given DFA is minimized as expected.
     """
-    act_minimal_dfa = nonminimal_dfa.minimilize() 
+    act_minimal_dfa = nonminimal_dfa.minimize() 
 
     assert len(act_minimal_dfa.states) == len(expected_minimial_dfa.states)
     assert len(act_minimal_dfa.initial_states) == len(expected_minimial_dfa.initial_states)
