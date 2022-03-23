@@ -1151,20 +1151,6 @@ def run_evaluation_procedure(root,  # NOQA
     return result
 
 
-def get_sat_value_from_smt_info(smt_info: Dict[str, str], default: Optional[bool] = True) -> Optional[bool]:
-    '''
-    Parse the information collected from the smt-info blocks for the expected SAT value.
-
-    :param smt_info: A dictionary containing the parsed information from smt-info statements
-    :param default:  If the SAT information is not present, the default (fallback) value is used.
-    :returns:        True if the expected value is SAT, False if unsat or default if not present.
-    '''
-    if ':status' in smt_info:
-        return smt_info[':status'] == 'sat'
-    else:
-        return default
-
-
 def get_smt_info(ast) -> Dict[str, Any]:
     smt_info: Dict[str, Any] = dict()
     for top_level_statement in ast:
