@@ -925,13 +925,12 @@ def evaluate_binary_conjunction_expr(expr: List,
         reduction_result = reduction_fn(reduction_result, next_operand_automaton)
         ctx.stats_operation_ends(reduction_result)
 
-        # The introspection information needs to be emitted before minimization.
+        # Emit the evaluation information before minimization
         ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
 
         reduction_result = minimize_automaton_if_configured(reduction_result, ctx)
 
         emit_evaluation_progress_info(f' >> {reduction_operation}(lhs, rhs) (result size: {len(reduction_result.states)}, automaton_type={reduction_result.automaton_type})', _depth)
-        ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
 
     return reduction_result
 
