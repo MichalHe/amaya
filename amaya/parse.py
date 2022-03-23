@@ -673,7 +673,6 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     else:
         assert_tree_to_evaluate = asserts[0]  # If there is just 1, do not transform AST
 
-    # preprocess_assert_tree(assert_tree_to_evaluate)  # Preprocessing is performed in place
     preprocessing.preprocess_ast(assert_tree_to_evaluate)  # Preprocessing is performed in place
 
     assert_tree_to_evaluate = preprocessing.reduce_relation_asts_to_evaluable_leaves(assert_tree_to_evaluate)
@@ -883,15 +882,11 @@ def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
         return nfa
 
     ctx.stats_operation_starts(ParsingOperation.MINIMIZE, nfa, None)
-    minimized_dfa = nfa.minimize()
-    logger.info(
-        'Minimization applied. Result size: {0} ({1} before minimization).'.format(
-            len(minimized_dfa.states),
-            len(nfa.states)
-    ))
-    ctx.stats_operation_ends(minimized_dfa)
-    ctx.emit_evaluation_introspection_info(minimized_dfa, ParsingOperation.MINIMIZE)
-    return minimized_dfa
+    min_dfa = nfa.minimize()
+    logger.info(f'Minimization applied - inputs has {len(nfa.states)} states, result {len(min_dfa.states)}.')
+    ctx.stats_operation_ends(min_dfa)
+    ctx.emit_evaluation_introspection_info(min_dfa, ParsingOperation.MINIMIZE)
+    return min_dfa
 
 
 def evaluate_binary_conjunction_expr(expr: List,
