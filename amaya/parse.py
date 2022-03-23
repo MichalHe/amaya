@@ -21,9 +21,9 @@ from amaya.ast_relations import (
     try_retrieve_variable_if_literal,
 )
 from amaya.automatons import (
-    AutomatonType, 
+    AutomatonType,
     LSBF_Alphabet,
-    NFA, 
+    NFA,
 )
 from amaya import logger
 import amaya.presburger.constructions.naturals as relations_to_dfa
@@ -410,13 +410,14 @@ def can_tree_be_reduced_to_aritmetic_expr(tree) -> bool:
 
 
 def is_tree_presburger_equality(tree, ctx: EvaluationContext) -> bool:
-    '''Checks whether the provided AST `tree` represents a an equality
-    (Presburger atomic formula).
+    """
+    Check whether the provided AST is an equality relation.
+
     To do so it first performs checks on the structure of the tree - whether it
     does contain only operators allowed in a such expression. If it does have
     a valid form performs further checks on whether it is not SMT equivalence
     check between a boolean variable and a `let` bound expression.
-    '''
+    """
 
     def is_literal_from_let_or_boolean_var(literal_var: str) -> bool:
         if ctx.get_let_binding_value(literal_var) is not None:
@@ -873,7 +874,7 @@ def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
     """
     Wrap the NFA.minimize with introspection emission, timings and logging, if
     eager minimization is configured.
-    
+
     :param nfa: Automaton to minimize.
     :param ctx: Evaluation context that will store information about measured timings.
     :returns: Minimized DFA equivalent to the given NFA.
@@ -932,7 +933,7 @@ def evaluate_binary_conjunction_expr(expr: List,
         # The introspection information needs to be emitted before minimization.
         ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
 
-        reduction_result = minimize_automaton_if_configured(reduction_result, ctx) 
+        reduction_result = minimize_automaton_if_configured(reduction_result, ctx)
 
         emit_evaluation_progress_info(f' >> {reduction_operation}(lhs, rhs) (result size: {len(reduction_result.states)}, automaton_type={reduction_result.automaton_type})', _depth)
         ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
@@ -1131,62 +1132,23 @@ def run_evaluation_procedure(root,  # NOQA
                 return nfa
 
     node_name = root[0]
-    if node_name in ['<', '>', '<=', '>=', '=']:
-        # We have found a node which needs to be (directly) translated into NFA
-        # @Problem: This implementation does not distinguish between
-        # SMT equivalence of two boolean variables and presburger equation
-        if node_name == '=' and not is_tree_presburger_equality(root, ctx):
-            # Perform boolean equivalence expansion:
-            # A = B  <<-->> (A & B) | (~A & ~B)
-            logger.debug(f'Encountered boolean equivalence expression: {root} ')
-            b = root.pop(-1)
-            a = root.pop(-1)
-            root[0] = 'or'
-            root.append(['and', a, b])
-            root.append(['and', ['not', a], ['not', b]])
+    emit_evaluation_progress_info(f'eval_smt_tree({root}), node_name={node_name}', _debug_recursion_depth)
+    # Current node is a NFA operation
+    evaluation_functions = {
+        'and': evaluate_and_expr,
+        'or': evaluate_or_expr,
+        'not': evaluate_not_expr,
+        'exists': evaluate_exists_expr,
+        'let': evaluate_let_expr,
+    }
 
-            # remove_multiple_negations(root)
+    if node_name not in evaluation_functions:
+        raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}')
 
-            logger.debug(f'Expression expanded into: {root}')
+    evaluation_function = evaluation_functions[node_name]
 
-            return run_evaluation_procedure(root, ctx, _debug_recursion_depth)
-
-        logger.info('Reached relation root, performing ITE expansion...')
-
-        expanded_tree = expand_relation_on_ite(root)
-
-        # If the relation was indeed expanded, the root will be 'or'
-        if expanded_tree[0] == 'or':
-            assert False, 'The ITE expansion should be done in preprocessing.'
-            return run_evaluation_procedure(expanded_tree, ctx, _debug_recursion_depth)
-        else:
-            # The relation was no expanded
-            # (maybe a second evaluation pass, after the first expansion)
-
-            ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_RELATION, None, None)
-            result = build_automaton_from_presburger_relation_ast(root,
-                                                                  ctx,
-                                                                  _debug_recursion_depth)
-            ctx.stats_operation_ends(result)
-            return result
-    else:
-        emit_evaluation_progress_info(f'eval_smt_tree({root}), node_name={node_name}', _debug_recursion_depth)
-        # Current node is a NFA operation
-        evaluation_functions = {
-            'and': evaluate_and_expr,
-            'or': evaluate_or_expr,
-            'not': evaluate_not_expr,
-            'exists': evaluate_exists_expr,
-            'let': evaluate_let_expr,
-        }
-
-        if node_name not in evaluation_functions:
-            raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}')
-
-        evaluation_function = evaluation_functions[node_name]
-        
-        result = evaluation_function(root, ctx, _debug_recursion_depth)
-        return result
+    result = evaluation_function(root, ctx, _debug_recursion_depth)
+    return result
 
 
 def get_sat_value_from_smt_info(smt_info: Dict[str, str], default: Optional[bool] = True) -> Optional[bool]:
