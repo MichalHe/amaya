@@ -187,9 +187,15 @@ def build_presburger_modulo_dfa(equality: Relation,
     )
 
     modulo_term = equality.modulo_terms[0]
+
+    vars_with_coefs = zip(modulo_term.variables, modulo_term.variable_coeficients)
+    variable_coefs_ord_by_track = sorted(vars_with_coefs, key=lambda vc: variable_name_to_track_index[vc[0]])
+
     initial_state = ModuloTermStateComponent(value=equality.absolute_part,
                                              modulo=modulo_term.modulo,
-                                             variable_coeficients=tuple(modulo_term.variable_coeficients))
+                                             variable_coeficients=tuple(vc[1] for vc in variable_coefs_ord_by_track))
+
+    print(f'{initial_state.variable_coeficients=}')
 
     alias_store = AliasStore()
     work_list: List[ModuloTermStateComponent] = [initial_state]
