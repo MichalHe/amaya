@@ -246,28 +246,28 @@ def run_in_getsat_mode(args):
     with open(args.input_file) as input_file:
         input_text = input_file.read()
         logger.info(f'Executing evaluation procedure with configuration: {evaluation_config}')
-        nfa, smt_info = parse.perform_whole_evaluation_on_source_text(input_text, evaluation_config, handle_automaton_created_fn)
+        nfa, smt_info = parse.perform_whole_evaluation_on_source_text(input_text, evaluation_config,
+                                                                      handle_automaton_created_fn)
 
-        expected_sat = True
-        if ':status' in smt_info:
-            if smt_info[':status'] == 'unsat':
-                expected_sat = False
-            logger.info(f'Retrieved expected SAT value from the smt-info statements: expected_sat={expected_sat}')
-        else:
-            logger.warning('The given file is missing the smt-info statement specifying the expected SAT value (`:status` field), assuming expected_sat=True.')
+        expected_sat = smt_info.get(':status', 'sat')
+        if ':status' not in smt_info:
+            logger.warning('The is missing :status in the smt-info statement, assuming sat.')
 
-        actual_sat, model = nfa.is_sat()
-        logger.info(f'The SAT value of the result automaton: actual_sat={actual_sat}')
-        sat_matches = (actual_sat == expected_sat)
+        computed_is_sat, model = nfa.is_sat()
+        computed_sat = 'sat' if computed_is_sat else 'unsat'
+        logger.info(f'The SAT value of the result automaton is {computed_sat}')
 
-        sat_value_str = 'sat' if actual_sat else 'unsat'
-        expected_sat_str = 'sat' if expected_sat else 'unsat'
-        if sat_matches:
-            logger.info(f'The result SAT is OK (as expected) (SAT={sat_value_str}, model: {model})')
-            print(sat_value_str)
-        else:
-            logger.critical(f'The automaton\'s SAT did not match expected: actual={sat_value_str}, given word: {model}, expected={expected_sat_str}')
-            print(f'FAIL: Calculated SAT: {sat_value_str} is different from the expected value: {expected_sat_str}')
+        if expected_sat != 'unknown':
+            if computed_sat == expected_sat:
+                logger.debug(f'The result SAT is matching the expected value.')
+            else:
+                msg = (f'The automaton\'s SAT did not match expected: actual={computed_sat}, '
+                       f'expected={expected_sat}')
+                logger.critical(msg)
+
+                print('error: computed different SAT as present in the input info :status field')
+                sys.exit(1)
+        print(computed_sat)
 
 
 def run_in_benchmark_mode(args):  # NOQA
@@ -323,7 +323,7 @@ def run_in_benchmark_mode(args):  # NOQA
                 else:
                     executed_benchmarks[benchmark_file].runtimes_ns.append(runtime_ns)
 
-                expected_sat = parse.get_sat_value_from_smt_info(smt_info, None)
+                expected_sat = smt_info.get(':status')
 
                 if expected_sat is not None:
                     sat, _ = nfa.is_sat()
