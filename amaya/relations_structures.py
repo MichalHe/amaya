@@ -79,8 +79,8 @@ class Relation:
         return are_all_coefs_zero
 
     def is_always_satisfied(self) -> bool:
-        '''Returns true if all the variable cooeficients are zero and
-        the relation is satisfied.'''
+        """
+        Returns true if all the variable cooeficients are zero and the relation is satisfied."""
         # TODO(codeboy): This needs fixing
         if self.modulo_terms:
             return False
