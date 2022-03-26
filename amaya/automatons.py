@@ -426,7 +426,7 @@ class NFA(object):
         nfa.add_state(state)
         nfa.add_initial_state(state)
 
-        self_loop_symbol = tuple('*' for i in len(alphabet.variable_numbers))
+        self_loop_symbol = tuple('*' for vn in alphabet.variable_numbers)
         nfa.update_transition_fn(state, self_loop_symbol, state)
 
         return nfa
