@@ -4,7 +4,30 @@ import amaya.ast_relations as relations
 from amaya.ast_definitions import AST_NaryNode, AST_Node, AST_Leaf, NodeEncounteredHandler, NodeEncounteredHandlerStatus
 from amaya.relations_structures import Relation, ModuloTerm
 from amaya.preprocessing.ite_preprocessing import expand_ite_expressions_inside_presburger_relation, ite_expansion_handler
-from amaya import logger
+from amaya import logger, utils
+
+
+def will_mod_automaton_accept_anything_after_projection(mod_term: ModuloTerm) -> bool:
+    """
+    Check whether the automaton for constructed congruence accepts everything after added modulo var is projected away.
+
+    Assumes that the generated congurence relation will have 0 as absolute part.
+    """
+    original_coefs = mod_term.variable_coeficients
+    original_var_cnt = len(mod_term.variable_coeficients)
+    symbols = (utils.number_to_bit_tuple(i, tuple_size=original_var_cnt) for i in range(2**original_var_cnt))
+    all_symbols_go_to_final = True
+    for sym in symbols:
+        dot = utils.vector_dot(sym, original_coefs)
+        mod = (dot if dot > 0 else dot + mod_term.modulo)
+
+        # Extend the computed dot with the added modulo var and ints coef (precomputed dot)
+        mod0 = mod
+        mod1 = (mod + 1) % mod_term.modulo
+        if mod0 == 0 or mod1 == 0:
+            all_symbols_go_to_final = False
+            break
+    return all_symbols_go_to_final
 
 
 def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode) -> AST_Node:
@@ -38,13 +61,6 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode) -> AST_Node:
                                      modulo=replacement_info.term.modulo)
             modulo_term = modulo_term.into_sorted()
 
-            congruence_relation = Relation(variable_names=[],
-                                           variable_coeficients=[],
-                                           modulo_terms=[modulo_term],
-                                           modulo_term_coeficients=[1],
-                                           absolute_part=0,
-                                           operation='=')
-
             reminder_lower_bound = Relation(variable_names=[replacement_info.variable],
                                             variable_coeficients=[-1],
                                             modulo_terms=[],
@@ -61,7 +77,16 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode) -> AST_Node:
 
             resulting_relations.append(reminder_lower_bound)
             resulting_relations.append(reminder_upper_bound)
-            resulting_relations.append(congruence_relation)
+
+            if not will_mod_automaton_accept_anything_after_projection(replacement_info.term):
+                congruence_relation = Relation(variable_names=[],
+                                               variable_coeficients=[],
+                                               modulo_terms=[modulo_term],
+                                               modulo_term_coeficients=[1],
+                                               absolute_part=0,
+                                               operation='=')
+
+                resulting_relations.append(congruence_relation)
 
         variable_binding_list = [[variable, 'Int'] for variable in sorted(map(lambda info: info.variable, replacement_infos))]
         return ['exists', variable_binding_list, ['and', *resulting_relations]]
