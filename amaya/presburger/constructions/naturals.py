@@ -23,6 +23,16 @@ from amaya.relations_structures import Relation
 from amaya.utils import vector_dot
 
 
+def sort_relation_var_vector_to_match_track_order(rel: Relation, var_id_pairs: List[Tuple[str, int]]):
+    """
+    Changes the order of variables and correspoding coeficients to match the order of tracks that belong to the them.
+    """
+    var_name_to_track_index: Dict[str, int] = dict(var_id_pairs)
+    sorted_var_coef_pairs = sorted(zip(rel.variable_names, rel.variable_coeficients),
+                                   key=lambda var_coef_pair: var_name_to_track_index[var_coef_pair[0]])
+    rel.variable_names, rel.variable_coeficients = zip(*sorted_var_coef_pairs)
+
+
 def build_dfa_from_linear_inequality(ineq: Relation,
                                      ineq_var_id_pairs: List[Tuple[str, int]],
                                      alphabet: LSBF_Alphabet,
@@ -46,6 +56,10 @@ def build_dfa_from_linear_inequality(ineq: Relation,
     # We need to work only with alphabet symbols differing in the tracks of variables present in the relation
     active_alphabet = list(alphabet.gen_projection_symbols_onto_variables(ineq_var_id_pairs))
 
+    sort_relation_var_vector_to_match_track_order(ineq, ineq_var_id_pairs)
+
+    var_ids = [var_id_pair[1] for var_id_pair in ineq_var_id_pairs]
+
     while work_queue:
         currently_processed_state = work_queue.pop()
         dfa.add_state(currently_processed_state)
@@ -55,11 +69,13 @@ def build_dfa_from_linear_inequality(ineq: Relation,
             dfa.add_final_state(currently_processed_state)
 
         for symbol in active_alphabet:
+            cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(var_ids, symbol)
+
             dot = vector_dot(symbol, ineq.variable_coeficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
             # Add newly discovered transition
-            dfa.update_transition_fn(currently_processed_state, symbol, next_state)
+            dfa.update_transition_fn(currently_processed_state, cylindrified_symbol, next_state)
 
             if not (dfa.has_state_with_value(next_state) or next_state in work_queue):
                 work_queue.append(next_state)
@@ -124,6 +140,9 @@ def build_dfa_from_linear_equality(eq: Relation,
 
     work_queue: List[DFA_AutomatonStateType] = [eq.absolute_part]
 
+    sort_relation_var_vector_to_match_track_order(eq, eq_var_id_pairs)
+    var_ids = [var_id_pair[1] for var_id_pair in eq_var_id_pairs]
+
     # We need to work only with alphabet symbols differing in the tracks of variables present in the relation
     active_alphabet = list(alphabet.gen_projection_symbols_onto_variables(eq_var_id_pairs))
 
@@ -137,6 +156,8 @@ def build_dfa_from_linear_equality(eq: Relation,
             dfa.add_final_state(current_state)
 
         for alphabet_symbol in active_alphabet:
+            cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(var_ids, alphabet_symbol)
+
             dot = vector_dot(alphabet_symbol, eq.variable_coeficients)
             next_value = current_state - dot
 
@@ -144,7 +165,7 @@ def build_dfa_from_linear_equality(eq: Relation,
                 next_state = int(next_value / 2)
 
                 # Add the newly discovered transition
-                dfa.update_transition_fn(current_state, alphabet_symbol, next_state)
+                dfa.update_transition_fn(current_state, cylindrified_symbol, next_state)
 
                 if not (dfa.has_state_with_value(next_state) or next_state in work_queue):
                     work_queue.append(next_state)
@@ -154,7 +175,7 @@ def build_dfa_from_linear_equality(eq: Relation,
                 # we would like the automaton to be complete, therefore add a trap state for such transitions.
                 if trap_state is None:
                     trap_state = add_trap_state_to_automaton(dfa)
-                dfa.update_transition_fn(current_state, alphabet_symbol, trap_state)
+                dfa.update_transition_fn(current_state, cylindrified_symbol, trap_state)
 
     dfa.used_variables = sorted(var_id_pair[1] for var_id_pair in eq_var_id_pairs)
 
