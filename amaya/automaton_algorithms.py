@@ -91,7 +91,6 @@ def pad_closure2(nfa):
                     has_transition_to_final = True
                     break
             if not has_transition_to_final:
-
                 # Maybe no new final states has been generated yet, generate it
                 if new_final_state is None:
                     new_final_state = max(nfa.states) + 1
@@ -99,6 +98,46 @@ def pad_closure2(nfa):
                     nfa.add_final_state(new_final_state)
 
                 nfa.update_transition_fn(state, symbol, new_final_state)
+
+
+def pad_closure2_naturals(nfa):
+    """
+    Ensures the saturation property holds when solving over naturals.
+    """
+    # Add a new final state so that the modifications to the automaton structure will not cause overapproximations
+    new_final_state: Optional[int] = None
+
+    # When solving over naturals there is only one padding symbol - zero tuple
+    padding_symbol = tuple(0 for i in range(len(nfa.alphabet.variable_numbers)))
+
+    states = set()
+    work_list = list(nfa.final_states)
+
+    # Collect all states reaching a final state via words consisiting of repeated `symbol`
+    while work_list:
+        state = work_list.pop(-1)
+        for pre_state in nfa.transition_fn.get_state_pre_with_symbol(state, padding_symbol):
+            if pre_state not in states:
+                states.add(pre_state)
+                work_list.append(pre_state)
+
+    # All the collected states should be accepting since we are solving over naturals, however
+    # we cannot just make them accepting. Instead, add a new final state and link every predecesor
+    # of these states via the accepting symbol
+
+    # Collect all predecesors of the states reaching final with padding
+    for state in states:
+        for pre_state in nfa.transition_fn.get_state_pre(state):
+            if state == pre_state:
+                continue
+            for symbol in nfa.transition_fn.get_symbols_between_states(pre_state, state):
+                # Maybe no new final states has been generated yet, generate it
+                if new_final_state is None:
+                    new_final_state = max(nfa.states) + 1
+                    nfa.add_state(new_final_state)
+                    nfa.add_final_state(new_final_state)
+
+                nfa.update_transition_fn(pre_state, symbol, new_final_state)
 
 
 from amaya.transitions import SparseBDDTransitionFunction
