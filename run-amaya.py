@@ -114,6 +114,13 @@ get_sat_subparser.add_argument('--print-operations-runtime',
                                dest='should_print_operations_runtime',
                                default=False,
                                help=r'''If present, the runtime of the operations performed during the execution (e.g. determinization) will be logged.''')
+get_sat_subparser.add_argument('-p',
+                               '--print-model',
+                               action='store_true',
+                               dest='should_print_model',
+                               default=False,
+                               help='Print model after the decision procedure is finished, if any.')
+
 
 benchmark_subparser = subparsers.add_parser('benchmark')
 benchmark_subparser.add_argument('--add-file',
@@ -268,6 +275,8 @@ def run_in_getsat_mode(args):
                 print('error: computed different SAT as present in the input info :status field')
                 sys.exit(1)
         print(computed_sat)
+        if args.should_print_model:
+            print('Model:', model)
 
 
 def run_in_benchmark_mode(args):  # NOQA
