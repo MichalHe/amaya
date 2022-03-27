@@ -311,7 +311,8 @@ class NFA(object):
 
     def perform_pad_closure(self):
         """Performs inplace padding closure. See file automaton_algorithms.py:padding_closure"""
-        automaton_algorithms.pad_closure2(self)
+        logger.info('Performing padding closure.')
+        automaton_algorithms.pad_closure2_naturals(self)
 
     def get_symbols_leading_from_state_to_state(self, from_state: int, to_state: int) -> Set[LSBF_AlphabetSymbol]:
         return self.transition_fn.get_symbols_between_states(from_state, to_state)
