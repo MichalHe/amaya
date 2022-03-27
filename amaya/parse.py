@@ -988,6 +988,7 @@ def evaluate_not_expr(not_expr: List,
         ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
         operand = operand.determinize()
         ctx.stats_operation_ends(operand)
+        ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_DETERMINIZE)
         emit_evaluation_progress_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
 
     ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
@@ -1038,13 +1039,13 @@ def evaluate_exists_expr(exists_expr: List,
     logger.debug(f'Established projection order: {projected_var_ids}')
 
     last_var_id: int = projected_var_ids[-1]
-
     for var_id in projected_var_ids:
         logger.debug(f'Projecting away variable {var_id}')
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
 
         # Do not skip only after the last projection
         skip_pad_closure = False if var_id == last_var_id else True
+
         projection_result = nfa.do_projection(var_id, skip_pad_closure=skip_pad_closure)
         assert projection_result
         nfa = projection_result
