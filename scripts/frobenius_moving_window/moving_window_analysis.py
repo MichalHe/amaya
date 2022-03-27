@@ -13,8 +13,8 @@ SMT_SOLVERS = {
     'z3': ['z3', '-smt2'],
     'cvc4': ['cvc4'],
     'cvc5': ['cvc5'],
-    'amaya': ['python3', '../amaya.py', 'get-sat'] ,
-    'amaya-mtbdd': ['python3', '../amaya.py', '--backend', 'MTBDD', 'get-sat'],
+    'amaya': ['python3', '../run-amaya.py', 'get-sat'] ,
+    'amaya-mtbdd': ['python3', '../run-amaya.py', '--backend', 'MTBDD', 'get-sat'],
 }
 
 
@@ -24,7 +24,7 @@ class DataPoint(object):
     Class holding collection of facts and statistics about one solver execution.
     """
     window_start_index: int
-    primes: int
+    primes: List[int]
     execution_status: str
     execution_time: float
     """Execution time in seconds of a solver in seconds."""
@@ -36,6 +36,9 @@ class DataPoint(object):
             'status': self.execution_status,
             'runtime': self.execution_time
         }
+
+    def into_csv_row(self, separator=',') -> str:
+        return separator.join((str(self.primes), str(self.execution_time)))
 
 
 def read_primes_file(filename='primes.csv') -> List[int]:
@@ -193,6 +196,12 @@ arg_parser.add_argument('-d',
                         action='store_true',
                         default=False,
                         help='Debug output.')
+
+arg_parser.add_argument('-v',
+                        '--verbose',
+                        action='store_true',
+                        default=False,
+                        help='Print what is going on.')
 arg_parser.add_argument('solver', choices=list(SMT_SOLVERS.keys()))
 args = arg_parser.parse_args()
 
@@ -200,11 +209,13 @@ solver = SMT_SOLVERS[args.solver]
 
 if args.debug:
     logging.getLogger().setLevel(logging.DEBUG)
+elif args.verbose:
+    logging.getLogger().setLevel(logging.INFO)
 
 primes = read_primes_file()
 data_points = perform_moving_window_analysis(solver, primes, args.window_size, args.grace, timeout=args.timeout)
 
-data_points_dicts = list(map(DataPoint.into_dict, data_points))
-print(json.dumps(data_points_dicts))
+for point in data_points:
+    print(point.into_csv_row())
 
-draw_scatter(data_points)
+# draw_scatter(data_points)
