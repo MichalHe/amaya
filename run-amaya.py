@@ -79,6 +79,11 @@ argparser.add_argument('--debug',
                        default=False,
                        help='Enables debug output  (logging level >= DEBUG).')
 
+argparser.add_argument('-q', '--quiet',
+                       action='store_true',
+                       default=False,
+                       help='Only report most critical messages.')
+
 argparser.add_argument('--domain',
                        choices=['integers', 'naturals'],
                        default='integers',
@@ -168,7 +173,9 @@ elif 'input_file' in args:
     runner_mode = RunnerMode.GET_SAT
 logger.debug(f'Chosen runner mode: {runner_mode}')
 
-if args.debug:
+if args.quiet:
+    logger.setLevel(logging.CRITICAL)
+elif args.debug:
     logger.setLevel(logging.DEBUG)
 elif args.verbose:
     logger.setLevel(logging.INFO)
