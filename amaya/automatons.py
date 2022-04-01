@@ -16,11 +16,15 @@ from typing import (
     Tuple,
 )
 
+from amaya import logger, automaton_algorithms
+from amaya.config import (
+    solver_config,
+    SolutionDomain,
+)
 from amaya.alphabet import (
     LSBF_Alphabet,
     LSBF_AlphabetSymbol
 )
-from amaya import logger, automaton_algorithms
 from amaya.transitions import (
     calculate_variable_bit_position,
     SparseSimpleTransitionFunction
@@ -312,7 +316,11 @@ class NFA(object):
     def perform_pad_closure(self):
         """Performs inplace padding closure. See file automaton_algorithms.py:padding_closure"""
         logger.info('Performing padding closure.')
-        automaton_algorithms.pad_closure2_naturals(self)
+        if solver_config.solution_domain == SolutionDomain.INTEGERS:
+            automaton_algorithms.pad_closure2(self)
+        else:
+            automaton_algorithms.pad_closure2_naturals(self)
+        logger.info('Pad closure done.')
 
     def get_symbols_leading_from_state_to_state(self, from_state: int, to_state: int) -> Set[LSBF_AlphabetSymbol]:
         return self.transition_fn.get_symbols_between_states(from_state, to_state)
