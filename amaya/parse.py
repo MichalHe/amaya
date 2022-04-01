@@ -1026,11 +1026,7 @@ def evaluate_exists_expr(exists_expr: List,
     projected_var_ids: List[int] = list()
     for var_name in variable_bindings:
         current_var_info = vars_info[var_name]
-        if current_var_info.usage_count == 0:
-            logger.info(f'Skipping projecting away a variable "{var_name}" - the variable is not used anywhere in the tree underneath.')
-            logger.debug(f'{exists_expr}')
-        else:
-            projected_var_ids.append(current_var_info.id)
+        projected_var_ids.append(current_var_info.id)
 
     if not projected_var_ids:
         # No projection will occur
