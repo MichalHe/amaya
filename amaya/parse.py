@@ -26,6 +26,11 @@ from amaya.automatons import (
     NFA,
 )
 from amaya import logger
+from amaya.config import (
+    BackendType,
+    solver_config,
+    SolutionDomain,
+)
 import amaya.presburger.constructions.naturals as relations_to_dfa
 import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
@@ -38,16 +43,6 @@ from amaya import utils
 PRETTY_PRINT_INDENT = ' ' * 2
 
 logger.setLevel(INFO)
-
-
-class SolutionDomain(IntEnum):
-    NATURALS = 0
-    INTEGERS = 1
-
-
-class BackendType(IntEnum):
-    NAIVE = 1
-    MTBDD = 2
 
 
 class ParsingOperation(Enum):
@@ -109,17 +104,8 @@ class VariableInfo:
     usage_count: int = 0
 
 
-@dataclass
-class EvaluationConfig:
-    solution_domain: SolutionDomain
-    backend_type: BackendType
-    print_operation_runtime: bool = False
-    minimize_eagerly: bool = False
-
-
 class EvaluationContext:
     def __init__(self,
-                 evaluation_config: EvaluationConfig,
                  emit_introspect=lambda nfa, operation: None,
                  alphabet: Optional[LSBF_Alphabet] = None  # From previous passes
                  ):
@@ -136,12 +122,9 @@ class EvaluationContext:
         self.variables_info_stack: List[Dict[str, VariableInfo]] = []
         self.global_variables: Dict[str, VariableInfo] = {}
 
-        # Execution settings
-        self.execution_config = evaluation_config
-
         # Lazy load MTBDD automata module if needed
         self.automata_cls = NFA
-        if self.execution_config.backend_type == BackendType.MTBDD:
+        if solver_config.backend_type == BackendType.MTBDD:
             from amaya.mtbdd_automatons import MTBDD_NFA
             self.automata_cls = MTBDD_NFA
 
@@ -184,6 +167,9 @@ class EvaluationContext:
 
     def stats_operation_starts(self, operation: ParsingOperation, input1: Optional[NFA], input2: Optional[NFA]):
         '''Notify the context that the parsing operation started.'''
+        if not solver_config.track_operation_runtime:
+            return
+
         startpoint = [
             operation,
             len(input1.states) if input1 is not None else None,
@@ -195,14 +181,16 @@ class EvaluationContext:
 
     def stats_operation_ends(self, output: NFA):
         '''Notify the context that the parsing operation ended and it can create a new stat point.'''
+        if not solver_config.track_operation_runtime:
+            return
+
         op_startpoint = self.pending_operations_stack.pop(-1)  # Operation starting point
         op, size1, size2, start_ns = op_startpoint
 
         runtime = time.time_ns() - start_ns
 
         stat = EvaluationStat(op, size1, size2, len(output.states), runtime)
-        if self.execution_config.print_operation_runtime:
-            logger.critical(f"Operation finished: {stat}")
+        logger.info(f"Operation finished: {stat}")
         self.stats.append(stat)
 
     def get_all_currently_available_variables(self) -> List[Tuple[str, str]]:
@@ -627,7 +615,6 @@ def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNod
 
 
 def perform_whole_evaluation_on_source_text(source_text: str,
-                                            evaluation_config: EvaluationConfig,
                                             emit_introspect: IntrospectHandle = lambda nfa, op: None
                                             ) -> Tuple[NFA, Dict[str, str]]:
     """
@@ -655,7 +642,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     logger.info(f'Extracted smt-info: {smt_info}')
     logger.info(f'Detected {len(asserts)} assert statements from the source text.')
 
-    eval_ctx = EvaluationContext(EvaluationConfig(SolutionDomain.INTEGERS, BackendType.NAIVE))
+    eval_ctx = EvaluationContext()
 
     function_symbols = get_declared_function_symbols(ast)
     constant_symbols = list(filter(lambda function_symbol: function_symbol.arity == 0, function_symbols))
@@ -691,11 +678,11 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     alphabet = LSBF_Alphabet.from_variable_id_pairs(vars_with_ids)
     logger.info(f'The created overall alphabet: {alphabet}')
 
-    eval_ctx = EvaluationContext(evaluation_config, emit_introspect, alphabet=alphabet)
+    eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet)
     for constant_symbol in constant_symbols:
         eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
-    logger.info(f'Proceeding to assert tree evaluation (backend={eval_ctx.execution_config.backend_type.name})')
+    logger.info(f'Proceeding to assert tree evaluation (backend={solver_config.backend_type.name})')
     nfa = run_evaluation_procedure(assert_tree_to_evaluate[1], eval_ctx)  # Evaluate the formula in the assert tree
 
     return (nfa, smt_info)
@@ -734,7 +721,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
 
     # We should never encounter the '<' inequality as we are always converting it to the <=
     assert relation.operation in ['<=', '=']
-    operation, automaton_building_function = building_handlers[ctx.execution_config.solution_domain].get(relation.operation)
+    operation, automaton_building_function = building_handlers[solver_config.solution_domain].get(relation.operation)
 
     # Congruence relations of the form a.x ~ k must be handled differently - it
     # is necessary to reorder the modulo term inside, not the nonmodular
@@ -878,7 +865,7 @@ def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
     :param ctx: Evaluation context that will store information about measured timings.
     :returns: Minimized DFA equivalent to the given NFA.
     """
-    if not ctx.execution_config.minimize_eagerly:
+    if not solver_config.minimize_eagerly:
         return nfa
 
     ctx.stats_operation_starts(ParsingOperation.MINIMIZE, nfa, None)

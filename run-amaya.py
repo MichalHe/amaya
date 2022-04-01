@@ -11,10 +11,10 @@ Amaya is an experimental, automata based LIA SMT solver.
 The solver accepts input formulae written in the SMTlib (v2) language.
 Currently, there are two backends available to be used when evaluating the
 given formula (controlled via the `--backend` option):
-    - naive - symbols that belong to a transition are stored in a semi-
-              compressed form and all the automaton operations perform
-              iteration of some kind over these transitions (the backend
-              is rather slow)
+    - native - symbols that belong to a transition are stored in a semi-
+               compressed form and all the automaton operations perform
+               iteration of some kind over these transitions (the backend
+               is rather slow)
     - MTBDD - transition symbols are stored using MTBDDs (compact
               representation). The operations manipulating automatons are much
               faster, however the backend support is relatively fresh, so there
@@ -32,6 +32,11 @@ import time
 from amaya import automatons
 from amaya import logger
 from amaya import parse
+from amaya.config import (
+    BackendType,
+    solver_config,
+    SolutionDomain
+)
 
 
 class RunnerMode(Enum):
@@ -65,8 +70,8 @@ class BenchmarkStat:
 argparser = ap.ArgumentParser(description=__doc__, formatter_class=ap.RawTextHelpFormatter)
 
 argparser.add_argument('--backend',
-                       choices=['MTBDD', 'naive'],
-                       default='naive',
+                       choices=['MTBDD', 'native'],
+                       default='native',
                        help='Selects the backend used in the automatons to store the transition function.')
 
 argparser.add_argument('--verbose',
@@ -97,7 +102,7 @@ argparser.add_argument('-M',
                        dest='minimize_eagerly',
                        default=False,
                        help=('Minimize the automatons eagerly, after automaton operation is performed.'
-                             'Requires `naive` backend to be used.'))
+                             'Requires `native` backend to be used.'))
 
 subparsers = argparser.add_subparsers(help='Runner operation')
 get_sat_subparser = subparsers.add_parser('get-sat')
@@ -182,17 +187,19 @@ elif args.verbose:
 else:
     logger.setLevel(logging.WARNING)
 
-# Evaluation config
-backend_type = parse.BackendType.NAIVE
-if args.backend == 'MTBDD':
-    backend_type = parse.BackendType.MTBDD
+# Initialize the solver configuration
+backend_str_to_type = {
+    'native': BackendType.NATIVE,
+    'MTBDD': BackendType.MTBDD,
+}
+solver_config.backend_type = backend_str_to_type[args.backend]
 
-solution_domain = parse.SolutionDomain.INTEGERS
-if args.domain == 'naturals':
-    solution_domain = parse.SolutionDomain.NATURALS
-
-
-evaluation_config = parse.EvaluationConfig(solution_domain, backend_type, minimize_eagerly=args.minimize_eagerly)
+solution_domain_str_to_type = {
+    'naturals': SolutionDomain.NATURALS,
+    'integers': SolutionDomain.INTEGERS,
+}
+solver_config.solution_domain = solution_domain_str_to_type[args.domain]
+solver_config.minimize_eagerly = args.minimize_eagerly
 
 
 def ensure_dump_destination_valid(path: str):
@@ -259,8 +266,8 @@ def run_in_getsat_mode(args):
 
     with open(args.input_file) as input_file:
         input_text = input_file.read()
-        logger.info(f'Executing evaluation procedure with configuration: {evaluation_config}')
-        nfa, smt_info = parse.perform_whole_evaluation_on_source_text(input_text, evaluation_config,
+        logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
+        nfa, smt_info = parse.perform_whole_evaluation_on_source_text(input_text,
                                                                       handle_automaton_created_fn)
 
         expected_sat = smt_info.get(':status', 'sat')
