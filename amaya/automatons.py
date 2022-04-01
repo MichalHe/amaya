@@ -122,7 +122,7 @@ class NFA(object):
 
             resulting_nfa.add_state(current_state)
 
-            logger.debug(f'Processed state {current_state_label}, remaining in queue {len(work_queue)}')
+            logger.debug('Processed state %s, remaining in queue %s', current_state_label, len(work_queue))
 
             self_state, others_state = current_state_label
 
@@ -211,7 +211,7 @@ class NFA(object):
             current_metastate_label: Tuple[int, ...] = work_list.pop(-1)
             current_metastate = label_to_state_number[current_metastate_label]
 
-            logger.debug(f'Determinization for {current_metastate}, remaining in work queue: {len(work_list)}')
+            logger.debug('Determinization for %s, remaining in work queue: %s', current_metastate, len(work_list))
 
             determinized_automaton.add_state(current_metastate)
 
