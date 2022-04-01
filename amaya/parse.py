@@ -136,26 +136,28 @@ class EvaluationContext:
         return self.alphabet
 
     def get_let_binding_value(self, var_name: str) -> Optional[NFA]:
-        '''Retrieves the (possible) value of a lexical binding introduced via the
-        SMTlib `let` construct. Currently we suppose the bindings bind names to the
-        automatons.'''
+        """
+        Retrieves the value of a lexical binding introduced via the SMTLIB `let` construct. 
+
+        Currently we suppose the bindings bind names to the automatons.
+        """
         for binding_record in reversed(self.binding_stack):
             if var_name in binding_record:
                 return binding_record[var_name]
         return None
 
     def new_let_binding_context(self):
-        '''Creates a new binding frame/context.'''
+        """Creates a new binding frame/context."""
         self.binding_stack.append(dict())
 
     def insert_let_binding(self, var_name: str, nfa: NFA):
-        '''Insters a new `let` binding of the given var_name to the given nfa.'''
+        """Insters a new `let` binding of the given var_name to the given nfa."""
         self.binding_stack[-1][var_name] = nfa
 
     def insert_all_bindings_into_current_context(self, bindings: Dict[str, NFA]):
-        '''A bulk transaction operation that inserts all the bindings represented
-        in the given binding into the current let binding context.
-        '''
+        """
+        Insert the given bindings the current let binding context.
+        """
         for var_name, nfa in bindings.items():
             self.insert_let_binding(var_name, nfa)
 
@@ -166,7 +168,7 @@ class EvaluationContext:
         self.introspect_handle(nfa, operation)
 
     def stats_operation_starts(self, operation: ParsingOperation, input1: Optional[NFA], input2: Optional[NFA]):
-        '''Notify the context that the parsing operation started.'''
+        """(performance tracking) Note the time at which the given operation with given params starts."""
         if not solver_config.track_operation_runtime:
             return
 
@@ -180,7 +182,7 @@ class EvaluationContext:
         self.pending_operations_stack.append(startpoint)
 
     def stats_operation_ends(self, output: NFA):
-        '''Notify the context that the parsing operation ended and it can create a new stat point.'''
+        """(performance tracking) Note the time at which the given operation with given params ends."""
         if not solver_config.track_operation_runtime:
             return
 
@@ -192,15 +194,6 @@ class EvaluationContext:
         stat = EvaluationStat(op, size1, size2, len(output.states), runtime)
         logger.info(f"Operation finished: {stat}")
         self.stats.append(stat)
-
-    def get_all_currently_available_variables(self) -> List[Tuple[str, str]]:
-        '''Retrieves all variables (and their types) in the order they have been
-        located by the smt parser.
-
-        Returns:
-            A list of all variables that have been encountered until the current
-            point of execution, in the same order they have been encountered.
-        '''
 
     def _generate_new_variable_id(self) -> int:
         variable_id = self.next_available_variable_id
@@ -218,59 +211,61 @@ class EvaluationContext:
     def add_variable_to_current_frame(self,
                                       variable_name: str,
                                       variable_type: VariableType = VariableType.UNSET):
-        '''Creates and associates a new variable info entry in the current frame.
-        If a variable of the given name already exists in the current frame an
-        exception is raised (cannot have duplicitous exists?).
-        .'''
+        """
+        Add a new variable with given name and type to the current variable frame.
+
+        Creates and associates a new variable info entry in the current frame with given name and type.
+        If a variable of the given name already exists in the current frame an exception is raised.
+        """
         current_frame = self.variables_info_stack[-1]
         if variable_name not in current_frame:
             var_id = self._generate_new_variable_id()
-            current_frame[variable_name] = VariableInfo(id=var_id,
-                                                        name=variable_name,
-                                                        type=variable_type)
+            current_frame[variable_name] = VariableInfo(id=var_id, name=variable_name, type=variable_type)
         else:
-            raise ValueError(
-                f'DUPLICITOUS EXISTS: Attempting to add a variable "{variable_name}" to the current frame, but it is already defined.')
+            err_msg = (f'Attempting to add a variable "{variable_name}" to the current frame, '
+                        'but it is already defined.')
+            raise ValueError(err_msg)
 
     def get_variable_type_if_defined(self, variable_name: str) -> Optional[VariableType]:
-        '''Performs variable lookup in the variable frames (local -> enclosing -> global).
-        If a binding for the given variable name is present returns the variable type,
-        otherwise returns None. '''
+        """
+        Performs variable lookup in the variable frames (local -> enclosing -> global).
+
+        :returns: the variable type if found, otherwise returns None.
+        """
         maybe_variable = self.lookup_variable(variable_name)
         if maybe_variable is None:
             return None
         else:
             return maybe_variable.type
 
-    def was_variable_encountered(self, variable_name: str) -> bool:
-        maybe_var = self.lookup_variable(variable_name)
-        return maybe_var is not None
-
     def get_variables_info_for_current_frame(self) -> Dict[str, VariableInfo]:
         return self.variables_info_stack[-1]
 
-    def add_multiple_variables_to_current_frame(self,
-                                                variables: Dict[str, VariableType]):
-        '''Bulk version of add_variable_to_current_frame.'''
+    def add_multiple_variables_to_current_frame(self, variables: Dict[str, VariableType]):
+        """Add the given variables with their type to the current frame."""
         for variable_name, variable_type in variables.items():
             self.add_variable_to_current_frame(variable_name, variable_type=variable_type)
 
     def get_variable_id(self, variable_name: str, variable_type: VariableType = VariableType.UNSET) -> int:
-        '''Retrives the variable ID associated with the given variable name.
+        """
+        Get the ID associated with the given variable name.
+
         If the variable name was not previously bound in any way a new global
         variable will be associated with the name and its ID will be returned.
-        '''
+        """
         return self.get_variable_info(variable_name, variable_type).id
 
     def get_variable_info(self, variable_name: str,
                           variable_type: VariableType = VariableType.UNSET) -> VariableInfo:
-        '''Attempts to search for variable information associated with the given
-        variable name in the internal structures in the following order: local
-        variables, enclosing variables (etc.), global variables.
+        """
+        Locate variable with given name in variable scopes and return its info.
 
-        If no variable information is located creates a new global variable info
-        entry (with new id and unset type) and returns that.
-        '''
+        Searches for variable information associated with the given variable name in variable scopes 
+        (local -> enclosing -> global).
+
+        If no entry matching given name is found a new variable entry in the global scope is created 
+        (with new id and unset type), and returned.
+        """
 
         maybe_variable = self.lookup_variable(variable_name)
         if maybe_variable is not None:
@@ -297,7 +292,7 @@ class EvaluationContext:
         return None
 
     def get_multiple_variable_ids(self, variable_names: List[str]) -> List[Tuple[str, int]]:
-        '''The bulk version of notify get_variable_id.'''
+        """Search variable scopes for given variable names and return their ids (along with their names)."""
         assigned_ids = []
         for variable_name in variable_names:
             assigned_ids.append((variable_name,
