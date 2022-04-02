@@ -1,17 +1,26 @@
-import pytest
-from relations_structures import Relation
-from presburger_algorithms import build_nfa_from_linear_inequality
-from presburger_algorithms import AutomatonConstructor
-from typing import Union, Dict
-from automatons import (
+from typing import (
+    Dict,
+    Union
+)
+
+from amaya.presburger.constructions.integers import (
+    AutomatonConstructor,
+    build_nfa_from_linear_inequality
+)
+from amaya.presburger.definitions import Relation
+from amaya.automatons import (
     AutomatonType,
     LSBF_Alphabet,
     NFA,
 )
-from mtbdd_automatons import MTBDD_NFA
+from amaya.mtbdd_automatons import MTBDD_NFA
+from amaya.automaton_algorithms import abstract_determinize
 from tests.conftest import ResolutionState
 
-alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+import pytest
+
+
+alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
 
 
 def mk_simple_presburger(constr: AutomatonConstructor) -> NFA:
@@ -48,18 +57,7 @@ def translate_transitions(transitions, translate):  # translate is function
     return translated
 
 
-def do_simple_nfa_determinization_tests(simple_nfa: NFA[Union[int, str]]):
-    assert simple_nfa.automaton_type == AutomatonType.NFA
-    assert len(simple_nfa.final_states) == 1, \
-        'The simple NFA resulting from the presburger formula should contain 1 final state.'
-
-    trans_map: Dict[Union[int, str], int] = {}
-
-    def state_rename_occured(automaton_id: int, old_name: Union[int, str], new_name: int):
-        trans_map[old_name] = new_name
-
-    simple_nfa._debug_state_rename = state_rename_occured
-
+def do_simple_nfa_determinization_tests(simple_nfa: NFA):
     dfa = simple_nfa.determinize()
     assert dfa
     assert len(dfa.states) == 8
@@ -98,7 +96,7 @@ def do_simple_nfa_determinization_tests(simple_nfa: NFA[Union[int, str]]):
     for origin, symbol, dest in e_transitions:
         dest_set = dfa.get_transition_target(origin.get(), symbol)
         assert len(dest_set) == 1, 'A DFA can have only 1 destination state for every alphabet symbol.'
-        dest.bind(dest_set[0])
+        dest.bind(next(iter(dest_set)))
 
     for s in [state_1, state_2, state_3, state_4, state_5, state_6, state_7]:
         assert s.is_bound()
