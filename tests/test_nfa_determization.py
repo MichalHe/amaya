@@ -23,7 +23,8 @@ import pytest
 alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
 
 
-def mk_simple_presburger(constr: AutomatonConstructor) -> NFA:
+@pytest.fixture()
+def nfa_for_inequality(automaton_cls: AutomatonConstructor) -> NFA:
     ineq = Relation(
         variable_names=['x', 'y'],
         variable_coeficients=[2, -1],
@@ -33,17 +34,7 @@ def mk_simple_presburger(constr: AutomatonConstructor) -> NFA:
         operation='<='
     )
 
-    return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, constr)
-
-
-@pytest.fixture
-def simple_nfa() -> NFA:
-    return mk_simple_presburger(NFA)
-
-
-@pytest.fixture
-def simple_mtbdd_nfa() -> NFA:
-    return mk_simple_presburger(MTBDD_NFA)
+    return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, automaton_cls)
 
 
 def translate_transitions(transitions, translate):  # translate is function
@@ -57,8 +48,10 @@ def translate_transitions(transitions, translate):  # translate is function
     return translated
 
 
-def do_simple_nfa_determinization_tests(simple_nfa: NFA):
-    dfa = simple_nfa.determinize()
+@pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
+def test_nfa_determinization_on_nfa_for_inequality(automaton_cls, nfa_for_inequality):
+    # dfa = simple_nfa.determinize()
+    dfa = abstract_determinize(nfa_for_inequality, lambda x: x)
     assert dfa
     assert len(dfa.states) == 8
     assert len(dfa.final_states) == 4
@@ -102,11 +95,3 @@ def do_simple_nfa_determinization_tests(simple_nfa: NFA):
         assert s.is_bound()
 
     assert len(dfa.final_states) == 4
-
-
-def test_simple_nfa_determinization(simple_nfa: NFA):
-    do_simple_nfa_determinization_tests(simple_nfa)
-
-
-def test_simple_mtbdd_nfa_determinization(simple_mtbdd_nfa: NFA):
-    do_simple_nfa_determinization_tests(simple_mtbdd_nfa)
