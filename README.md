@@ -16,12 +16,12 @@ will look for it.
 After compiling the C++ module, install the required python dependencies from the `requirements.txt`.
 
 ## Running
-The runner script `amaya.py` is currently capable of two run modes, each with its own set of command line options. Some
+The runner script `run-amaya.py` is currently capable of two run modes, each with its own set of command line options. Some
 options can be applied regardless of the run mode chosen. To view those, see `python3 amaya.py --help`. 
 
 ### Get-Sat 
 ```bash
-python3 amaya.py get-sat FILE
+python3 run-amaya.py get-sat FILE
 ```
 The get-sat command evaluates the given SMT2 lib file and reports the results (sat/unsat). This command supports various
 flags for inspecting the evaluation process such as the export of the automatons created during the evaluation, or writing
@@ -29,7 +29,7 @@ out the runtime for the individual operations performed during the evaluation et
 
 To see a full list of supported switches, see:
 ```bash
-python3 amaya.py get-sat --help
+python3 run-amaya.py get-sat --help
 ```
 
 #### Example - Viewing the automatons created during evaluation of a TPTP benchmark file
@@ -37,7 +37,7 @@ The following command will print to the _stdout_ all automatons created during t
 Furthermore one can supply additional option `--dump-dest DEST` that will cause outputing the individual automatons to separate
 files in the specified `DEST` directory. (If the directory does not exists it will be created.)
 ```bash
-python3 amaya.py --backend MTBDD get-sat --dump-created-automatons smt-files/tptp/ARI005\=1.smt2
+python3 run-amaya.py --backend MTBDD get-sat --dump-created-automatons smt-files/tptp/ARI005\=1.smt2
 ```
 
 ### Benchmarks
@@ -52,7 +52,7 @@ in the file via the `smt-info` statement) the file will not be rerun and will ha
 
 To see a full list of supported options, see:
 ```bash
-python3 amaya.py benchmark --help
+python3 run-amaya.py benchmark --help
 ```
 
 #### Example - Running the TPTP benchmark
@@ -60,7 +60,7 @@ The following command specifies a benchmark to be run as all smt2 files present 
 searching). The option `--backend naive` specifies that the transition functions should be stored as Python built-in sets of transition symbols
 (will not use MTBDDs). The option `--execute-times 10` specifies that every benchmark file should be run 10 times. 
 ```bash
-python3 amaya.py --backend naive benchmark --add-directory smt-files/tptp/ --execute-times 10
+python3 run-amaya.py --backend naive benchmark --add-directory smt-files/tptp/ --execute-times 10
 ```
 
 ## Known bugs
@@ -76,10 +76,4 @@ The following table gives serves to reflect the current capabilities of the Amay
 | Psyco | Not passing | Unknown | The naive TFN runtime is enormous |
 
 ## Implementation backlog
-- [ ] Enable the usage of the efficient construction for modulo automata
-  - [ ] Process atomic formulae before the evaluation starts into Relations structures
-  - [ ] Detect the special form of equalities with one modulo term when building an automaton
-  - [ ] Add basic unit tests covering that the tasks above work (and still work after some modifications to the code will happen, and they will)
-- [ ] Refactor all code source code into one `amaya/` folder (this way it will be a proper python module)
 - [ ] Unify the `ast_relations` and `relations_structures` modules into `relations` module with `data` and `algorithm` submodules
-- [ ] Fix the `visualization` functions so that they do not create own variable names (instead they should be propagated from the actual automata)
