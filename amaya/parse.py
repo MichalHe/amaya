@@ -372,63 +372,6 @@ def strip_comments(source: str) -> str:
     return new_src
 
 
-def can_tree_be_reduced_to_aritmetic_expr(tree) -> bool:
-    '''Checks that the given `tree` contains only valid function symbols for an
-    aritmetic expression. A valid aritmetic expression is also considered to be
-    an expression that contains ITE that expands itself also to an aritmetic expr.'''
-    if type(tree) == list:
-        root = tree[0]
-        if root in ['+', '*']:
-            return can_tree_be_reduced_to_aritmetic_expr(tree[1]) and can_tree_be_reduced_to_aritmetic_expr(tree[2])
-        elif root in ['-']:
-            if len(tree) == 2:
-                return can_tree_be_reduced_to_aritmetic_expr(tree[1])
-            else:
-                return can_tree_be_reduced_to_aritmetic_expr(tree[1]) and can_tree_be_reduced_to_aritmetic_expr(tree[2])
-        elif root in ['ite']:
-            return can_tree_be_reduced_to_aritmetic_expr(tree[2]) and can_tree_be_reduced_to_aritmetic_expr(tree[3])
-        else:
-            return False
-    return True
-
-
-def is_tree_presburger_equality(tree, ctx: EvaluationContext) -> bool:
-    """
-    Check whether the provided AST is an equality relation.
-
-    To do so it first performs checks on the structure of the tree - whether it
-    does contain only operators allowed in a such expression. If it does have
-    a valid form performs further checks on whether it is not SMT equivalence
-    check between a boolean variable and a `let` bound expression.
-    """
-
-    def is_literal_from_let_or_boolean_var(literal_var: str) -> bool:
-        if ctx.get_let_binding_value(literal_var) is not None:
-            return True
-
-        maybe_left_var_info = ctx.lookup_variable(literal_var)
-        if maybe_left_var_info is not None:
-            return maybe_left_var_info.type == VariableType.BOOL
-        return False
-
-    if type(tree) != list:
-        return False
-
-    if tree[0] != '=' or len(tree) != 3:
-        return False
-
-    if can_tree_be_reduced_to_aritmetic_expr(tree[1]) and can_tree_be_reduced_to_aritmetic_expr(tree[2]):
-        maybe_left_literal_var = try_retrieve_variable_if_literal(tree[1])
-        maybe_right_literal_var = try_retrieve_variable_if_literal(tree[2])
-
-        if maybe_left_literal_var is None or maybe_right_literal_var is None:
-            return True
-
-        return not (is_literal_from_let_or_boolean_var(maybe_left_literal_var) and is_literal_from_let_or_boolean_var(maybe_right_literal_var))
-
-    return False
-
-
 def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, VariableType]]:  # NOQA
     '''Traverses the whole AST `tree` and identifies all the variables used. Manages
     the variable contexts implaced by the usage of \\exists, so that two
