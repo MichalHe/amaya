@@ -1,11 +1,21 @@
+from functools import reduce
 from typing import (
-    Set,
+    Callable,
     List,
     Optional,
+    Set,
+    Tuple,
 )
 
+from amaya.automatons import (
+    AutomatonType,
+    DFA,
+    NFA
+)
+from amaya.presburger.definitions import AliasStore
 
-def pad_closure(nfa):
+
+def pad_closure(nfa: NFA):
     """
     Performs inplace padding closure.
 
@@ -53,7 +63,7 @@ def pad_closure(nfa):
 
 
 
-def pad_closure2(nfa):
+def pad_closure2(nfa: NFA):
     """
     Ensure that the automaton satisfies the saturation property.
 
@@ -186,3 +196,38 @@ def determinize_bdd(initial_states: List, final_states: List,
         'transition_fn': resulting_transition_fn,
         'final_states': result_final_states
     }
+
+
+Metastate = Tuple[int, ...]
+
+def abstract_determinize(nfa: NFA, fn: Callable[Metastate, Metastate]) -> DFA:
+    """ 
+    Determinize given NFA with metastate modification/compression function.
+    """
+    alias_store = AliasStore()
+
+    initial_state = fn(tuple(sorted(nfa.initial_states)))
+    initial_state_alias = alias_store.get_alias_for_state(initial_state)
+
+    dfa = DFA(alphabet=nfa.alphabet, automaton_type=AutomatonType.DFA, initial_states={initial_state_alias})
+
+    work_set = {initial_state}
+
+    while work_set:
+        metastate = work_set.pop()
+        metastate_alias = alias_store.get_alias_for_state(metastate)
+
+        dfa.add_state(metastate_alias)
+        if not set(metastate).isdisjoint(nfa.final_states):
+            dfa.add_final_state(metastate_alias)
+        
+        for symbol in nfa.alphabet.gen_symbols_for_relevant_variables(nfa.used_variables):
+            post = fn(tuple(sorted(reduce(set.union,
+                                          (set(nfa.get_transition_target(sc, symbol)) for sc in metastate)))))
+            post_alias = alias_store.get_alias_for_state(post)
+
+            dfa.update_transition_fn(metastate_alias, symbol, post_alias)
+
+            if not (post_alias in dfa.states or post in work_set):
+                work_set.add(post)
+    return dfa
