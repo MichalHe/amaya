@@ -436,7 +436,7 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                     out_states.add(dest)
                     break  # Stop checking symbols, continue with next dest
 
-        return list(out_states)
+        return tuple(out_states)
 
     def insert_transition(self, source: StateType, symbol: Symbol, dest: StateType):
         if source not in self.data:

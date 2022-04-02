@@ -16,7 +16,7 @@ from typing import (
     Tuple,
 )
 
-from amaya import logger, automaton_algorithms
+from amaya import logger
 from amaya.config import (
     solver_config,
     SolutionDomain,
@@ -80,9 +80,8 @@ class NFA(object):
         return value in self.final_states
 
     def get_transition_target(self, origin: int, via_symbol: LSBF_AlphabetSymbol) -> Tuple[int, ...]:
-        # FIXME: Remove this cast.
         # TODO: Rename this function to be get post or similar
-        return tuple(self.transition_fn.get_transition_target(origin, via_symbol))
+        return self.transition_fn.get_transition_target(origin, via_symbol)
 
     def intersection(self, other: NFA, remove_nonfinishing_states: bool = True):
         """
@@ -645,3 +644,5 @@ class AutomatonSnapshot:
         ))
 
 DFA = NFA
+
+from amaya import automaton_algorithms
