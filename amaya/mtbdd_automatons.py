@@ -1,5 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Dict,
@@ -27,26 +28,27 @@ from amaya.visualization import AutomatonVisRepresentation
 from amaya import logger
 
 
+@dataclass
 class MTBDD_NFA(NFA):
     automaton_id_counter = 0  # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
     fast_prunining_enabled = False
 
-    def __init__(self,
-                 alphabet: LSBF_Alphabet,
-                 automaton_type: AutomatonType,
-                 used_variables: List[int] = []):
-        logger.debug('Initializing an MTBDD NFA Automaton.')
-        self.alphabet = alphabet
-        self.automaton_type = automaton_type
-        self.states: Set[int] = set()
-        self.final_states: Set[int] = set()
-        self.initial_states: Set[int] = set()
+    alphabet:       LSBF_Alphabet
+    automaton_type: AutomatonType = AutomatonType.NFA
+    transition_fn:  MTBDDTransitionFn = field(init=False)
+
+    states:         Set[int] = field(default_factory=set)
+    initial_states: Set[int] = field(default_factory=set)
+    final_states:   Set[int] = field(default_factory=set)
+    used_variables: List[int] = field(default_factory=list)
+    applied_operations_info: List[str] = field(default_factory=list)
+    state_labels:   Dict[int, Any] = field(default_factory=dict)
+    extra_info:     Dict[Any, Any] = field(default_factory=dict)
+
+    trapstate: Optional[int] = None
+
+    def __post_init__(self):
         self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_numbers, MTBDD_NFA.automaton_id_counter)
-        self.trapstate = None
-        self.applied_operations_info = []
-        self.used_variables = used_variables
-        self.extra_info: Dict[str, Any] = {}
-        self.state_labels: Dict[int, Any] = {}
         MTBDD_NFA.automaton_id_counter += 1
 
     def add_state(self, state: int):
@@ -405,7 +407,7 @@ class MTBDD_NFA(NFA):
 
         if not self.used_variables:
             logger.info('After the projection there are no more variables used by the MTBDD NFA - performing reduction to a trivial automaton.')
-            model = self.find_some_model()
+            model = self.find_model()
             logger.info(f'Does the automaton have a model? model={model}')
 
             if model is None:
@@ -452,46 +454,41 @@ class MTBDD_NFA(NFA):
         nfa.add_final_state(0)  # Just toggle the finality of the rejecting state
         return nfa
 
-    def find_some_model(self) -> Optional[Tuple[List[LSBF_AlphabetSymbol], List[int]]]:
-        '''Runs DFS on this automaton searching for a model.
+    def find_model(self) -> Optional[Tuple[List[LSBF_AlphabetSymbol], List[int]]]:
+        """
+        Check whether the language of this automaton is empty and return the found model if not.
 
         Returns:
-             //- A tuple containing the model (word over alphabet) and a list of states that would be traversed or
-            -
-             \\- None, if the automaton has no model (DFS search failed).
-        '''
-        stack: List[Tuple[int, List[Tuple[Union[int, str]]]]] = list(map(lambda state: (state, []), self.initial_states))
-        states_already_visited: Set[int] = set()
-        state_predecesors: Dict[int, int] = {}
-        while stack:
-            current_state, path = stack.pop(-1)
-            if current_state in self.final_states:
-                # We have found the a model, reconstruct the visited states
-                states_remaining = len(path)
-                visited_states_along_path = [current_state]
-                rev_traversal_state = current_state
-                for _ in range(states_remaining):
-                    predecesor = state_predecesors[rev_traversal_state]
-                    visited_states_along_path.append(predecesor)
-                    rev_traversal_state = predecesor
-                return (path, list(reversed(visited_states_along_path)))
+            A tuple containing the model (word over alphabet) and a list of states that would be traversed or
+            None, if the automaton has empty language.
+        """
+        Word = Tuple[LSBF_AlphabetSymbol, ...]
+        states_with_word_to_explore: List[Tuple[int, Word]] = [(q0, tuple()) for q0 in self.initial_states]
+        states_to_explore = set(self.initial_states)  # To prevent having the same state waiting to be explored multiple times
+        visited_states: Set[int] = set()
 
-            states_already_visited.add(current_state)
-            reachable_state_symbol_pairs = self.transition_fn.get_state_post_with_some_symbol(current_state)
-            for reachable_state, transition_symbol in reachable_state_symbol_pairs:
-                if reachable_state in states_already_visited:
-                    continue  # Skip the state we did already visit
+        while states_with_word_to_explore:
+            state, word = states_with_word_to_explore.pop(-1)
 
-                new_path = path + [transition_symbol]
-                stack.append((reachable_state, new_path))
-                state_predecesors[reachable_state] = current_state
+            states_to_explore.remove(state)
+            visited_states.add(state)
+
+            dest_state_symbol_pairs = self.transition_fn.get_state_post_with_some_symbol(state)
+
+            for dest_state, transition_symbol in dest_state_symbol_pairs:
+                # We can skip the state if it already is explored, or if it is waiting to be explored,
+                # since it would not be waiting if it was accepting
+                if dest_state in visited_states or dest_state in states_to_explore:
+                    continue
+                
+                dest_word = word + (transition_symbol,)
+
+                if dest_state in self.final_states:
+                    return dest_word
+
+                states_with_word_to_explore.append((dest_state, dest_word))
+                states_to_explore.add(dest_state)
         return None
-
-    def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
-        model = self.find_some_model()
-        if model:
-            return (True, model[0])
-        return (False, [])
 
     def get_visualization_representation(self) -> AutomatonVisRepresentation:
 
