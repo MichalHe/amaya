@@ -282,13 +282,9 @@ class NFA(object):
 
         if resulting_alphabet_var_count == 0:
             logger.info('Projecting away the last variable for automaton - performing DFS search for a model.')
-            is_sat, _ = self.is_sat()  # Check whether the language is nonempty
+            is_sat = self.find_model() is not None  # Check whether the language is nonempty
             logger.info(f'Was model found? {is_sat}')
-            if is_sat:
-                return NFA.trivial_accepting(self.alphabet)
-            else:
-                return NFA.trivial_nonaccepting(self.alphabet)
-
+            return NFA.trivial_accepting(self.alphabet) if is_sat else NFA.trivial_nonaccepting(self.alphabet)
         else:
             # Cross out the projected variable
             new_nfa = NFA(alphabet=self.alphabet, automaton_type=AutomatonType.NFA)
@@ -377,15 +373,24 @@ class NFA(object):
         """
         Word = Tuple[LSBF_AlphabetSymbol, ...]
 
-        states_to_explore: List[Tuple[int, Word]] = list((q0, tuple()) for q0 in self.initial_states)
+        states_with_words_to_explore: List[Tuple[int, Word]] = list((q0, tuple()) for q0 in self.initial_states)
+        states_to_explore = set(self.initial_states)
         explored_states: Set[int] = set()
 
         # Use DFS to find an accepting state reachable by a suitable model
-        while states_to_explore:
-            current_state, word = states_to_explore.pop(-1)
+        while states_with_words_to_explore:
+            current_state, word = states_with_words_to_explore.pop(-1)
+
+            states_to_explore.remove(current_state)
             explored_states.add(current_state)
             
             for destination in self.transition_fn.data.get(current_state, tuple()):
+                if destination in explored_states or destination in states_to_explore:
+                    # If it was already explored it is needless to explore it again,
+                    # if it already is in states to explore, nothing can be gained by creating 
+                    # a dest_word and adding it again to be explored twice
+                    continue
+
                 # Pick arbitrary transition symbol to use
                 dest_word = word + (next(iter(self.transition_fn.data[current_state][destination])),)
 
@@ -394,8 +399,8 @@ class NFA(object):
                     if solver_config.solution_domain != SolutionDomain.INTEGERS or dest_word:
                         return dest_word
 
-                if destination not in explored_states:
-                    states_to_explore.append((destination, dest_word))
+                states_with_words_to_explore.append((destination, dest_word))
+                states_to_explore.add(destination)
 
         return None
 
