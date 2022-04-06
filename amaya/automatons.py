@@ -371,45 +371,33 @@ class NFA(object):
 
         return result
 
-    def is_sat(self) -> Tuple[bool, List[LSBF_AlphabetSymbol]]:
-        if not self.used_variables:
-            if self.final_states:
-                return (True, [])
-            else:
-                return (False, [])
+    def find_model(self) -> Optional[Tuple[LSBF_AlphabetSymbol, ...]]:
+        """
+        Check whether the language of the automaton is empty using depth first search and return the model if found.
+        """
+        Word = Tuple[LSBF_AlphabetSymbol, ...]
 
-        # Implementation of DFS for a determinized automaton
-        state_stack: List[int] = list(self.initial_states)
-        traversal_history: Dict[int, int] = dict()
-
+        states_to_explore: List[Tuple[int, Word]] = list((q0, tuple()) for q0 in self.initial_states)
         explored_states: Set[int] = set()
-        used_word: List[LSBF_AlphabetSymbol] = list()
 
-        while state_stack:
-            current_state = state_stack.pop(-1)
-
+        # Use DFS to find an accepting state reachable by a suitable model
+        while states_to_explore:
+            current_state, word = states_to_explore.pop(-1)
             explored_states.add(current_state)
+            
+            for destination in self.transition_fn.data.get(current_state, tuple()):
+                # Pick arbitrary transition symbol to use
+                dest_word = word + (next(iter(self.transition_fn.data[current_state][destination])),)
 
-            if current_state in self.final_states:
-                used_word = self.transition_fn.calculate_path_from_dfs_traversal_history(
-                    traversal_history, current_state, self.initial_states)
+                if destination in self.final_states:
+                    # Automaton language does not contain empty word if solving over integers 
+                    if solver_config.solution_domain != SolutionDomain.INTEGERS or dest_word:
+                        return dest_word
 
-                # The NFA cannot accept empty words - that happens when after
-                # determinization and complement some of the initial states
-                # becomes accepting
-                if used_word:
-                    return (True, used_word)
+                if destination not in explored_states:
+                    states_to_explore.append((destination, dest_word))
 
-            if current_state not in self.transition_fn.data:
-                if used_word:
-                    used_word.pop(-1)
-            else:
-                transitions = self.transition_fn.data[current_state]
-                for destination, _ in transitions.items():
-                    if destination not in explored_states:
-                        traversal_history[destination] = current_state
-                        state_stack.append(destination)
-        return (False, [])
+        return None
 
     def remove_nonfinishing_states(self):
         '''BFS on rotated transitions'''

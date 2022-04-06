@@ -274,8 +274,8 @@ def run_in_getsat_mode(args):
         if ':status' not in smt_info:
             logger.warning('The is missing :status in the smt-info statement, assuming sat.')
 
-        computed_is_sat, model = nfa.is_sat()
-        computed_sat = 'sat' if computed_is_sat else 'unsat'
+        model = nfa.find_model()
+        computed_sat = 'sat' if model is not None else 'unsat'
         logger.info(f'The SAT value of the result automaton is {computed_sat}')
 
         if expected_sat != 'unknown':
