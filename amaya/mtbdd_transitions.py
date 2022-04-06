@@ -6,6 +6,8 @@ import pathlib
 import os
 
 from amaya import logger
+from amaya.alphabet import LSBF_AlphabetSymbol
+
 
 amaya_root_path = pathlib.Path(__file__).parent.absolute()
 mtbdd_wrapper = ct.CDLL(os.path.join(amaya_root_path, 'amaya-mtbdd.so'))
@@ -945,7 +947,7 @@ class MTBDDTransitionFn():
         _debug_on = ct.c_bool(debug_on)
         mtbdd_wrapper.amaya_set_debugging(_debug_on)
 
-    def get_state_post_with_some_symbol(self, state: int) -> List[Tuple[int, Tuple[Union[int, str], ...]]]:
+    def get_state_post_with_some_symbol(self, state: int) -> List[Tuple[int, LSBF_AlphabetSymbol]]:
         if state not in self.mtbdds:
             return []
         mtbdd = self.mtbdds[state]
@@ -953,7 +955,7 @@ class MTBDDTransitionFn():
 
     @staticmethod
     def get_state_post_with_some_symbol_from_its_mtbdd(mtbdd: ct.c_ulong,
-                                                       variables: List[int]) -> List[Tuple[int, Tuple[Union[int, str], ...]]]:
+                                                       variables: List[int]) -> List[Tuple[int, LSBF_AlphabetSymbol]]:
         '''Retrieves the state post set including an examplatory symbol from its mtbdd.'''
         _variables = (ct.c_uint32 * len(variables))(*variables)
         _variable_cnt = ct.c_uint32(len(variables))
