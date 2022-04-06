@@ -349,7 +349,7 @@ def run_in_benchmark_mode(args):  # NOQA
                 expected_sat = smt_info.get(':status')
 
                 if expected_sat is not None:
-                    sat, _ = nfa.is_sat()
+                    sat = nfa.model() is not None
                     if sat != expected_sat:
                         failed += 1
                         executed_benchmarks[benchmark_file].failed = True
