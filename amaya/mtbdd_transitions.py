@@ -658,11 +658,21 @@ class MTBDDTransitionFn():
         closure can be freed and other maintenance tasks performed.'''
         mtbdd_wrapper.amaya_end_pad_closure()
 
-    def iter_single_state(self, state: int, variables: Optional[List[int]] = None):
-        '''Iterates over all transitions that originate in the given `state`.
-        The transitions are yielded in their compressed form - the don't care bits
-        carry the value `*`.
-        '''
+    def iter_single_state(self,
+                          state: int,
+                          variables: Optional[List[int]] = None
+                          ) -> Generator[Tuple[int, LSBF_AlphabetSymbol, int], None, None]:
+        """
+        Iterate over all transitions from the given state.
+
+        The transitions are yielded in their compressed form, meaning that the don't care bits have the value `*`.
+
+        :param state: State from which should the yielded transitions originate.
+        :param variables: Alphabet variables onto which the transition symbols will be projected. 
+                          If None supplied, the symbols contain bits for all alphabet variables.
+        :returns: Generates the transition tuples (state, symbol, dest_state) where state is the same as the supplied 
+                  parameter.
+        """
         if variables is None:
             variables = self.alphabet_variables
 
