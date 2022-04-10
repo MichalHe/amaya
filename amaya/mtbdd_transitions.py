@@ -581,32 +581,6 @@ class MTBDDTransitionFn():
         MTBDDTransitionFn.call_end_pad_closure()
         return new_final_state_added
 
-    def _do_pad_closure_single(self, left_state: int, right_state: int, final_states: List[int]) -> bool:
-        '''(left_state) --A--> (right_state) --B--> final_states'''
-        left_mtbdd = self.mtbdds.get(left_state, None)
-        right_mtbdd = self.mtbdds.get(right_state, None)
-
-        c_left_state = c_side_state_type(left_state)
-        c_right_state = c_side_state_type(right_state)
-
-        if left_mtbdd is None or right_mtbdd is None:
-            return  # We need a pair of mtbdds to perform padding closure.
-
-        # Convert the set into C array
-        final_states_arr = (c_side_state_type * len(final_states))(*list(final_states))
-        final_states_cnt = ct.c_uint32(len(final_states))
-
-        was_modified = mtbdd_wrapper.amaya_mtbdd_do_pad_closure(
-            c_left_state,
-            left_mtbdd,
-            c_right_state,
-            right_mtbdd,
-            final_states_arr,
-            final_states_cnt
-        )
-
-        return bool(was_modified)
-
     @staticmethod
     def call_begin_pad_closure(new_final_state: int, final_states: List[int]):
         """
