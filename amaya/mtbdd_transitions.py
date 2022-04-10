@@ -518,10 +518,10 @@ class MTBDDTransitionFn():
         Padding closure:
             Every solution encoding obtained by repeating the sign bit (last one) is accepted.
 
-        The operation is performed in-situ and no new MTBDDs are created, therefore,
-        no reference counting manipulation is required.
+        Fixing padding closure might create new MTBDDs (as new transitions might be added), and therefore,
+        a reference counting updates are taken care of.
 
-        :returns: True if the saturation property needed fixing.
+        :returns: True if the saturation property was broken.
         """
         # We need adjacency matrix so that we can add the predecessors of the states
         # for which the transition to a final state was added to the work list
@@ -565,8 +565,7 @@ class MTBDDTransitionFn():
                                                                            state, right_mtbdd)
 
                 if patched_left_mtbdd != left_mtbdd:  # The pad closure did have effect.
-                    # Replace the old left mtbdd with the patched (reference
-                    # counting)
+                    # Replace the old left mtbdd with the patched and update reference counters accordingly
                     MTBDDTransitionFn.inc_mtbdd_ref_unsafe(patched_left_mtbdd)
                     MTBDDTransitionFn.dec_mtbdd_ref_unsafe(left_mtbdd)
                     self.mtbdds[pre_state] = patched_left_mtbdd
@@ -630,7 +629,20 @@ class MTBDDTransitionFn():
                             left_mtbdd: ct.c_ulong,
                             right_state: int,
                             right_mtbdd: ct.c_ulong) -> ct.c_ulong:
-        '''Wrapper around the C backend performing pad closure between two given mtbdds.'''
+        """
+        Given a state, its predecesor and their MTBDDs, fix the saturation property in the predecesor MTBDD.
+
+        The saturation property is broken if there is a transition to a final state along some symbol S from the state,
+        but there is no such transition along S from the predecessor. This would mean that a word wSS would be accepted
+        from the state, but word wS would not be - two encodings of the same value but one is not accepted.
+
+        :param left_state: The predecessor state to given right_state whose saturation property should be fixed.
+        :param left_mtbdd: The MTBDD encoding transitions from the predecessor state.
+        :param right_state: A state from which a final state is reachable.
+        :param right_mtbdd: The MTBDD encoding transitions from the predecessor state.
+        :returns: A new MTBDD with the saturation property fixed, or the original one (left_mtbdd) if the saturation
+                  property was not broken.
+        """
 
         resulting_mtbdd = mtbdd_wrapper.amaya_mtbdd_do_pad_closure(
             c_side_state_type(left_state),
