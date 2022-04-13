@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Plots the given measured runtimes of executed solvers.
 """
@@ -118,27 +119,40 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
     if interpolate:
         def exponential(x, a, b, c):
             return c + a * np.exp(b*x)
-        
+
+        def quadriatic(x, a2, a0):
+            """A polynomial function with a only one (dual) root."""
+            return a2*np.square(x + a0)
+
         for dataset in datasets:
             # Select the dataset valid range (without the added padding timeouts)
             first_timeout_i = dataset.runtimes.index(timeout)
             valid_x_values = x_values[0:first_timeout_i+1]  # include the first timeout too
             valid_y_values = dataset.runtimes[0:first_timeout_i+1]
+            
+            # Points at which the approximated curve will be sampled
+            exp_x_sample_points = np.arange(valid_x_values[0], valid_x_values[-1] + 0.1, 0.1)
 
-            # Place an exponential across the selected values
-            fitted_params = scipy.optimize.curve_fit(exponential, valid_x_values, valid_y_values)    
-
-            # Oversample the exponential on the valid x interval (we don't want to sample where timeouts are as that
-            # would yield fn-values way beyond plot boundaries
-            exp_x_sample_points = np.arange(valid_x_values[0], valid_x_values[-1] + 0.1, 0.1) 
-            exp_y_points = exponential(exp_x_sample_points,
-                                       a=fitted_params[0][0],
-                                       b=fitted_params[0][1],
-                                       c=fitted_params[0][2])
+            if len(valid_x_values) == 2:
+                # There is not enough point to fit an exponential, do a quadriatic fn instead
+                fitted_params = scipy.optimize.curve_fit(quadriatic, valid_x_values, valid_y_values)
+                print(f'Approximation function: {fitted_params[0][0]}x^2 - {fitted_params[0][1]}')
+                exp_y_points = quadriatic(exp_x_sample_points,
+                                          a2=fitted_params[0][0],
+                                          a0=fitted_params[0][1])
+            else:
+                # Place an exponential across the selected values
+                fitted_params = scipy.optimize.curve_fit(exponential, valid_x_values, valid_y_values)
+                # Oversample the exponential on the valid x interval (we don't want to sample where timeouts
+                # are as that would yield fn-values way beyond plot boundaries
+                exp_y_points = exponential(exp_x_sample_points,
+                                           a=fitted_params[0][0],
+                                           b=fitted_params[0][1],
+                                           c=fitted_params[0][2])
             plt.plot(exp_x_sample_points, exp_y_points, linewidth=0.6)
-    
+
     if draw_patch:
-        worst_dataset = min(datasets, key=lambda dataset: dataset.runtimes.index(timeout)) 
+        worst_dataset = min(datasets, key=lambda dataset: dataset.runtimes.index(timeout))
         rectangle_left_bottom = (dataset.runtimes.index(timeout) + 0.5, timeout - 0.5)
         height = 1.0
         width = len(dataset.runtimes) - dataset.runtimes.index(timeout)
@@ -148,13 +162,13 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
     plt.axhline(y=timeout, color='black', linestyle='--', linewidth=0.5)
     plt.text((x_values[0] + x_values[-1])/2, timeout+2, f'Timeout={timeout}s', ha='center')
 
-    plt.legend()
+    plt.legend(bbox_to_anchor=(0.73, 0.1))
     plt.tight_layout()
     plt.subplots_adjust(left=0.09,
-                        bottom=0.15, 
-                        right=0.95, 
-                        top=0.95, 
-                        wspace=0.4, 
+                        bottom=0.15,
+                        right=0.95,
+                        top=0.95,
+                        wspace=0.4,
                         hspace=0.4)
 
 
