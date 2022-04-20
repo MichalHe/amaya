@@ -1,10 +1,32 @@
-from typing import Dict, Generator, List, Optional, Tuple
+from typing import (
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import amaya.ast_relations as relations
-from amaya.ast_definitions import AST_NaryNode, AST_Node, AST_Leaf, NodeEncounteredHandler, NodeEncounteredHandlerStatus
-from amaya.relations_structures import Relation, ModuloTerm
-from amaya.preprocessing.ite_preprocessing import expand_ite_expressions_inside_presburger_relation, ite_expansion_handler
-from amaya import logger, utils
+from amaya.ast_definitions import (
+    AST_Leaf,
+    AST_NaryNode,
+    AST_Node,
+    NodeEncounteredHandler,
+    NodeEncounteredHandlerStatus,
+)
+from amaya.relations_structures import (
+    ModuloTerm,
+    Relation,
+)
+from amaya.preprocessing.ite_preprocessing import (
+    expand_ite_expressions_inside_presburger_relation,
+    ite_expansion_handler,
+)
+from amaya import (
+    logger,
+    utils,
+)
 
 
 def will_mod_automaton_accept_anything_after_projection(mod_term: ModuloTerm) -> bool:
@@ -30,14 +52,35 @@ def will_mod_automaton_accept_anything_after_projection(mod_term: ModuloTerm) ->
     return all_symbols_go_to_final
 
 
-def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode) -> AST_Node:
-    '''
+def is_ast_bool_equavalence(ast: AST_Node, bool_fn_symbols: Set[str]):
+    """
+    Check whether the given ast encodes the equivalence of two Booleans.
+    :returns: True if the AST represents a Boolean equivalence instead of Presburger equality.
+    """
+    if not isinstance(ast, list) or ast[0] != '=':
+        return False
+
+    left_subtree, right_subtree = ast[1], ast[2]
+
+    if isinstance(left_subtree, str) and left_subtree in bool_fn_symbols:
+        return True
+    if isinstance(right_subtree, str) and right_subtree in bool_fn_symbols:
+        return True
+    return False
+
+
+def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode, bool_fn_symbols: Set[str]) -> AST_Node:
+    """
     Walks the AST and replaces its subtrees encoding relations (atomic formulas) to canoical representation - Relation.
     Example:
         (and (= x 0) (<= y 1))  --->  (and Relation(..) Relation(..))
-    '''
+    """
     if type(ast) != list:
         return ast
+
+    if ast[0] == '=':
+        if is_ast_bool_equavalence(ast, bool_fn_symbols):
+            return list(map(lambda _ast: reduce_relation_asts_to_evaluable_leaves(_ast, bool_fn_symbols), ast))
 
     if ast[0] in ['<', '>', '<=', '>=', '=']:
         relation = relations.extract_relation(ast)
@@ -93,7 +136,7 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode) -> AST_Node:
     else:
         new_subtree: AST_NaryNode = []
         for subtree in ast:
-            processed_subtree = reduce_relation_asts_to_evaluable_leaves(subtree)
+            processed_subtree = reduce_relation_asts_to_evaluable_leaves(subtree, bool_fn_symbols)
             new_subtree.append(processed_subtree)
         return new_subtree
 

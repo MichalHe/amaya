@@ -36,6 +36,7 @@ import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
 from amaya.ast_definitions import (
     AST_NaryNode,
+    AST_Node,
     NodeEncounteredHandlerStatus,
 )
 from amaya import utils
@@ -137,7 +138,7 @@ class EvaluationContext:
 
     def get_let_binding_value(self, var_name: str) -> Optional[NFA]:
         """
-        Retrieves the value of a lexical binding introduced via the SMTLIB `let` construct. 
+        Retrieves the value of a lexical binding introduced via the SMTLIB `let` construct.
 
         Currently we suppose the bindings bind names to the automatons.
         """
@@ -260,10 +261,10 @@ class EvaluationContext:
         """
         Locate variable with given name in variable scopes and return its info.
 
-        Searches for variable information associated with the given variable name in variable scopes 
+        Searches for variable information associated with the given variable name in variable scopes
         (local -> enclosing -> global).
 
-        If no entry matching given name is found a new variable entry in the global scope is created 
+        If no entry matching given name is found a new variable entry in the global scope is created
         (with new id and unset type), and returned.
         """
 
@@ -408,7 +409,12 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
 
     root = tree[0]
 
-    assert root not in ['<', '<=', '>=', '>', '='], 'Relations should get processed beforehand in a separate pass.'
+    assert root not in ['<', '<=', '>=', '>'], 'Relations should get proca essed beforehand in a separate pass.'
+
+    if root == '=':
+        # Relations are preprocessed in a separate pass - this must be a Boolean equivalence
+        return get_all_used_variables(tree[1], ctx).union(get_all_used_variables(tree[2], ctx))
+
 
     if root in ['exists']:
         # When we are entering the new context (\\exists) we can bound at max
@@ -600,7 +606,10 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
     preprocessing.preprocess_ast(assert_tree_to_evaluate)  # Preprocessing is performed in place
 
-    assert_tree_to_evaluate = preprocessing.reduce_relation_asts_to_evaluable_leaves(assert_tree_to_evaluate)
+    bool_symbols = {
+        var_name for var_name, v_info in eval_ctx.global_variables.items() if v_info.type == VariableType.BOOL
+    }
+    assert_tree_to_evaluate = preprocessing.reduce_relation_asts_to_evaluable_leaves(assert_tree_to_evaluate, bool_symbols)
 
     # We are interested only in the number of different variables found in the
     # assert tree
@@ -747,51 +756,45 @@ def evaluate_let_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA
     return binding
 
 
-def get_automaton_for_operand(operand_value: Union[str, List],
-                              ctx: EvaluationContext,
-                              _depth: int) -> NFA:
-    '''Tries to convert the given SMT subtree to a corresponding NFA. This is used on various places throughout
-    the codebase e.g. and/or evaluation as this function provides capabilities of differentiating between
-    evaluation of a string (a SMT bool var, or some `let` bound substitution) and a situation when there is
-    really a real subtree.'''
-    if type(operand_value) == str:
-        # If it is a string, then it should reference a variable
-        # previously bound to a value, or a bool variable which can be
-        # converted to Automaton directly
-        logger.debug('Found a usage of a bound variable in evaluated node.')
+def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _depth: int) -> NFA:
+    """
+    Construct automaton accepting solutions of the formula given by its AST.
 
-        is_bool_var = False
-        variable_info = ctx.lookup_variable(str(operand_value))
-        if variable_info is not None:
-            if variable_info.type == VariableType.BOOL:
-                is_bool_var = True
+    If the given ast is a AST Leaf, the evaluation context is checked for the definition of the symbol - first whether
+    the given literal is a Boolean variable (direct construction exists), or whether it is a let variable (that is 
+    bound to an entire AST).
+
+    If the given ast is not a leaf, the evaluation procedure is ran to build the NFA encoding the AST.
+    """
+    if isinstance(operand_ast, str):
+        # If it is a string, then it should reference a let variable bound to some formula,
+        # or a Boolean variable that can be converted to Automaton directly
+
+        logger.debug('Requested the automaton for an operand that is an AST Leaf (str).'
+                     'Searching variable scopes for its definition.')
+
+        variable_info = ctx.lookup_variable(operand_ast)
+        is_bool_var = (variable_info and variable_info.type == VariableType.BOOL)
 
         if is_bool_var:
-            logger.debug(f'The reached variable {operand_value} was queried as a boolean variable.')
-            # We build an automaton for `var_name` with True value. Should
-            # the boolean be considered False, it would be encoded
-            # ['not', 'var_name'], which is equivalent to the complement of the
-            # automaton.
+            logger.debug(f'Found definition for %s - symbol defined as a boolean variable.', operand_ast)
             variable_info.usage_count += 1
-            return build_automaton_for_boolean_variable(str(operand_value), True, ctx)
+            return build_automaton_for_boolean_variable(operand_ast, True, ctx)
         else:
-            logger.debug(f'The variable {operand_value} is not boolean, searching `let` bindings.')
+            logger.debug(f'The variable %s is not boolean, searching `let` bindings.', operand_ast)
 
-        nfa = ctx.get_let_binding_value(str(operand_value))
+        nfa = ctx.get_let_binding_value(str(operand_ast))
         if nfa is None:
-            logger.fatal(f'A referenced variable: `{operand_value}` was not found in any of the binding contexts, is SMT2 file malformed?.')
-            logger.debug(f'Bound variables: `{ctx.binding_stack}`')
-            raise ValueError(f'A variable `{operand_value}` referenced inside AND could not be queried for its NFA.')
+            mgs = ('The variable `%s` was not defines as boolean, nor it is a let variable.'
+                    'Cannot construct automaton for undefined variable.')
+            logger.fatal(msg, operand_ast)
+            raise ValueError(f'Undefined variable `{operand_ast}`.')
         else:
-            logger.debug(f'Value query for variable `{operand_value}` OK.')
+            logger.debug('Value query for variable `%s` OK.', operand_ast)
         return nfa
     else:
-        # The node must be evaluated first
-        nfa = run_evaluation_procedure(operand_value,
-                                       ctx,
-                                       _debug_recursion_depth=_depth+1)
-
-        return nfa
+        # The operand in not an AST Leaf - evaluate it first
+        return run_evaluation_procedure(operand_ast, ctx, _debug_recursion_depth=_depth+1)
 
 
 def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
@@ -1013,6 +1016,15 @@ def evaluate_let_expr(let_expr: List,
     return term_nfa
 
 
+def evaluate_bool_equivalence_expr(ast: AST_NaryNode, ctx: EvaluationContext, _depth: int = 0) -> NFA:
+    """
+    Constructs an automaton for the given equivalence of two Booleans.
+    """
+    left_nfa = get_automaton_for_operand(ast[1], ctx, _depth)
+    right_nfa = get_automaton_for_operand(ast[2], ctx, _depth)
+    return left_nfa.intersection(right_nfa)
+
+
 def run_evaluation_procedure(root,  # NOQA
                   ctx: EvaluationContext,
                   _debug_recursion_depth=0,
@@ -1020,7 +1032,7 @@ def run_evaluation_procedure(root,  # NOQA
     '''Evaluates the SMT given SMT tree and returns the resulting NFA.'''
 
     if not type(root) == list:
-        # This means that either we hit a SMT2 term (boolean variable) or
+        # This means that either we hit an SMT2 term (boolean variable) or
         # the tree is malformed, and therefore we cannot continue.
 
         # TODO(codeboy): Here we should handle atoms -> like the processed relations.
@@ -1056,6 +1068,7 @@ def run_evaluation_procedure(root,  # NOQA
         'not': evaluate_not_expr,
         'exists': evaluate_exists_expr,
         'let': evaluate_let_expr,
+        '=': evaluate_bool_equivalence_expr,
     }
 
     if node_name not in evaluation_functions:
