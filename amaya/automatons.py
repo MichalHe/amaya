@@ -468,13 +468,14 @@ class NFA(object):
         # - so we use iter() and reconstruct the information.
         _transitions = defaultdict(list)
         for origin_state, symbol, destination_state in self.transition_fn.iter():
+            symbol = tuple(b for i, b in enumerate(symbol) if (i+1) in self.used_variables)
             _transitions[(origin_state, destination_state)].append(symbol)
 
         transitions = []
         for state_pair, symbols in _transitions.items():
             transitions.append((state_pair[0], symbols, state_pair[1]))
 
-        var_ids: List[int] = tuple(self.alphabet.variable_numbers)
+        var_ids = self.used_variables if solver_config.vis_display_only_free_vars else self.alphabet.variable_numbers
         var_names: Tuple[str] = tuple(self.alphabet.variable_names[var_id] for var_id in var_ids)
 
         return AutomatonVisRepresentation(

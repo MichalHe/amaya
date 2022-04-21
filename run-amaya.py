@@ -113,24 +113,30 @@ get_sat_subparser.add_argument('--dump-created-automatons',
                                action='store_true',
                                dest='dump_created_automatons',
                                default=False,
-                               help=r'''Debug option. All automatons created during the formula evaluation will be written
-                                        to separate files to the location specified by `--dump-dest`. The output format is graphviz.''')
+                               help='All automatons constructed during the formula evaluation will be written'
+                                    ' in the DOT language to separate files to the location specified by --dump-dest.')
 get_sat_subparser.add_argument('--dump-dest',
                                metavar='DEST',
                                dest='dump_destination',
-                               help=r'''Debug option. Specifies the location where the graphviz representations emitted during evaluation will be placed.''')
+                               help='Specifies the location where the intermediate automata will be exported.')
 get_sat_subparser.add_argument('--print-operations-runtime',
                                action='store_true',
                                dest='should_print_operations_runtime',
                                default=False,
-                               help=r'''If present, the runtime of the operations performed during the execution (e.g. determinization) will be logged.''')
+                               help='If present, the runtime of the automata operations performed during the execution'
+                                    ' will be measured and printed.')
 get_sat_subparser.add_argument('-p',
                                '--print-model',
                                action='store_true',
                                dest='should_print_model',
                                default=False,
                                help='Print model after the decision procedure is finished, if any.')
-
+get_sat_subparser.add_argument('--vis-only-free-vars',
+                               action='store_true',
+                               dest='vis_display_only_free_vars',
+                               default=False,
+                               help='Display only tracks only for free variables in the corresponding formula'
+                                    ' when exporting automata.')
 
 benchmark_subparser = subparsers.add_parser('benchmark')
 benchmark_subparser.add_argument('--add-file',
@@ -200,6 +206,7 @@ solution_domain_str_to_type = {
 }
 solver_config.solution_domain = solution_domain_str_to_type[args.domain]
 solver_config.minimize_eagerly = args.minimize_eagerly
+solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
 
 
 def ensure_dump_destination_valid(path: str):

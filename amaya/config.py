@@ -23,5 +23,8 @@ class SolverConfig(object):
     # Debug options
     track_state_semantics: bool = False
 
+    vis_display_only_free_vars: bool = False
+    """Export transition symbols with bits only for the free variables in the corresponding automaton."""
+
 
 solver_config = SolverConfig()
