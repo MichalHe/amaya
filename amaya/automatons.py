@@ -31,7 +31,6 @@ from amaya.transitions import (
 )
 from amaya.utils import (
     carthesian_product,
-    create_enumeration_state_translation_map,
 )
 from amaya.visualization import AutomatonVisRepresentation
 
