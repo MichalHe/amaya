@@ -150,7 +150,7 @@ def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AS
     :returns: Funcion is generating tuples containing the subtree node and
               a tuple containing a parent and index which points to the subtree.
     """
-    if type(root_node) != list:
+    if not isinstance(root_node, list):
         return root_node
 
     node_name = root_node[0]
