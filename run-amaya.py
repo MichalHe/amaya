@@ -106,19 +106,24 @@ argparser.add_argument('-M',
 
 subparsers = argparser.add_subparsers(help='Runner operation')
 get_sat_subparser = subparsers.add_parser('get-sat')
+
 get_sat_subparser.add_argument('input_file',
                                metavar='input_file_path',
                                help='The input .smt2 file containing the input formula.')
-get_sat_subparser.add_argument('--dump-created-automatons',
-                               action='store_true',
-                               dest='dump_created_automatons',
-                               default=False,
-                               help='All automatons constructed during the formula evaluation will be written'
-                                    ' in the DOT language to separate files to the location specified by --dump-dest.')
-get_sat_subparser.add_argument('--dump-dest',
-                               metavar='DEST',
-                               dest='dump_destination',
-                               help='Specifies the location where the intermediate automata will be exported.')
+
+get_sat_subparser.add_argument('--output-format',
+                               metavar='format',
+                               choices=['dot', 'vtf'],
+                               default='dot',
+                               dest='output_format',
+                               help='Specify the format of the exported automata.')
+
+get_sat_subparser.add_argument('--output-created-automata',
+                               metavar='destination',
+                               dest='output_destination',
+                               help='Causes the intermediate automata manipulated throughout the decision procedure'
+                                    ' to be exported to the given location.')
+
 get_sat_subparser.add_argument('--print-operations-runtime',
                                action='store_true',
                                dest='should_print_operations_runtime',
@@ -131,6 +136,7 @@ get_sat_subparser.add_argument('-p',
                                dest='should_print_model',
                                default=False,
                                help='Print model after the decision procedure is finished, if any.')
+
 get_sat_subparser.add_argument('--vis-only-free-vars',
                                action='store_true',
                                dest='vis_display_only_free_vars',
@@ -209,14 +215,14 @@ solver_config.minimize_eagerly = args.minimize_eagerly
 solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
 
 
-def ensure_dump_destination_valid(path: str):
-    '''Verifies that the given path points to a dir, or if it does not exists,
-    creates a new dir.'''
-    if os.path.exists(path):
-        if not os.path.isdir(path):
-            assert False, 'The automaton dump destination must be a folder, not a file.'
+def ensure_output_destination_valid(output_destination: str):
+    """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""
+    if os.path.exists(output_destination):
+        if not os.path.isdir(output_destination):
+            print('Error: The automaton output destination must be a folder, not a file.', file=sys.stderr)
+            sys.exit(1)
     else:
-        os.mkdir(path)
+        os.mkdir(output_destination)
 
 
 def search_directory_recursive(root_path: str, filter_file_ext='.smt2') -> List[str]:
@@ -251,9 +257,15 @@ def run_in_getsat_mode(args):
     }
 
     def write_created_automaton_to_folder(nfa: automatons.NFA, op: parse.ParsingOperation):
-        filename = os.path.join(args.dump_destination, f'{_enclosing_ctx["automatons_written_counter"]}-{op.value}.dot')
+        filename = os.path.join(args.output_destination, 
+                                f'{_enclosing_ctx["automatons_written_counter"]}-{op.value}.{args.output_format}')
         with open(filename, 'w') as output_file:
-            output_file.write(str(nfa.get_visualization_representation().compress_symbols().into_graphviz()))
+            vis_representation = nfa.get_visualization_representation().compress_symbols()
+            if args.output_format == 'dot':
+                output_contents = str(vis_representation.into_graphviz())
+            elif args.output_format == 'vtf':
+                output_contents = vis_representation.into_vtf()
+            output_file.write(output_contents)
         _enclosing_ctx['automatons_written_counter'] += 1
 
     def print_created_automaton_to_stdout(nfa: automatons.NFA, op: parse.ParsingOperation):
@@ -262,12 +274,9 @@ def run_in_getsat_mode(args):
     def discard_created_automaton(nfa: automatons.NFA, op: parse.ParsingOperation):
         pass
 
-    if args.dump_created_automatons:
-        if args.dump_destination is None:
-            handle_automaton_created_fn = print_created_automaton_to_stdout
-        else:
-            ensure_dump_destination_valid(args.dump_destination)
-            handle_automaton_created_fn = write_created_automaton_to_folder
+    if args.output_destination:
+        ensure_output_destination_valid(args.output_destination)
+        handle_automaton_created_fn = write_created_automaton_to_folder
     else:
         handle_automaton_created_fn = discard_created_automaton
 
@@ -275,7 +284,7 @@ def run_in_getsat_mode(args):
         input_text = input_file.read()
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
         nfa, smt_info = parse.perform_whole_evaluation_on_source_text(input_text,
-                                                                      handle_automaton_created_fn)
+                                                                      write_created_automaton_to_folder)
 
         expected_sat = smt_info.get(':status', 'sat')
         if ':status' not in smt_info:
