@@ -761,7 +761,7 @@ def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _de
     Construct automaton accepting solutions of the formula given by its AST.
 
     If the given ast is a AST Leaf, the evaluation context is checked for the definition of the symbol - first whether
-    the given literal is a Boolean variable (direct construction exists), or whether it is a let variable (that is 
+    the given literal is a Boolean variable (direct construction exists), or whether it is a let variable (that is
     bound to an entire AST).
 
     If the given ast is not a leaf, the evaluation procedure is ran to build the NFA encoding the AST.
@@ -1025,42 +1025,44 @@ def evaluate_bool_equivalence_expr(ast: AST_NaryNode, ctx: EvaluationContext, _d
     return left_nfa.intersection(right_nfa)
 
 
-def run_evaluation_procedure(root,  # NOQA
-                  ctx: EvaluationContext,
-                  _debug_recursion_depth=0,
-                  ) -> NFA:
-    '''Evaluates the SMT given SMT tree and returns the resulting NFA.'''
+def run_evaluation_procedure(ast: AST_Node,
+                             ctx: EvaluationContext,
+                             _debug_recursion_depth: int = 0) -> NFA:
+    """
+    Evaluates the entire SMT given SMT tree and returns the NFA accepting the solutions of the given formula.
 
-    if not type(root) == list:
+    :param ast: The formula to evaluate into an automaton.
+    :param ctx: The context of the performed evaluation.
+    :param _debug_recursion_depth: Used to pretty print debugging information about the progress of evaluation.
+    :returns: The NFA corresponding to the given formula.
+    """
+
+    if not isinstance(ast, list):
         # This means that either we hit an SMT2 term (boolean variable) or
-        # the tree is malformed, and therefore we cannot continue.
+        # the tree is malformed, therefore, we cannot continue.
 
-        # TODO(codeboy): Here we should handle atoms -> like the processed relations.
-        if isinstance(root, Relation):
-            return build_automaton_from_presburger_relation_ast(root, ctx, _debug_recursion_depth)
+        if isinstance(ast, Relation):
+            return build_automaton_from_presburger_relation_ast(ast, ctx, _debug_recursion_depth)
 
         # Is the term a bool variable?
         is_bool_var = False
-        maybe_variable_type = ctx.get_variable_type_if_defined(root)
+        maybe_variable_type = ctx.get_variable_type_if_defined(ast)
         if maybe_variable_type is not None and maybe_variable_type == VariableType.BOOL:
             is_bool_var = True
 
         if is_bool_var:
-            logger.debug('Reached a SMT2 term {0}, which was queried as a boolean variable.'.format(root))
-            # We build an automaton for `var_name` with True value. Should
-            # the boolean be considered False, it would be encoded
-            # ['not', 'var_name'], which is equivalent to the complement of the
-            # automaton.
-            return build_automaton_for_boolean_variable(root, True, ctx)
+            logger.debug('Reached a SMT2 term %s, which was queried as a boolean variable.', ast)
+            return build_automaton_for_boolean_variable(var_name=ast, var_value=True, ctx=ctx)
         else:
-            nfa = ctx.get_let_binding_value(root)
+            nfa = ctx.get_let_binding_value(ast)
             if nfa is None:
-                raise ValueError(f'Unknown SMT2 expression: {root}.')
+                raise ValueError(f'SMT2 identifier `{ast}` is not a let variable, nor a Boolean variable. '
+                                 'Don\'t know how to constuct an automaton')
             else:
                 return nfa
 
-    node_name = root[0]
-    emit_evaluation_progress_info(f'eval_smt_tree({root}), node_name={node_name}', _debug_recursion_depth)
+    node_name = ast[0]
+    emit_evaluation_progress_info(f'eval_smt_tree({ast}), node_name={node_name}', _debug_recursion_depth)
     # Current node is a NFA operation
     evaluation_functions = {
         'and': evaluate_and_expr,
@@ -1072,11 +1074,11 @@ def run_evaluation_procedure(root,  # NOQA
     }
 
     if node_name not in evaluation_functions:
-        raise NotImplementedError(f'Error while evaluating tree, unknown operation: {node_name}')
+        raise NotImplementedError(f'Don\'t know how to evaluate {node_name} when evaluating the formula: {ast}')
 
     evaluation_function = evaluation_functions[node_name]
 
-    result = evaluation_function(root, ctx, _debug_recursion_depth)
+    result = evaluation_function(ast, ctx, _debug_recursion_depth)
     return result
 
 
