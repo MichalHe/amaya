@@ -1,43 +1,29 @@
-import pytest
-from automatons import NFA, LSBF_Alphabet, AutomatonType
-from export_transformations import convert_automaton_to_vtf, iter_alphabet_symbol
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import (
+    AutomatonType,
+    AutomatonVisRepresentation,
+    NFA, 
+)
 
+import pytest
+
+
+alphabet = LSBF_Alphabet.from_variable_id_pairs((('x', 1), ('y', 2)))
 
 @pytest.fixture()
 def simple_automaton() -> NFA:
-    return NFA(
-        alphabet=LSBF_Alphabet.from_variable_ids([1, 2]),
+    nfa = NFA(
+        alphabet=alphabet,
         automaton_type=AutomatonType.NFA,
-        initial_states=set([0]),
-        final_states=set([1]),
-        states=set([0, 1]),
-        transition_fn={
-            0: {
-                1: set([('*', 0)])
-            }
-        }
+        initial_states={0}, final_states={1}, states={0, 1},
+        used_variables=[1, 2],
     )
+    nfa.update_transition_fn(0, ('*', 0), 1)
+    return nfa
 
 
-@pytest.fixture()
-def automaton_for_ground_formula() -> NFA:
-    return NFA(
-        alphabet=LSBF_Alphabet.from_variable_ids([1, 2]),
-        automaton_type=AutomatonType.NFA,
-        initial_states=set([0]),
-        final_states=set([0]),
-        states=set([0]),
-        transition_fn={
-            0: {
-                0: set([('*', '*')])
-            }
-        }
-    )
-
-
-def test_simple_nfa(simple_automaton: NFA):
-    assert simple_automaton
-    vtf = convert_automaton_to_vtf(simple_automaton)
+def test_convert_simple_nfa_into_vtf(simple_automaton: NFA):
+    vtf = simple_automaton.get_visualization_representation().into_vtf(uncompress_symbols=True)
     assert vtf
 
     lines = vtf.split('\n')
@@ -47,63 +33,31 @@ def test_simple_nfa(simple_automaton: NFA):
     assert lines[1] == '%States 0 1'
     assert lines[2] == '%Initial 0'
     assert lines[3] == '%Final 1'
-
     assert lines[6] == '0 00 1'
     assert lines[7] == '0 10 1'
 
-
-def test_automaton_for_ground_formula(automaton_for_ground_formula: NFA):
-    g_nfa = automaton_for_ground_formula
-    assert g_nfa
-    vtf = convert_automaton_to_vtf(g_nfa)
-    assert vtf
+    vtf = simple_automaton.get_visualization_representation().into_vtf(uncompress_symbols=False)
 
     lines = vtf.split('\n')
-    assert len(lines) == 11
-
+    assert len(lines) == 8
     assert lines[0] == '@NFA'
-    assert lines[1] == '%States 0'
+    assert lines[1] == '%States 0 1'
     assert lines[2] == '%Initial 0'
-    assert lines[3] == '%Final 0'
-
-    assert lines[6] == '0 00 0'
-    assert lines[7] == '0 01 0'
-    assert lines[8] == '0 10 0'
-    assert lines[9] == '0 11 0'
+    assert lines[3] == '%Final 1'
+    assert lines[6] == '0 x0 1'
 
 
-def test_transition_symbols_expansion():
-    sym = ('*', '*')
-    g_syms = list(iter_alphabet_symbol(sym))
-    expected_syms = [
-        (0, 0),
-        (0, 1),
-        (1, 0),
-        (1, 1),
-    ]
-    assert len(g_syms) == 4
-    for sym in expected_syms:
-        assert sym in expected_syms
-
-    sym = ('*')
-    g_syms = list(iter_alphabet_symbol(sym))
-    expected_syms = [
-        (0, ),
-        (1, ),
-    ]
-    assert len(g_syms) == 2
-    for sym in expected_syms:
-        assert sym in expected_syms
-
-    sym = (1, 0)
-    g_syms = list(iter_alphabet_symbol(sym))
-    expected_syms = [
-        (1, 0),
-    ]
-    assert len(g_syms) == 1
-    for sym in expected_syms:
-        assert sym in expected_syms
-
-    sym = tuple()
-    g_syms = list(iter_alphabet_symbol(sym))
-    assert len(g_syms) == 0
+@pytest.mark.parametrize(
+    ('compressed_symbol', 'expected_symbols'),
+    (
+        (('*', '*'), ((0, 0), (0, 1), (1, 0), (1, 1))),
+        (('*',), ((0,), (1,))),
+        ((1, 0), ((1, 0), )),
+        (tuple(), ()),
+        ((1, '*'), ((1, 0), (1, 1))),
+        ((1, '*', 0), ((1, 0, 0), (1, 1, 0))),
+    )
+)
+def test_uncompress_transition_symbols(compressed_symbol, expected_symbols):
+    actual = sorted(AutomatonVisRepresentation._uncompress_symbol(compressed_symbol))
+    assert actual == sorted(expected_symbols)

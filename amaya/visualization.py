@@ -3,6 +3,8 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generator,
+    Iterable,
     List,
     Optional,
     Set,
@@ -13,6 +15,11 @@ from dataclasses import (
     dataclass,
     field
 )
+
+from amaya.alphabet import (
+    LSBF_AlphabetSymbol,
+)
+from amaya.utils import number_to_bit_tuple
 
 
 def compute_html_label_for_symbols(variable_names: List[str], symbols: List[Tuple[int, ...]]):
@@ -139,6 +146,73 @@ class AutomatonVisRepresentation:
                     )
             )
         return graph
+
+    def into_vtf(self, uncompress_symbols=False) -> str:
+        """
+        Converts the automaton representation to the VTF format.
+
+        VTF format:
+             https://github.com/ondrik/automata-benchmarks/blob/c554e59dab98ea1f985431ccaf6c142821717cfc/vtf/README.md 
+        """
+        # VTF format example:
+        # @NFA-BDD          # NFAs with transitions in BDD
+        # %Symbol-Vars 8    # number of Boolean variables in the alphabet (required)
+        # %Initial q1 q2
+        # %Final q2
+
+        # q1 000x11x1 q2    # the format is <source> <symbol> <target>
+        # q1 01101111 q3    # 'x' in the binary vector denote don't care values
+        # q3 xxxxxxxx q1    # the length needs to match the value in '%Symbol-Vars'
+
+        initial_state = self.initial_states
+        final_states = ' '.join(map(str, self.final_states))
+        states = ' '.join(map(str, self.states))
+
+        def join_list(seq: Iterable[IntOrStr]) -> str:
+            return ' '.join(map(str, seq))
+
+        vtf = '@NFA\n'
+        vtf += '%States {0}\n'.format(join_list(self.states))
+        vtf += '%Initial {0}\n'.format(join_list(self.initial_states))
+        vtf += '%Final {0}\n'.format(join_list(self.final_states))
+
+        # Just to be sure, include metadata about number of variables in the alphabet
+        vtf += '%Symbol-Vars {0}\n'.format(len(self.variable_names))
+        vtf += '\n'
+
+        # Add automaton transition function
+        for source, transition_symbols, destination in self.transitions:
+            for compressed_symbol in transition_symbols:
+                if uncompress_symbols:
+                    for symbol in AutomatonVisRepresentation._uncompress_symbol(compressed_symbol):
+                        vtf += '{0} {1} {2}\n'.format(source, ''.join(map(str, symbol)), destination)
+                else:
+                    vtf += '{0} {1} {2}\n'.format(
+                            source, 
+                            ''.join(map(str, compressed_symbol)).replace('*', 'x'),
+                            destination)
+                    
+
+        return vtf
+
+    @staticmethod
+    def _uncompress_symbol(symbol: LSBF_AlphabetSymbol) -> Generator[Tuple[int, ...], None, None]:
+        """Uncompress the given symbol yielding the symbolically represented symbols."""
+        if not symbol:
+            return
+
+        dont_care_indices = tuple(i for i, bit in enumerate(symbol) if bit == '*')
+        if not dont_care_indices:
+            yield symbol
+            return
+
+        symbol_template = list(symbol)
+        for k in range(2**len(dont_care_indices)):
+            dont_care_bit_values = number_to_bit_tuple(k, tuple_size=len(dont_care_indices))
+            for i, dont_care_bit_value in enumerate(dont_care_bit_values):
+                dont_care_bit_index = dont_care_indices[i]
+                symbol_template[dont_care_bit_index] = dont_care_bit_value
+            yield tuple(symbol_template)
 
     def compress_symbols(self):
         """Peforms transition sets compression using plain BDDs."""
