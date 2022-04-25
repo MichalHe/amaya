@@ -144,6 +144,13 @@ get_sat_subparser.add_argument('--vis-only-free-vars',
                                help='Display only tracks only for free variables in the corresponding formula'
                                     ' when exporting automata.')
 
+get_sat_subparser.add_argument('--colorize-dot',
+                               action='store_true',
+                               dest='colorize_dot',
+                               default=False,
+                               help='Colorize the SCCs with more than 1 node in the exported automata if the output'
+                                    ' format is dot.')
+
 benchmark_subparser = subparsers.add_parser('benchmark')
 benchmark_subparser.add_argument('--add-file',
                                  metavar='FILE',
@@ -212,7 +219,6 @@ solution_domain_str_to_type = {
 }
 solver_config.solution_domain = solution_domain_str_to_type[args.domain]
 solver_config.minimize_eagerly = args.minimize_eagerly
-solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
 
 
 def ensure_output_destination_valid(output_destination: str):
@@ -248,8 +254,8 @@ def run_in_getsat_mode(args):
     assert os.path.exists(args.input_file), 'The SMT2 supplied file containing input formula does not exists!'
     assert os.path.isfile(args.input_file), 'The supplied file must not be a directory.'
 
-    if args.should_print_operations_runtime:
-        evaluation_config.print_operation_runtime = True
+    evaluation_config.print_operation_runtime = args.should_print_operations_runtime
+    solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
 
     # Wrap in a dictionary so we can modify it from nested functions
     _enclosing_ctx = {
@@ -262,7 +268,7 @@ def run_in_getsat_mode(args):
         with open(filename, 'w') as output_file:
             vis_representation = nfa.get_visualization_representation().compress_symbols()
             if args.output_format == 'dot':
-                output_contents = str(vis_representation.into_graphviz())
+                output_contents = str(vis_representation.into_graphviz(highlight_sccs=args.colorize_dot))
             elif args.output_format == 'vtf':
                 output_contents = vis_representation.into_vtf()
             output_file.write(output_contents)
@@ -325,12 +331,10 @@ def run_in_benchmark_mode(args):  # NOQA
     for f in benchmark_files:
         print(' > ', f)
 
-    evaluation_config = parse.EvaluationConfig(solution_domain, backend_type)
-    print('The evaluation configuration used during benchmarking:', evaluation_config)
     executed_benchmarks: Dict[str, BenchmarkStat] = {}
     failed = 0
 
-    if evaluation_config.backend_type == parse.BackendType.MTBDD:
+    if solver_config.backend_type == parse.BackendType.MTBDD:
         from mtbdd_transitions import MTBDDTransitionFn
 
     for i in range(args.benchmark_execution_count):
@@ -344,13 +348,13 @@ def run_in_benchmark_mode(args):  # NOQA
                 text = benchmark_input_file.read()
 
                 benchmark_start = time.time_ns()
-                nfa, smt_info = parse.perform_whole_evaluation_on_source_text(text, evaluation_config)
+                nfa, smt_info = parse.perform_whole_evaluation_on_source_text(text)
                 benchmark_end = time.time_ns()
                 runtime_ns = benchmark_end - benchmark_start
 
                 # Clear sylvan cache if running multiple evaluations, so that
                 # the measurements do not interfere.
-                if evaluation_config.backend_type == parse.BackendType.MTBDD:
+                if solver_config.backend_type == parse.BackendType.MTBDD:
                     MTBDDTransitionFn.call_clear_cachce()
                     MTBDDTransitionFn.call_sylvan_gc()
 
@@ -362,10 +366,11 @@ def run_in_benchmark_mode(args):  # NOQA
                 else:
                     executed_benchmarks[benchmark_file].runtimes_ns.append(runtime_ns)
 
-                expected_sat = smt_info.get(':status')
+                expected_sat_str = smt_info.get(':status', 'unknown')
 
-                if expected_sat is not None:
-                    sat = nfa.model() is not None
+                if expected_sat_str in ('sat', 'unsat'):
+                    sat = nfa.find_model() is not None
+                    expected_sat = (expected_sat_str == 'sat')
                     if sat != expected_sat:
                         failed += 1
                         executed_benchmarks[benchmark_file].failed = True
