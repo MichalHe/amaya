@@ -1,4 +1,11 @@
-from graphviz import Digraph
+from collections import (
+    defaultdict
+)
+from dataclasses import (
+    dataclass,
+    field
+)
+from random import randint
 from typing import (
     Any,
     Callable,
@@ -11,15 +18,18 @@ from typing import (
     Tuple,
     Union,
 )
-from dataclasses import (
-    dataclass,
-    field
-)
 
 from amaya.alphabet import (
     LSBF_AlphabetSymbol,
 )
-from amaya.utils import number_to_bit_tuple
+from amaya.utils import (
+    COLOR_PALETTE,
+    find_sccs_kosaruju,
+    get_color_palette_with_min_size,
+    number_to_bit_tuple,
+)
+
+from graphviz import Digraph
 
 
 def compute_html_label_for_symbols(variable_names: List[str], symbols: List[Tuple[int, ...]]):
@@ -113,7 +123,31 @@ class AutomatonVisRepresentation:
     variable_ids:   Tuple[int, ...]
     state_labels:   Dict[int, Any] = field(default_factory=dict)
 
-    def into_graphviz(self) -> Digraph:
+    def _compute_state_colors_by_sccs(self) -> Dict[int, Tuple[str, str]]:
+        """
+        Computes a dictionary mapping state to the color of the SCC they are in. 
+            
+        SCCs of size 1 are ignored.
+        """
+        state_colors: Dict[int, Tuple[str, str]] = {}
+
+        graph_edges = defaultdict(set)
+        for source, dummy_symbols, destination in self.transitions:
+            graph_edges[source].add(destination)
+        
+        # Ignore SCCs with only 1 node, they are not interesting
+        sccs = [scc for scc in find_sccs_kosaruju(graph_edges) if len(scc) > 1]
+        
+        colors = get_color_palette_with_min_size(len(sccs))
+        
+        # Assign colors to states based on the SCC they are in
+        for i, scc in enumerate(sccs):
+            for state in scc:
+                state_colors[state] = colors[i] 
+        return state_colors
+        
+
+    def into_graphviz(self, highlight_sccs: bool = False) -> Digraph:
         """Transforms the stored automaton represenation into graphviz (dot)."""
         graph = Digraph('automaton',
                         strict=True,
@@ -121,12 +155,24 @@ class AutomatonVisRepresentation:
                             'rankdir': 'LR',
                             'ranksep': '1'})
 
+        # Compute the SCCs and assign colors accordingly
+        state_colors: Dict[int, Tuple[str, str]] = self._compute_state_colors_by_sccs() if highlight_sccs else {}
+
+        def gen_color_kwargs(state: int) -> Dict:
+            if state in state_colors:
+                state_color = state_colors[state]
+                return {
+                        'fillcolor': state_color[0], 
+                        'fontcolor': state_color[1],
+                        'style': 'filled'
+                }
+            return {}
+               
+
         for state in self.states:
             state_label = str(self.state_labels.get(state, state))
-            if state in self.final_states:
-                graph.node(state_label, state_label, shape='doublecircle')
-            else:
-                graph.node(state_label, state_label)
+            shape = 'doublecircle' if state in self.final_states else 'circle'
+            graph.node(state_label, state_label, shape=shape, **gen_color_kwargs(state))
 
         for state in self.initial_states:
             initial_point_name = f'{state}@Start'
@@ -137,14 +183,9 @@ class AutomatonVisRepresentation:
         for origin_state, transition_symbols, dest_state in self.transitions:
             origin_label = str(self.state_labels.get(origin_state, origin_state))
             dest_label = str(self.state_labels.get(dest_state, dest_state))
-            graph.edge(
-                origin_label,
-                dest_label,
-                label=compute_html_label_for_symbols(
-                    self.variable_names,
-                    list(transition_symbols),
-                    )
-            )
+            graph.edge(origin_label,
+                       dest_label,
+                       label=compute_html_label_for_symbols(self.variable_names, list(transition_symbols)))
         return graph
 
     def into_vtf(self, uncompress_symbols=False) -> str:

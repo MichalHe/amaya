@@ -21,6 +21,25 @@ from typing import (
 T = TypeVar('T')
 S = TypeVar('S')
 
+ColorPalette = List[Tuple[str, str]]
+
+COLOR_PALETTE = [  # Node (bg, fg)
+    ('#005e73', 'white'),
+    ('#0B9396', 'black'),
+    ('#94D2BC', 'black'),
+    ('#E8D8A6', 'black'),
+    ('#EE9B01', 'black'),
+    ('#CA6701', 'white'),
+    ('#BC3E03', 'black'),
+    ('#AF2012', 'white'),
+    ('#001219', 'white'),
+    ('#9B2326', 'white'),
+    ('#b5179e', 'black'),
+    ('#606c38', 'white'),
+    ('#560bad', 'white'),
+    ('#4361ee', 'white'),
+]
+
 
 def vector_dot(vec1: Sequence[Union[int, str]], vec2: Union[int, str]) -> int:
     assert len(vec1) == len(vec2), 'Cannot take dot product of vectors with different length.'
@@ -144,3 +163,23 @@ def find_sccs_kosaruju(graph: Dict[T, Iterable[T]]) -> Set[Tuple[T]]:
         sccs.add(tuple(sorted(current_scc)))
 
     return sccs
+
+
+def get_color_palette_with_min_size(min_palette_size: int) -> ColorPalette:
+    """
+    Constructs a color palette with size at least as big as the requirested size.
+    
+    The color palette has the first 14 colors defined by hand. If the requested palette is is greater than 14, 
+    the missing colors are generated randomly.
+
+    :param min_palette_size: The minimal number of colors to present in the palette.
+    :return: The requested color palette at least as big as the requested size.
+    """
+    if min_palette_size <= len(COLOR_PALETTE):
+        return COLOR_PALETTE
+    else:
+        missing_color_cnt = len(COLOR_PALETTE) - min_palette_size
+        random_colors = ['{r:02x}{g:02x}{b:02x}' for r, g, b in (
+                            (randint(0, 255), randint(0, 255), randint(0, 255)) for i in range(missing_color_cnt)
+                        )]
+        return list(COLOR_PALETTE) + random_colors
