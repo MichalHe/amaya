@@ -261,7 +261,7 @@ class NFA(object):
 
         The automaton should be deterministic.
         """
-        assert self.automaton_type == AutomatonType.DFA, 'Cannot add a trap state to a nondeterministic automaton.'
+        assert self.automaton_type & AutomatonType.DFA, 'Cannot add a trap state to a nondeterministic automaton.'
 
         trap_state = max(self.states) + 1
         trap_state_added = self.transition_fn.complete_with_trap_state(self.alphabet, self.used_variables,
@@ -353,7 +353,7 @@ class NFA(object):
 
         The underlying automaton must be deterministic and complete in order for the complement to be correct.
         """
-        assert self.automaton_type == AutomatonType.DFA, 'Cannot complement nondeterministic automaton'
+        assert self.automaton_type & AutomatonType.DFA, 'Cannot complement nondeterministic automaton'
 
         result = NFA(alphabet=self.alphabet,
                      automaton_type=self.automaton_type,
@@ -381,12 +381,15 @@ class NFA(object):
             current_state, word = states_with_words_to_explore.pop(-1)
 
             states_to_explore.remove(current_state)
-            explored_states.add(current_state)
-            
+            if word or solver_config.solution_domain == SolutionDomain.NATURALS:
+                # Make sure that we consider the initial state as unexplored until it is reached by a non-empty word
+                # if solving over integers
+                explored_states.add(current_state)
+
             for destination in self.transition_fn.data.get(current_state, tuple()):
                 if destination in explored_states or destination in states_to_explore:
                     # If it was already explored it is needless to explore it again,
-                    # if it already is in states to explore, nothing can be gained by creating 
+                    # if it already is in states to explore, nothing can be gained by creating
                     # a dest_word and adding it again to be explored twice
                     continue
 
@@ -394,7 +397,7 @@ class NFA(object):
                 dest_word = word + (next(iter(self.transition_fn.data[current_state][destination])),)
 
                 if destination in self.final_states:
-                    # Automaton language does not contain empty word if solving over integers 
+                    # Automaton language does not contain empty word if solving over integers
                     if solver_config.solution_domain != SolutionDomain.INTEGERS or dest_word:
                         return dest_word
 
@@ -420,7 +423,7 @@ class NFA(object):
 
     @staticmethod
     def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA:
-        nfa = NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
+        nfa = NFA(alphabet=alphabet, automaton_type=(AutomatonType.DFA | AutomatonType.TRIVIAL))
 
         state = 0
         nfa.add_state(state)
