@@ -254,7 +254,7 @@ def run_in_getsat_mode(args):
     assert os.path.exists(args.input_file), 'The SMT2 supplied file containing input formula does not exists!'
     assert os.path.isfile(args.input_file), 'The supplied file must not be a directory.'
 
-    evaluation_config.print_operation_runtime = args.should_print_operations_runtime
+    solver_config.print_operation_runtime = args.should_print_operations_runtime
     solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
 
     # Wrap in a dictionary so we can modify it from nested functions
@@ -290,7 +290,7 @@ def run_in_getsat_mode(args):
         input_text = input_file.read()
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
         nfa, smt_info = parse.perform_whole_evaluation_on_source_text(input_text,
-                                                                      write_created_automaton_to_folder)
+                                                                      handle_automaton_created_fn)
 
         expected_sat = smt_info.get(':status', 'sat')
         if ':status' not in smt_info:
