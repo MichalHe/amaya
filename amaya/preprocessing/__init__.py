@@ -52,6 +52,16 @@ def will_mod_automaton_accept_anything_after_projection(mod_term: ModuloTerm) ->
     return all_symbols_go_to_final
 
 
+def is_presburger_term(ast: AST_Node, bool_vars: Set[str]) -> bool:
+    """
+    Returns true if the given ast represents a Presburger arithmetics term.
+    """
+    if isinstance(ast, str):
+        return ast not in bool_vars
+    root = ast[0]
+    return root in {'+', '-', '*', 'mod', 'div'}
+
+
 def is_ast_bool_equavalence(ast: AST_Node, bool_fn_symbols: Set[str]):
     """
     Check whether the given ast encodes the equivalence of two Booleans.
@@ -62,11 +72,9 @@ def is_ast_bool_equavalence(ast: AST_Node, bool_fn_symbols: Set[str]):
 
     left_subtree, right_subtree = ast[1], ast[2]
 
-    if isinstance(left_subtree, str) and left_subtree in bool_fn_symbols:
-        return True
-    if isinstance(right_subtree, str) and right_subtree in bool_fn_symbols:
-        return True
-    return False
+    return not (
+        is_presburger_term(left_subtree, bool_fn_symbols) and is_presburger_term(right_subtree, bool_fn_symbols)
+    )
 
 
 def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode, bool_fn_symbols: Set[str]) -> AST_Node:

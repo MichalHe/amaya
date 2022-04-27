@@ -1,6 +1,14 @@
-from typing import Dict, Set
+from typing import (
+    Dict,
+    Set,
+)
 
-from amaya.ast_definitions import AST_Leaf, AST_NaryNode, AST_Node, NodeEncounteredHandlerStatus
+from amaya.ast_definitions import (
+    AST_Leaf,
+    AST_NaryNode,
+    AST_Node,
+    NodeEncounteredHandlerStatus,
+)
 
 
 def collect_ite_control_variables(ast) -> Set[str]:
