@@ -906,7 +906,10 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
     projected_var_ids: List[int] = list()
     for var_name in variable_bindings:
         current_var_info = vars_info[var_name]
-        projected_var_ids.append(current_var_info.id)
+        if current_var_info.usage_count > 0:
+            projected_var_ids.append(current_var_info.id)
+        else:
+            logger.debug('Skipping projection of %s - 0 ussages found.', var_name)
 
     if not projected_var_ids:
         # No projection will occur
