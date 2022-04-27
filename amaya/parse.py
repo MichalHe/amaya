@@ -310,9 +310,6 @@ class EvaluationContext:
 
 
 def emit_evaluation_progress_info(msg: str, depth: int):
-    '''Logs the provided message with the correct indentation as is the current parser depth
-    in the SMT tree. The logging level is INFO by default.
-    '''
     logger.info('  ' * depth + msg)
 
 
@@ -342,9 +339,9 @@ def pretty_print_smt_tree(tree, printer=None, depth=0):
 
 
 def parse_variable_bindings_list_to_internal_repr(bindings: List[Tuple[str, str]]) -> Dict[str, VariableType]:
-    '''Converts the list of variable-to-type bindings (such as those found in \\exists)
-    to the internal representations.
-    '''
+    """
+    Parse the given variable bindings.
+    """
     var_info: Dict[str, VariableType] = {}
     for binding in bindings:
         var_name, var_type_smt_str = binding
@@ -373,16 +370,15 @@ def strip_comments(source: str) -> str:
     return new_src
 
 
-def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, VariableType]]:  # NOQA
-    '''Traverses the whole AST `tree` and identifies all the variables used. Manages
-    the variable contexts implaced by the usage of \\exists, so that two
-    variables with the same name, one of them bound via \\exists other is in
-    FREE(\\psi) are treated as a two separate variables.
+def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[str, int, VariableType]]:  # NOQA
+    """
+    Traverse the given AST and collect the used variables.
+    
+    The variables are collected in a context sensitive manner, recognizing that equally named variables
+    are not the same when bound by different quantifiers.
 
-    Returns:
-        The set of all identified variables in form of:
-            (<variable_name>, <variable_id>, <variable_type>)
-    '''
+    :returns: The set of all identified variables in form of (<variable_name>, <variable_id>, <variable_type>)
+    """
 
     if not isinstance(tree, list):
         if isinstance(tree, Relation):
@@ -453,7 +449,7 @@ def get_all_used_variables(tree, ctx: EvaluationContext) -> Set[Tuple[str, int, 
 
 
 def get_declared_function_symbols(top_level_smt_statements: List) -> List[FunctionSymbol]:
-    '''Retrieves the top-level declared function symbols from the internal smt representation.'''
+    """Retrieves the top-level declared function symbols from the internal SMT representation."""
     declared_function_symbols: List[FunctionSymbol] = []
     for statement in top_level_smt_statements:
         if statement[0] == 'declare-fun':
@@ -519,43 +515,6 @@ def get_asserts_from_ast(ast):
         if top_level_expr[0] == 'assert':
             _asserts.append(top_level_expr)
     return _asserts
-
-
-def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode,
-                                                      is_reeval: bool,
-                                                      ctx: Dict) -> NodeEncounteredHandlerStatus:
-    """Deprecated."""
-    from ast_relations import evaluate_ite_for_var_assignment
-    ite_control_variables = []  # This was here before the empty list: collect_ite_control_variables(relation_root)
-
-    if not ite_control_variables:
-        # There are no control variables, no modification to the AST needs to be performed.
-        return NodeEncounteredHandlerStatus(False, False)
-
-    # Generate the expanded ite-expression
-    expanded_expr = ['or']
-    for i in range(2**len(ite_control_variables)):
-        control_variables_bit_values = utils.number_to_bit_tuple(i, len(ite_control_variables))
-        # Convert the bit values into corresponing formulas:
-        # (A=0, B=0, C=1) --> ~A, ~B, C
-        variable_literals = [variable if variable_bit else ['not', variable] for variable, variable_bit in zip(ite_control_variables, control_variables_bit_values)]
-
-        variable_truth_assignment = dict(zip(ite_control_variables, map(bool, control_variables_bit_values)))
-
-        conjuction = ['and', *variable_literals, evaluate_ite_for_var_assignment(relation_root, variable_truth_assignment)]
-        expanded_expr.append(conjuction)
-
-    # replace the contents of `relation_root` with the results.
-    relation_root.pop(-1)
-    relation_root.pop(-1)
-    relation_root.pop(-1)
-
-    for node in expanded_expr:
-        relation_root.append(node)
-
-    ctx['ite_expansions_cnt'] += len(ite_control_variables)
-
-    return NodeEncounteredHandlerStatus(True, False)
 
 
 def perform_whole_evaluation_on_source_text(source_text: str,
@@ -635,18 +594,16 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     return (nfa, smt_info)
 
 
-def build_automaton_from_presburger_relation_ast(relation: Relation,
-                                                 ctx: EvaluationContext,
-                                                 depth: int) -> NFA:
-    '''Converts the provided relation to an automaton that encodes it. To do so it employs the algorithms
-    provied by the module `presburger_algorithms`.
+def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: EvaluationContext, depth: int) -> NFA:
+    """
+    Construct an automaton corresponding to the given relation.
 
     The provided evalaution context `ctx` should have already an overall alphabet attached to it.
 
     Note: The automaton for sharp inequation (<) is not being directly built. Instead is is build as
     an an intersection of a complement of an automaton for the same relation but equation and non-sharp
     inequality -> (and (not <REL>[< -> =]) <REL>[< -> <=]).
-    '''
+    """
     building_handlers: Dict[SolutionDomain, Dict[str, Tuple[ParsingOperation, Callable]]] = {
         SolutionDomain.INTEGERS: {
             '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ, relations_to_nfa.build_nfa_from_linear_inequality),
@@ -737,15 +694,17 @@ def build_automaton_from_presburger_relation_ast(relation: Relation,
     return nfa
 
 
-def build_automaton_for_boolean_variable(var_name: str,
-                                         var_value: bool,
-                                         ctx: EvaluationContext) -> NFA:
+def build_automaton_for_boolean_variable(var_name: str, var_value: bool, ctx: EvaluationContext) -> NFA:
+    """Construct an automaton corresponding the given boolean variable."""
     logger.debug(f'Building an equivalent automaton for the bool variable {var_name}, with value {var_value}.')
     var_id = ctx.get_variable_id(var_name)
     return ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), var_id, var_value)
 
 
-def evaluate_let_bindings(binding_list, ctx: EvaluationContext) -> Dict[str, NFA]:
+def evaluate_let_bindings(binding_list: List[str, AST_Node], ctx: EvaluationContext) -> Dict[str, NFA]:
+    """
+    Construct automata for the individual formulae bound to let variables in the given binding list.
+    """
     logger.debug(f'Evaluating binding list of size: {len(binding_list)}')
     binding: Dict[str, NFA] = {}
     for var_name, expr in binding_list:
@@ -817,7 +776,7 @@ def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
     return min_dfa
 
 
-def evaluate_binary_conjunction_expr(expr: List,
+def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
                                      ctx: EvaluationContext,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
                                      reduction_operation: ParsingOperation,
@@ -826,7 +785,7 @@ def evaluate_binary_conjunction_expr(expr: List,
     Abstract binary conjuction evaluation algorithm.
 
     Perform the evaluation of AND and OR expressions in an abstract fashion using the provided
-    reduction function (used to fold the operands into a result).
+    reduction function (used to compose the individual operands into a result).
     """
     assert type(expr) == list and len(expr) >= 3
     first_operand = expr[1]
@@ -863,10 +822,8 @@ def evaluate_binary_conjunction_expr(expr: List,
     return reduction_result
 
 
-def evaluate_and_expr(and_expr: List,
-                      ctx: EvaluationContext,
-                      _depth: int) -> NFA:
-    '''Evaluates the given AND SMT expression and returns the resulting NFA.'''
+def evaluate_and_expr(and_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+    """Construct an automaton corresponding to the given conjuction."""
 
     result = evaluate_binary_conjunction_expr(
         and_expr,
@@ -879,10 +836,8 @@ def evaluate_and_expr(and_expr: List,
     return result
 
 
-def evaluate_or_expr(or_expr: List,
-                     ctx: EvaluationContext,
-                     _depth: int) -> NFA:
-    '''Evaluates the given OR SMT expression and returns the resulting NFA.'''
+def evaluate_or_expr(or_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+    """Construct an automaton corresponding to the given disjunction."""
 
     return evaluate_binary_conjunction_expr(
         or_expr,
@@ -893,10 +848,8 @@ def evaluate_or_expr(or_expr: List,
     )
 
 
-def evaluate_not_expr(not_expr: List,
-                      ctx: EvaluationContext,
-                      _depth: int) -> NFA:
-    '''Evaluates the given NOT SMT expression and returns the resulting NFA.'''
+def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+    """Return the automaton corresponding to the given SMT expression containing a negated formula."""
 
     assert len(not_expr) == 2
     operand = get_automaton_for_operand(not_expr[1], ctx, _depth)
@@ -920,6 +873,7 @@ def evaluate_not_expr(not_expr: List,
         emit_evaluation_progress_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
 
     ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
+    assert operand.automaton_type & AutomatonType.DFA, f'{operand.automaton_type} {not_expr}'
     operand = operand.complement()
     ctx.stats_operation_ends(operand)
 
@@ -931,10 +885,8 @@ def evaluate_not_expr(not_expr: List,
     return operand
 
 
-def evaluate_exists_expr(exists_expr: List,
-                         ctx: EvaluationContext,
-                         _depth: int) -> NFA:
-    '''Evaluates the given EXISTS SMT expression and returns the resulting NFA.'''
+def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+    """Construct an NFA corresponding to the given formula of the form (exists (vars) (phi))."""
     assert len(exists_expr) == 3
 
     # We are entering a new variable frame (only exists can bind variables to
@@ -986,14 +938,10 @@ def evaluate_exists_expr(exists_expr: List,
     return nfa
 
 
-def evaluate_let_expr(let_expr: List,
-                      ctx: EvaluationContext,
-                      _depth: int) -> NFA:
-    '''Evaluates the given let expression and returns the resulting automaton.
-
-    The let expression itself does not perform no mutation on the tree underneath,
-    however it introduces lexical bindings (variable to NFA).
-    '''
+def evaluate_let_expr(let_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+    """
+    Evaluate the given let expression and returns the resulting automaton.
+    """
     # `let` has this structure [`let`, `<binding_list>`, <term>]
 
     assert len(let_expr) == 3
