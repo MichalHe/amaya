@@ -12,6 +12,7 @@ from typing import (
     Union,
 )
 
+from amaya import logger
 from amaya.alphabet import (
     LSBF_Alphabet,
     LSBF_AlphabetSymbol,
@@ -20,12 +21,15 @@ from amaya.automatons import (
     AutomatonType,
     NFA,
 )
+from amaya.config import (
+    solver_config,
+    SolutionDomain
+)
 from amaya.mtbdd_transitions import (
     MTBDDTransitionFn,
     mtbdd_false
 )
 from amaya.visualization import AutomatonVisRepresentation
-from amaya import logger
 
 
 @dataclass
@@ -237,9 +241,13 @@ class MTBDD_NFA(NFA):
         return int_nfa
 
     def perform_pad_closure(self):
-        saturation_prop_repaired = self.transition_fn.do_pad_closure(self.initial_states, self.final_states)
+        new_final_state = max(self.states) + 1
+        saturation_prop_repaired = self.transition_fn.do_pad_closure(self.initial_states, 
+                                                                     self.final_states,
+                                                                     new_final_state)
         if saturation_prop_repaired:
-            self.final_states.add(100)
+            self.states.add(new_final_state)
+            self.final_states.add(new_final_state)
 
     def determinize(self):
         """
@@ -342,7 +350,7 @@ class MTBDD_NFA(NFA):
         formula over \\mathcal{Z}.  '''
 
         # dfa = self.determinize()
-        assert self.automaton_type == AutomatonType.DFA
+        assert self.automaton_type & AutomatonType.DFA
 
         new_final_states = self.states - self.final_states
         self.final_states = new_final_states
@@ -397,8 +405,7 @@ class MTBDD_NFA(NFA):
 
         logger.debug(f'Variable projected away, proceeding to padding closure. Should skip pad closure?: {skip_pad_closure}')
         if not skip_pad_closure:
-            self.transition_fn.do_pad_closure(self.initial_states,
-                                              list(self.final_states))
+            self.perform_pad_closure()
             logger.debug('Padding closure done.')
         else:
             logger.debug('Skipping padding closure.')
@@ -469,9 +476,10 @@ class MTBDD_NFA(NFA):
 
         while states_with_word_to_explore:
             state, word = states_with_word_to_explore.pop(-1)
-
+            
             states_to_explore.remove(state)
-            visited_states.add(state)
+            if word or solver_config.solution_domain == SolutionDomain.NATURALS:
+                visited_states.add(state)
 
             dest_state_symbol_pairs = self.transition_fn.get_state_post_with_some_symbol(state)
 
@@ -484,7 +492,8 @@ class MTBDD_NFA(NFA):
                 dest_word = word + (transition_symbol,)
 
                 if dest_state in self.final_states:
-                    return dest_word
+                    if solver_config.solution_domain != SolutionDomain.INTEGERS or dest_word:
+                        return dest_word
 
                 states_with_word_to_explore.append((dest_state, dest_word))
                 states_to_explore.add(dest_state)
@@ -516,7 +525,8 @@ class MTBDD_NFA(NFA):
             final_states=set(self.final_states),
             states=set(self.states),
             transitions=vis_transitions,
-            variable_names=self.alphabet.variable_numbers
+            variable_names=self.alphabet.variable_numbers,
+            variable_ids=self.used_variables,
         )
 
     def remove_nonfinishing_states(self):
@@ -555,8 +565,11 @@ class MTBDD_NFA(NFA):
 
         states_removed = self.states - states_reaching_accepting_state
 
-        logger.debug('Removing nonfinishing states from the MTBDD transitions.')
         logger.debug(f'Removed {len(states_removed)} out of {len(self.states)}.')
-
         self.transition_fn.remove_states(states_removed)
         self.states = states_reaching_accepting_state
+
+        if not states_reaching_accepting_state:
+            # In case the language of the automaton is empty keep at least 1 nonaccepting state so that functions 
+            # generating unique states by taking max(self.states) will not crash
+            self.states.add(0)

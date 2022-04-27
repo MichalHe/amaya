@@ -511,7 +511,7 @@ class MTBDDTransitionFn():
                 reversed_adjacency_matrix[destination_state].add(origin_state)
         return reversed_adjacency_matrix
 
-    def do_pad_closure(self, initial_states: Iterable[int], final_states: List[int]) -> bool:
+    def do_pad_closure(self, initial_states: Iterable[int], final_states: List[int], new_final_state: int) -> bool:
         """
         Ensures padding closure is satisfied.
 
@@ -539,8 +539,7 @@ class MTBDDTransitionFn():
         stat_operations_skipped = 0
         stat_closures_succeeded_cnt = 0
 
-        # FIXME: the hardcoded 100 needs to be a param
-        MTBDDTransitionFn.call_begin_pad_closure(100, final_states)
+        MTBDDTransitionFn.call_begin_pad_closure(new_final_state, final_states)
 
         new_final_state_added: bool = False
         while work_list:
