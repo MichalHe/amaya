@@ -9,6 +9,7 @@ from amaya.ast_definitions import (
     AST_Node,
     NodeEncounteredHandlerStatus,
 )
+from amaya.utils import number_to_bit_tuple
 
 
 def collect_ite_control_variables(ast) -> Set[str]:
