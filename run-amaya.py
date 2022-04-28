@@ -28,6 +28,7 @@ import sys
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 import time
+import statistics
 
 from amaya import automatons
 from amaya import logger
@@ -181,12 +182,17 @@ benchmark_subparser.add_argument('--execute-times',
                                  help='Specifies the number of times to execute the whole benchmark.')
 
 benchmark_subparser.add_argument('--output-format',
-                                 choices=['json'],
+                                 choices=['json', 'csv'],
                                  default='json',
                                  metavar='fmt',
                                  dest='output_format',
                                  help='Specifies the output format for the benchmark reports.')
 
+benchmark_subparser.add_argument('--csv-fields',
+                                 default='benchmark,avg_runtime_ms,std',
+                                 help=('Comma separated fields to print when outputting CSV. Available choices: '
+                                       'benchmark (benchmark name), avg_time_ms (average runtime), '
+                                       'std (standard deviation)'))
 
 args = argparser.parse_args()
 
@@ -250,7 +256,7 @@ def search_directory_nonrecursive(root_path: str, filter_file_ext='.smt2') -> Li
     )
 
 
-def run_in_getsat_mode(args):
+def run_in_getsat_mode(args) -> bool:
     assert os.path.exists(args.input_file), 'The SMT2 supplied file containing input formula does not exists!'
     assert os.path.isfile(args.input_file), 'The supplied file must not be a directory.'
 
@@ -263,7 +269,7 @@ def run_in_getsat_mode(args):
     }
 
     def write_created_automaton_to_folder(nfa: automatons.NFA, op: parse.ParsingOperation):
-        filename = os.path.join(args.output_destination, 
+        filename = os.path.join(args.output_destination,
                                 f'{_enclosing_ctx["automatons_written_counter"]}-{op.value}.{args.output_format}')
         with open(filename, 'w') as output_file:
             vis_representation = nfa.get_visualization_representation().compress_symbols()
@@ -309,13 +315,45 @@ def run_in_getsat_mode(args):
                 logger.critical(msg)
 
                 print('error: computed different SAT as present in the input info :status field')
-                sys.exit(1)
+                return False
         print(computed_sat)
         if args.should_print_model:
             print('Model:', model)
+        return True
 
 
-def run_in_benchmark_mode(args):  # NOQA
+
+def print_benchmark_results_as_csv(results: Dict[str, BenchmarkStat], args, separator=';'):
+    """Prints the benchmark results as a CSV with fields given by the args.csv_fields."""
+
+    requested_csv_fields = args.csv_fields.split(',')
+    supported_csv_fields = {'benchmark', 'avg_runtime_ms', 'std'}
+
+    csv_fields = []
+    for field in requested_csv_fields:
+        if field in supported_csv_fields:
+            csv_fields.append(field)
+        else:
+            print(f'Unknown CSV field {field}, skipping it.', file=sys.stderr)
+
+    def make_column_map(benchmark: str, result: BenchmarkStat, columns: List[str]) -> Dict[str, str]:
+        column_map = {
+            'avg_runtime_ms': str(round(result.avg_runtime_ns / 1000)),
+            'benchmark': benchmark,
+        }
+        if 'std' in columns:
+            column_map['std'] = str(round(statistics.stdev(result.runtimes_ns) / 1000))
+        return column_map
+
+    rows = []
+    for benchmark, result in results.items():
+        column_map = make_column_map(benchmark, result, csv_fields)
+        row_parts = [column_map[field] for field in csv_fields]
+        rows.append(separator.join(row_parts))
+    print('\n'.join(rows))
+
+
+def run_in_benchmark_mode(args) -> bool:  # NOQA
     benchmark_files: List[str] = []
     for benchmark_file in args.specified_files:
         assert os.path.exists(benchmark_file) and os.path.isfile(benchmark_file), f'The file in --add-file {benchmark_file} does not exists.'
@@ -327,15 +365,15 @@ def run_in_benchmark_mode(args):  # NOQA
     for recursive_search_directory in args.recursive_search_directories:
         benchmark_files += search_directory_recursive(nonrecursive_search_directory)
 
-    print('Executing benchmark with the following files:')
+    print('Executing benchmark with the following files:', file=sys.stderr)
     for f in benchmark_files:
-        print(' > ', f)
+        print(' > ', f, file=sys.stderr)
 
     executed_benchmarks: Dict[str, BenchmarkStat] = {}
     failed = 0
 
     if solver_config.backend_type == parse.BackendType.MTBDD:
-        from mtbdd_transitions import MTBDDTransitionFn
+        from amaya.mtbdd_transitions import MTBDDTransitionFn
 
     for i in range(args.benchmark_execution_count):
         for benchmark_file in benchmark_files:
@@ -344,6 +382,11 @@ def run_in_benchmark_mode(args):  # NOQA
                 continue
 
             with open(benchmark_file) as benchmark_input_file:
+                # Clear sylvan cache if running multiple evaluations, so that the measurements do not interfere.
+                if solver_config.backend_type == parse.BackendType.MTBDD:
+                    MTBDDTransitionFn.call_clear_cachce()
+                    MTBDDTransitionFn.call_sylvan_gc()
+
                 print('Running', benchmark_file, file=sys.stderr)
                 text = benchmark_input_file.read()
 
@@ -351,12 +394,6 @@ def run_in_benchmark_mode(args):  # NOQA
                 nfa, smt_info = parse.perform_whole_evaluation_on_source_text(text)
                 benchmark_end = time.time_ns()
                 runtime_ns = benchmark_end - benchmark_start
-
-                # Clear sylvan cache if running multiple evaluations, so that
-                # the measurements do not interfere.
-                if solver_config.backend_type == parse.BackendType.MTBDD:
-                    MTBDDTransitionFn.call_clear_cachce()
-                    MTBDDTransitionFn.call_sylvan_gc()
 
                 if benchmark_file not in executed_benchmarks:
                     executed_benchmarks[benchmark_file] = BenchmarkStat(os.path.basename(benchmark_file),
@@ -375,12 +412,17 @@ def run_in_benchmark_mode(args):  # NOQA
                         failed += 1
                         executed_benchmarks[benchmark_file].failed = True
 
-    print(f'Overall failed tests: {failed}/{len(benchmark_files)}')
+    print(f'Overall failed tests: {failed}/{len(benchmark_files)}', file=sys.stderr)
+    print(f'Overall failed tests:', ' '.join(b for b, r in executed_benchmarks.items() if r.failed), file=sys.stderr)
     report = list(map(BenchmarkStat.as_dict, executed_benchmarks.values()))
 
     if args.output_format == 'json':
         import json
         print(json.dumps(report))
+    elif args.output_format == 'csv':
+        print_benchmark_results_as_csv(executed_benchmarks, args)
+
+    return not failed
 
 
 running_modes_procedure_table = {
@@ -388,4 +430,5 @@ running_modes_procedure_table = {
     RunnerMode.GET_SAT: run_in_getsat_mode,
 }
 
-runner_procedure = running_modes_procedure_table[runner_mode](args)
+run_successful = running_modes_procedure_table[runner_mode](args)
+sys.exit(0 if run_successful else 1)
