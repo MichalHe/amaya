@@ -189,9 +189,9 @@ benchmark_subparser.add_argument('--output-format',
                                  help='Specifies the output format for the benchmark reports.')
 
 benchmark_subparser.add_argument('--csv-fields',
-                                 default='benchmark,avg_runtime_ms,std',
+                                 default='benchmark,avg_runtime,std',
                                  help=('Comma separated fields to print when outputting CSV. Available choices: '
-                                       'benchmark (benchmark name), avg_time_ms (average runtime), '
+                                       'benchmark (benchmark name), avg_time (average runtime in seconds), '
                                        'std (standard deviation)'))
 
 args = argparser.parse_args()
@@ -322,12 +322,11 @@ def run_in_getsat_mode(args) -> bool:
         return True
 
 
-
 def print_benchmark_results_as_csv(results: Dict[str, BenchmarkStat], args, separator=';'):
     """Prints the benchmark results as a CSV with fields given by the args.csv_fields."""
 
     requested_csv_fields = args.csv_fields.split(',')
-    supported_csv_fields = {'benchmark', 'avg_runtime_ms', 'std'}
+    supported_csv_fields = {'benchmark', 'avg_runtime', 'std'}
 
     csv_fields = []
     for field in requested_csv_fields:
@@ -338,11 +337,11 @@ def print_benchmark_results_as_csv(results: Dict[str, BenchmarkStat], args, sepa
 
     def make_column_map(benchmark: str, result: BenchmarkStat, columns: List[str]) -> Dict[str, str]:
         column_map = {
-            'avg_runtime_ms': str(round(result.avg_runtime_ns / 1000)),
+            'avg_runtime': str(result.avg_runtime_ns / 1_000_000_000),
             'benchmark': benchmark,
         }
         if 'std' in columns:
-            column_map['std'] = str(round(statistics.stdev(result.runtimes_ns) / 1000))
+            column_map['std'] = str(round(statistics.stdev(result.runtimes_ns) / 1_000_000_000))
         return column_map
 
     rows = []
