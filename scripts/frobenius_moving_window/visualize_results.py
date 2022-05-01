@@ -31,6 +31,7 @@ arg_parser.add_argument('dataset',
 
 arg_parser.add_argument('-I', '--no-interpolate',
                         action='store_false',
+                        dest='interpolate',
                         default=True,
                         help='Do not interpolate the datasets with a cubic curve.')
 
@@ -67,7 +68,6 @@ def read_dataset(solver: str, path: str) -> Dataset:
         return Dataset(solver=solver, coin_deniminations=denoms, runtimes=runtimes)
 
 
-
 def read_datasets_from_args(arg_datasets: List[str]) -> List[Dataset]:
     datasets = []
     for arg in arg_datasets:
@@ -100,7 +100,7 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
     """
     Plots the datasets.
     """
-    fig, ax = plt.subplots(figsize=(7, 7))
+    fig, ax = plt.subplots(figsize=(14, 7))
 
     dataset_representative = datasets[0]
     x_values = [i + 1 for i in range(len(dataset_representative.runtimes))]
@@ -141,7 +141,26 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
                                           a2=fitted_params[0][0],
                                           a0=fitted_params[0][1])
             else:
-                # Place an exponential across the selected values
+                if len(valid_x_values) > 10:
+                    vv = len(valid_x_values)
+                    valid_x_values = [
+                        valid_x_values[0],
+                        valid_x_values[1],
+                        valid_x_values[vv//2],
+                        valid_x_values[vv//2 + 1],
+                        valid_x_values[vv//2 + 2],
+                        valid_x_values[-2],
+                    ]
+                    
+                    valid_y_values = [
+                        valid_y_values[0],
+                        valid_y_values[1],
+                        valid_y_values[vv//2],
+                        valid_y_values[vv//2 + 1],
+                        valid_y_values[vv//2 + 2],
+                        valid_y_values[-2],
+                    ]
+
                 fitted_params = scipy.optimize.curve_fit(exponential, valid_x_values, valid_y_values)
                 # Oversample the exponential on the valid x interval (we don't want to sample where timeouts
                 # are as that would yield fn-values way beyond plot boundaries
@@ -149,7 +168,8 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
                                            a=fitted_params[0][0],
                                            b=fitted_params[0][1],
                                            c=fitted_params[0][2])
-            plt.plot(exp_x_sample_points, exp_y_points, linewidth=0.6)
+
+            plt.plot(exp_x_sample_points, exp_y_points, linestyle='--', linewidth=0.6)
 
     if draw_patch:
         worst_dataset = min(datasets, key=lambda dataset: dataset.runtimes.index(timeout))
@@ -164,19 +184,20 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
 
     plt.legend(bbox_to_anchor=(0.73, 0.1))
     plt.tight_layout()
-    plt.subplots_adjust(left=0.09,
+    plt.title('Frobenius coin problem runtime comparison')
+    plt.subplots_adjust(left=0.05,
                         bottom=0.15,
                         right=0.95,
-                        top=0.95,
+                        top=0.92,
                         wspace=0.4,
                         hspace=0.4)
 
 
 datasets = read_datasets_from_args(args.dataset)
 pad_datasets_with_timeout(datasets, args.timeout)
-plot_datasets(datasets)
+plot_datasets(datasets, interpolate=args.interpolate)
 
 if args.save_path:
-    plt.savefig(args.save_path, dpi=120, format='pdf')
+    plt.savefig(args.save_path, dpi=300, format='pdf')
 else:
     plt.show()

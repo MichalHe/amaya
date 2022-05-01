@@ -1,20 +1,21 @@
-from typing import Dict, List
-import subprocess
-import logging
-from dataclasses import dataclass
 import argparse
-from matplotlib import pyplot as plt
+from dataclasses import dataclass
 import json
+import logging
+from matplotlib import pyplot as plt
+import subprocess
+import sys
+from typing import Dict, List
 
 
 FROBENIUS_FORMULA_GENERATOR_PATH = './frobenius_generator.py'
 
 SMT_SOLVERS = {
-    'z3': ['z3', '-smt2'],
+    'z3': ['/home/codeboy/work/misc/z3-4.8.16-x64-glibc-2.31/bin/z3', '-smt2'],
     'cvc4': ['cvc4'],
-    'cvc5': ['cvc5'],
-    'amaya': ['python3', '../run-amaya.py', 'get-sat'] ,
-    'amaya-mtbdd': ['python3', '../run-amaya.py', '--backend', 'MTBDD', 'get-sat'],
+    'cvc5': ['/home/codeboy/work/misc/cvc5-Linux'],
+    'amaya': ['python3', '../../run-amaya.py', 'get-sat'] ,
+    'amaya-mtbdd': ['python3', '../../run-amaya.py', '--backend', 'MTBDD', '-q', 'get-sat'],
 }
 
 
@@ -76,6 +77,20 @@ def generate_frobenius_formula_for_primes(primes: List[int], formula_dst: str = 
     logging.debug(f'The frobenius problem formula has been written to {formula_dst}.')
 
 
+def generate_subformula_for_primes(primes: List[int], formula_dst: str = '/tmp/f.smt2'):
+    """
+    Generate the problematic subformula.
+    """
+    from subformula_generator import generate_formula
+
+    print(f'Generating formula for {primes}', file=sys.stderr)
+
+    assert 2 == len(primes), f'Too many primes given: {primes}'
+    formula = generate_formula(w1=primes[0], w2=primes[1])
+    with open(formula_dst, 'w') as output_file:
+        output_file.write(formula)
+
+
 def run_solver_on_formula(solver_with_args: List[str],
                           formula_path: str = '/tmp/frobenius.smt2',
                           timeout_secs: int = 30) -> float:
@@ -92,9 +107,9 @@ def run_solver_on_formula(solver_with_args: List[str],
                             stderr=subprocess.PIPE,
                             timeout=timeout_secs)
 
-    fail_desc = (f'Solver finished with nonzero exit code.',
-                 '>>stderr: \n{result.stderr}\n' 
-                 '>>stdout: \n{result.stdout}')
+    fail_desc = (f'Solver finished with nonzero exit code.\n',
+                 f'>>stderr: \n{result.stderr}\n' 
+                 f'>>stdout: \n{result.stdout}')
     assert result.returncode == 0, fail_desc
     
     runtime = float(result.stderr.strip())
@@ -127,7 +142,8 @@ def perform_moving_window_analysis(solver: List[str],
                                    primes: List[int],
                                    window_size: int,
                                    grace_count: int = 3,
-                                   timeout=60):
+                                   timeout=60,
+                                   subformula=False):
     """
     Measure runtime of a given solven for instances of the Frobenius coin problem 
     with the `window_size` coins until the solver times out.
@@ -146,11 +162,15 @@ def perform_moving_window_analysis(solver: List[str],
     """
     datapoints: List[DataPoint] = []
     window_start_i = 0
+    
+    gen_formula_handle = generate_subformula_for_primes if subformula else generate_frobenius_formula_for_primes
+    formula_path = '/tmp/f.smt2'
+
     while grace_count > 0:
         window = primes[window_start_i:window_start_i + window_size]
-        generate_frobenius_formula_for_primes(window)
+        gen_formula_handle(window, formula_path)
         try:
-            runtime = run_solver_on_formula(solver, timeout_secs=timeout)
+            runtime = run_solver_on_formula(solver, timeout_secs=timeout, formula_path=formula_path)
             logging.info(f'Window#{window_start_i}={window} runtime={runtime}s')
             datapoints.append(
                 DataPoint(window_start_index=window_start_i,
@@ -202,9 +222,16 @@ arg_parser.add_argument('-v',
                         action='store_true',
                         default=False,
                         help='Print what is going on.')
-arg_parser.add_argument('solver', choices=list(SMT_SOLVERS.keys()))
-args = arg_parser.parse_args()
 
+arg_parser.add_argument('-s',
+                        '--subformula',
+                        action='store_true',
+                        default=False,
+                        help='Generate subformula instead of the entire formula.')
+
+arg_parser.add_argument('solver', choices=list(SMT_SOLVERS.keys()))
+
+args = arg_parser.parse_args()
 solver = SMT_SOLVERS[args.solver]
 
 if args.debug:
@@ -213,7 +240,9 @@ elif args.verbose:
     logging.getLogger().setLevel(logging.INFO)
 
 primes = read_primes_file()
-data_points = perform_moving_window_analysis(solver, primes, args.window_size, args.grace, timeout=args.timeout)
+
+data_points = perform_moving_window_analysis(solver, primes, args.window_size, 
+                                             args.grace, timeout=args.timeout, subformula=args.subformula)
 
 for point in data_points:
     print(point.into_csv_row())
