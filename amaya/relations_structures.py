@@ -7,8 +7,13 @@ from typing import (
     Callable,
     List,
     Dict,
-    Tuple
+    Generic,
+    Tuple,
+    TypeVar,
 )
+
+
+T = TypeVar('T')
 
 
 @dataclass
@@ -197,9 +202,10 @@ class DivTerm(object):
             divisor=divisor
         )
 
+
 @dataclass
-class ModuloReplacementInfo:
-    term: ModuloTerm
+class NonlinearTermReplacementInfo(Generic[T]):
+    term: T
     variable: str
 
 
@@ -319,7 +325,7 @@ class Relation(object):
 
     def is_conguence_equality(self) -> bool:
         """Returns true if the relation is equation of form (a.x mod c0) = c1."""
-        return len(self.modulo_terms) == 1 and self.operation == '=' and not self.variable_names
+        return len(self.modulo_terms) == 1 and self.operation == '=' and not self.variable_names and not self.div_terms
 
     def direct_construction_exists(self) -> bool:
         """Returns true if there exists a direct construction for the stored relation."""
@@ -328,39 +334,53 @@ class Relation(object):
 
         return is_congruence_eq or is_linear_relation
 
-    def replace_modulo_terms_with_variables(self) -> Tuple[Relation, List[ModuloReplacementInfo]]:
-        """Returns relation where every modulo term is replaced with a variable."""
-        mod_vars = ['Mod_{0}_Var'.format(i) for i in range(len(self.modulo_terms))]
+    def replace_nonlinear_terms_with_variables(self) -> Tuple[Relation,
+                                                              List[NonlinearTermReplacementInfo[ModuloTerm]],
+                                                              List[NonlinearTermReplacementInfo[DivTerm]]]:
+        """Returns a relation where every modulo term and div is replaced with a variable."""
+        mod_vars = [f'ModVar{i}' for i in range(len(self.modulo_terms))]
+        div_vars = [f'DivVar{i}' for i in range(len(self.div_terms))]
 
-        modulo_replacement_info: List[ModuloReplacementInfo] = []
+        modulo_replacement_info: List[NonlinearTermReplacementInfo[ModuloTerm]] = []
+        div_replacement_info: List[NonlinearTermReplacementInfo[DivTerm]] = []
 
-        relation_with_modulos_replaced = Relation(variable_names=self.variable_names[:],
-                                                  variable_coeficients=self.variable_coeficients[:],
-                                                  modulo_terms=[],
-                                                  modulo_term_coeficients=[],
-                                                  absolute_part=self.absolute_part,
-                                                  operation=self.operation)
+        replaced_relation = Relation(variable_names=list(self.variable_names),
+                                     variable_coeficients=list(self.variable_coeficients),
+                                     modulo_terms=[], modulo_term_coeficients=[],
+                                     div_term_coeficients=[], div_terms=[],
+                                     absolute_part=self.absolute_part, operation=self.operation)
+        # Replace div terms
+        for i, div_term_data in enumerate(zip(div_vars, self.div_term_coeficients, self.div_terms)):
+            div_var, term_coef, term = div_term_data
 
+            assert div_var not in self.variable_names, ('Name collision when trying to replace div term '
+                                                        'with an existentially bound variable: {div_var}')
+
+            replaced_relation.variable_names.append(div_var)
+            replaced_relation.variable_coeficients.append(term_coef)
+            div_replacement_info.append(NonlinearTermReplacementInfo(term=term, variable=div_var))
+        
+        # Replace modulo terms
         for i, mod_term_data in enumerate(zip(mod_vars, self.modulo_term_coeficients, self.modulo_terms)):
             mod_var, term_coef, term = mod_term_data
 
-            assert mod_var not in self.variable_names, 'Name collision when trying to replace modulo with a Mod_Var'
+            assert mod_var not in self.variable_names, ('Name collision when trying to replace modulo term '
+                                                        'with an existentially bound variable: {mod_var}')
 
-            relation_with_modulos_replaced.variable_names.append(mod_var)
-            relation_with_modulos_replaced.variable_coeficients.append(term_coef)
-
-            modulo_replacement_info.append(ModuloReplacementInfo(term=term, variable=mod_var))
+            replaced_relation.variable_names.append(mod_var)
+            replaced_relation.variable_coeficients.append(term_coef)
+            modulo_replacement_info.append(NonlinearTermReplacementInfo(term=term, variable=mod_var))
 
         # Sort the relation variables alphabetically, so we have a canoical form in the future
-        relation_with_modulos_replaced.sort_variables_alphabetically()
+        replaced_relation.sort_variables_alphabetically()
 
-        return (relation_with_modulos_replaced, modulo_replacement_info)
+        return (replaced_relation, modulo_replacement_info, div_replacement_info)
 
     def sort_variables_alphabetically(self):
         """Sorts the variables and corresponding coeficients alphabetically."""
         var_coef_pairs = zip(self.variable_names, self.variable_coeficients)
-        sorted_var_coef_pairs = sorted(var_coef_pairs, key=lambda pair: pair[1])
+        sorted_var_coef_pairs = sorted(var_coef_pairs, key=lambda pair: pair[0])
 
-        sorted_vars, sorted_coefs = zip(*sorted_var_coef_pairs)
+        sorted_vars, sorted_coefs = zip(*sorted_var_coef_pairs) if sorted_var_coef_pairs else (tuple(), tuple())
         self.variable_names = list(sorted_vars)
         self.variable_coeficients = list(sorted_coefs)
