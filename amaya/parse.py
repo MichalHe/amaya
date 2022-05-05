@@ -373,7 +373,7 @@ def strip_comments(source: str) -> str:
 def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[str, int, VariableType]]:  # NOQA
     """
     Traverse the given AST and collect the used variables.
-    
+
     The variables are collected in a context sensitive manner, recognizing that equally named variables
     are not the same when bound by different quantifiers.
 
@@ -973,7 +973,18 @@ def evaluate_bool_equivalence_expr(ast: AST_NaryNode, ctx: EvaluationContext, _d
     """
     left_nfa = get_automaton_for_operand(ast[1], ctx, _depth)
     right_nfa = get_automaton_for_operand(ast[2], ctx, _depth)
-    return left_nfa.intersection(right_nfa)
+    positive_branch = left_nfa.intersection(right_nfa)
+
+    if left_nfa.automaton_type & AutomatonType.NFA:
+        left_nfa = left_nfa.determinize()
+    if right_nfa.automaton_type & AutomatonType.NFA:
+        right_nfa = right_nfa.determinize()
+
+    not_left = left_nfa.complement()
+    not_right = right_nfa.complement()
+    negative_branch = not_left.intersection(not_right)
+    return positive_branch.union(negative_branch)
+
 
 
 def run_evaluation_procedure(ast: AST_Node,
