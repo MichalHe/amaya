@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import json
 import logging
 from matplotlib import pyplot as plt
+import os
+import signal
 import subprocess
 import sys
 from typing import Dict, List
@@ -66,7 +68,7 @@ def generate_frobenius_formula_for_primes(primes: List[int], formula_dst: str = 
     logging.debug(f'Spawning formula generator for: {primes}')
 
     generator_arg = ','.join(map(str, primes))
-    subprocess_result = subprocess.run(['python3', FROBENIUS_FORMULA_GENERATOR_PATH, generator_arg], 
+    subprocess_result = subprocess.run(['python3', FROBENIUS_FORMULA_GENERATOR_PATH, generator_arg],
                                        stdout=subprocess.PIPE, text=True)
 
     fail_desc = 'The script generating the frobenius coin problem formula in SMT2 finished with nonzero return code.'
@@ -101,18 +103,25 @@ def run_solver_on_formula(solver_with_args: List[str],
     :returns: Solver runtime in seconds with 1s/100 precision.
     """
     logging.debug(f'Timing the execution of {solver_with_args[0]}')
-    result = subprocess.run(['time', '-f', r'%e', *solver_with_args, formula_path],
-                            text=True,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            timeout=timeout_secs)
+    process = subprocess.Popen(['time', '-f', r'%e', *solver_with_args, formula_path],
+                               text=True,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,
+                               preexec_fn=os.setsid)  # Start new session, so that we can kill spawned subprocesses
+
+    try:
+        _stdout, _stderr = process.communicate(timeout=timeout_secs)
+    except KeyboardInterrupt:
+        print('Terminating:', process.pid)
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        sys.exit(1)
 
     fail_desc = (f'Solver finished with nonzero exit code.\n',
-                 f'>>stderr: \n{result.stderr}\n' 
-                 f'>>stdout: \n{result.stdout}')
-    assert result.returncode == 0, fail_desc
-    
-    runtime = float(result.stderr.strip())
+                 f'>>stderr: \n{_stderr}\n'
+                 f'>>stdout: \n{_stdout}')
+    assert process.returncode == 0, fail_desc
+
+    runtime = float(_stderr.strip())
 
     logging.debug(f'Done. Runtime: {runtime}s')
     return runtime
@@ -145,7 +154,7 @@ def perform_moving_window_analysis(solver: List[str],
                                    timeout=60,
                                    subformula=False):
     """
-    Measure runtime of a given solven for instances of the Frobenius coin problem 
+    Measure runtime of a given solven for instances of the Frobenius coin problem
     with the `window_size` coins until the solver times out.
 
     Creates a windows of the given size and moves it over the given list of primes.
@@ -162,7 +171,7 @@ def perform_moving_window_analysis(solver: List[str],
     """
     datapoints: List[DataPoint] = []
     window_start_i = 0
-    
+
     gen_formula_handle = generate_subformula_for_primes if subformula else generate_frobenius_formula_for_primes
     formula_path = '/tmp/f.smt2'
 
@@ -187,6 +196,7 @@ def perform_moving_window_analysis(solver: List[str],
                           execution_time=-1.0))
         finally:
             window_start_i += 1
+            running_process = None
     logging.info(f'Grace exhaused - last window to execute: {window}')
     return datapoints
 
@@ -241,7 +251,7 @@ elif args.verbose:
 
 primes = read_primes_file()
 
-data_points = perform_moving_window_analysis(solver, primes, args.window_size, 
+data_points = perform_moving_window_analysis(solver, primes, args.window_size,
                                              args.grace, timeout=args.timeout, subformula=args.subformula)
 
 for point in data_points:
