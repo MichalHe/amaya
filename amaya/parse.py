@@ -617,21 +617,19 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
     automaton_constr = ctx.get_automaton_class_for_current_backend()
 
-    logger.debug(f'Building an automaton for: {relation}')
+    logger.debug('Building an automaton for: %s', relation)
     if relation.is_always_satisfied():
-        assert ctx.alphabet, 'The context must have alphabet already created in the second stage of evaluation'
         logger.info(f'Encountered relation that is always true: {relation}, returning trivial accepting automaton.')
         return automaton_constr.trivial_accepting(ctx.alphabet)
 
     # We should never encounter the '<' inequality as we are always converting it to the <=
     assert relation.operation in ['<=', '=']
-    operation, automaton_building_function = building_handlers[solver_config.solution_domain].get(relation.operation)
+    operation, automaton_building_function = building_handlers[solver_config.solution_domain][relation.operation]
 
-    # Congruence relations of the form a.x ~ k must be handled differently - it
-    # is necessary to reorder the modulo term inside, not the nonmodular
-    # variables
+    # Congruence relations of the form a.x ~ k must be handled differently - it is necessary to reorder
+    # the modulo term inside, not the nonmodular variables
     if relation.is_conguence_equality():
-        logger.debug(f'Given relation: {relation} is congruence equivalence. Reordering variables.')
+        logger.debug(f'Given relation: %s is congruence equivalence. Reordering variables.', relation)
         modulo_term = relation.modulo_terms[0]
         variable_id_pairs = sorted(ctx.get_multiple_variable_ids(modulo_term.variables),
                                    key=lambda pair: pair[1])
@@ -644,10 +642,10 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
                                          constant=modulo_term.constant,
                                          modulo=modulo_term.constant)
 
-        logger.debug(f'Reordered modulo term from: {modulo_term} to {modulo_term_ordered}')
+        logger.debug(f'Reordered modulo term from: %s to %s', modulo_term, modulo_term_ordered)
 
-        # The alphabet might have only variable IDs but no names, inject
-        # the variable names so that we can do vizualization properly
+        # The alphabet might have only variable IDs but no names assigned to them yet, bind the variable names to IDs
+        # so that we can do vizualization properly
         ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
 
         nfa = relations_to_dfa.build_presburger_modulo_dfa(relation, variable_id_pairs,
@@ -657,6 +655,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
     else:
         assert not relation.modulo_terms
+        assert not relation.div_terms
 
         # The extracted relation contains the list of variables and their
         # coeficients in an arbitrary order - we need to make sure that the order
@@ -681,13 +680,17 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         nfa = automaton_building_function(reordered_relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
         ctx.emit_evaluation_introspection_info(nfa, operation)
 
-        emit_evaluation_progress_info(f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})', depth)
+        emit_evaluation_progress_info(
+            f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})',
+            depth
+        )
 
     # Finalization - increment variable usage counter and bind variable ID to a name in the alphabet (lazy binding)
     # as the variable IDs could not be determined beforehand.
     for var_name, var_id in variable_id_pairs:
         var_info = ctx.lookup_variable(var_name)
-        assert var_info, 'Failed to retrieve variable info from evaluation context.'
+        assert var_info, ('Failed to retrieve variable info from evaluation context to increment variable ussage '
+                          'counter after an automaton for an atomic constraint was built.')
         var_info.usage_count += 1
 
     return nfa
