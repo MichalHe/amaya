@@ -97,7 +97,7 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode, bool_fn_symbols:
         if relation.direct_construction_exists():
             return relation
 
-        relation_without_modulos, replacement_infos = relation.replace_modulo_terms_with_variables()
+        relation_without_modulos, replacement_infos = relation.replace_nonlinear_terms_with_variables()
         assert replacement_infos, 'Relation did not have a direct construction, yet there were no modulos inside(?)'
 
         # We need to add relations expressing modulo/reminder domains etc.
@@ -129,15 +129,14 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode, bool_fn_symbols:
             resulting_relations.append(reminder_lower_bound)
             resulting_relations.append(reminder_upper_bound)
 
-            if not will_mod_automaton_accept_anything_after_projection(replacement_info.term):
-                congruence_relation = Relation(variable_names=[],
-                                               variable_coeficients=[],
-                                               modulo_terms=[modulo_term],
-                                               modulo_term_coeficients=[1],
-                                               absolute_part=0,
-                                               operation='=')
+            congruence_relation = Relation(variable_names=[],
+                                           variable_coeficients=[],
+                                           modulo_terms=[modulo_term],
+                                           modulo_term_coeficients=[1],
+                                           absolute_part=0,
+                                           operation='=')
 
-                resulting_relations.append(congruence_relation)
+            resulting_relations.append(congruence_relation)
 
         variable_binding_list = [[variable, 'Int'] for variable in sorted(map(lambda info: info.variable, replacement_infos))]
         return ['exists', variable_binding_list, ['and', *resulting_relations]]
