@@ -1,6 +1,7 @@
 """
 Division term syntax: (div <expr> <constexpr>)
 """
+from functools import partial
 from typing import (
     Union,
 )
@@ -68,11 +69,42 @@ def test_relation_extraction_with_div(relation_ast: AST_Node, expected_relation:
             relation = extract_relation(relation_ast)
 
 
-@pytest.mark.skip
 def test_reduce_ast_to_evaluable_leaves():
-    ast = ['<=', ['div', 'y', '10'], '0']
+    ast = ['<=', ['div', ['*', 2, 'y'], '10'], '0']
     reduced_ast = reduce_relation_asts_to_evaluable_leaves(ast, set())
-    assert reduced_ast
+    LinRelation = partial(Relation, modulo_terms=[], modulo_term_coeficients=[], div_terms=[], div_term_coeficients=[])
+    CongruenceRelation = partial(Relation, div_terms=[], div_term_coeficients=[], operation='=',
+                                 variable_names=[], variable_coeficients=[])
+    expected_ast = [
+        'exists', [['DivVar0', 'Int']],
+        [
+            'and',
+            LinRelation(variable_names=['DivVar0'], variable_coeficients=[1], operation='<=', absolute_part=0),
+            LinRelation(variable_names=['DivVar0', 'y'], variable_coeficients=[10, -2], operation='<=', absolute_part=0),
+            LinRelation(variable_names=['DivVar0', 'y'], variable_coeficients=[-10, 2], operation='<=', absolute_part=9),
+        ]
+    ]
+
+    assert reduced_ast == expected_ast
+
+    ast = ['<=', ['+', ['div', 'y', '10'], ['mod', 'y', '11']], 1]
+    reduced_ast = reduce_relation_asts_to_evaluable_leaves(ast, set())
+    congruence_mod_term = ModuloTerm(variables=('ModVar0', 'y'), variable_coeficients=(-1, 1), constant=0, modulo=11)
+    expected_ast = [
+        'exists', [['DivVar0', 'Int'], ['ModVar0', 'Int']],
+        [
+            'and',
+            LinRelation(variable_names=['DivVar0', 'ModVar0'], variable_coeficients=[1, 1], operation='<=', absolute_part=1),
+            LinRelation(variable_names=['DivVar0', 'y'], variable_coeficients=[10, -1], operation='<=', absolute_part=0),
+            LinRelation(variable_names=['DivVar0', 'y'], variable_coeficients=[-10, 1], operation='<=', absolute_part=9),
+            LinRelation(variable_names=['ModVar0'], variable_coeficients=[-1], operation='<=', absolute_part=0),
+            LinRelation(variable_names=['ModVar0'], variable_coeficients=[1], operation='<=', absolute_part=10),
+            CongruenceRelation(modulo_terms=[congruence_mod_term], modulo_term_coeficients=[1], absolute_part=0),
+        ]
+    ]
+
+    assert reduced_ast[2] == expected_ast[2]
+
 
 
 def test_div_replacement_inside_relation():

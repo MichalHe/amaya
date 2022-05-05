@@ -91,7 +91,7 @@ def evaluate_expression_ast(expr) -> PresburgerExpr:
 
 def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr, rhs_expr: PresburgerExpr) -> Relation:
     """
-    Takes an automic formula of form: <expr> <op> <expr>, and produces output in the <VARIABLES> ~ <ABS> form 
+    Takes an automic formula of form: <expr> <op> <expr>, and produces output in the <VARIABLES> ~ <ABS> form
     where ~ is `<=` or `>=`.
 
     :param rel_type: Relation type, one of {<=, <, =, >, >=}
@@ -140,7 +140,7 @@ def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr,
     for modulo_term, modulo_term_coeficient in unified_expr.modulo_terms.items():
         modulo_terms.append(modulo_term)
         modulo_term_coeficients.append(modulo_term_coeficient)
-    
+
     div_terms, div_term_coeficients = (
         tuple(map(list, zip(*unified_expr.div_terms.items()))) if unified_expr.div_terms else ([], [])
     )

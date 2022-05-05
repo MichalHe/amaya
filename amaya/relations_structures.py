@@ -106,7 +106,7 @@ class PresburgerExpr:
         new_variables: Dict[str, int] = dict()
         multiplier = const_expr.absolute_part
 
-        new_variables = {var_name: multiplier * var_coef for var_name, multiplier in non_const_expr.variables.items()}
+        new_variables = {var_name: multiplier * var_coef for var_name, var_coef in non_const_expr.variables.items()}
         new_mod_terms = {
             var_name: multiplier * var_coef for var_name, var_coef in non_const_expr.modulo_terms.items()
         }
@@ -170,7 +170,7 @@ class ModuloTerm:
     def into_sorted(self) -> ModuloTerm:
         """Sorts the variables and corresponding coeficients alphabetically."""
         var_coef_pairs = zip(self.variables, self.variable_coeficients)
-        sorted_var_coef_pairs = sorted(var_coef_pairs, key=lambda pair: pair[1])
+        sorted_var_coef_pairs = sorted(var_coef_pairs, key=lambda pair: pair[0])
 
         sorted_vars, sorted_coefs = zip(*sorted_var_coef_pairs)
         return ModuloTerm(variables=sorted_vars, variable_coeficients=sorted_coefs,
@@ -213,8 +213,8 @@ class NonlinearTermReplacementInfo(Generic[T]):
 class Relation(object):
     """
     Represents one atomic PrA constraint.
-    
-    Might contain modulo terms or div terms that are not evaluable directly and must be expressed in terms 
+
+    Might contain modulo terms or div terms that are not evaluable directly and must be expressed in terms
     of existential quantifier.
     """
     variable_names: List[str]
@@ -271,7 +271,7 @@ class Relation(object):
 
         modulo_terms = (
             '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, mod_term) for coef, mod_term in zip(
-                self.modulo_terms, self.modulo_term_coeficients
+                self.modulo_term_coeficients, self.modulo_terms
             )
         )
 
@@ -280,7 +280,7 @@ class Relation(object):
                 self.div_term_coeficients, self.div_terms
             )
         )
-        
+
         relation_lhs_parts = (' '.join(linear_terms), ' '.join(modulo_terms), ' '.join(div_terms))
         return 'Relation({0} {1} {2})'.format(
             ' '.join(lhs_part for lhs_part in relation_lhs_parts if lhs_part),
@@ -309,6 +309,8 @@ class Relation(object):
             if coef >= 0:
                 positive_sign_count += 1
 
+        positive_sign_count += sum(coef >= 0 for coef in self.div_term_coeficients)
+
         if positive_sign_count == sign_count / 2:
             return self.absolute_part >= 0
 
@@ -321,6 +323,7 @@ class Relation(object):
         if not self.is_in_canoical_form():
             self.variable_coeficients = [-1 * coef for coef in self.variable_coeficients]
             self.modulo_term_coeficients = [-1 * coef for coef in self.modulo_term_coeficients]
+            self.div_term_coeficients = [-1 * coef for coef in self.div_term_coeficients]
             self.absolute_part *= -1
 
     def is_conguence_equality(self) -> bool:
@@ -359,7 +362,7 @@ class Relation(object):
             replaced_relation.variable_names.append(div_var)
             replaced_relation.variable_coeficients.append(term_coef)
             div_replacement_info.append(NonlinearTermReplacementInfo(term=term, variable=div_var))
-        
+
         # Replace modulo terms
         for i, mod_term_data in enumerate(zip(mod_vars, self.modulo_term_coeficients, self.modulo_terms)):
             mod_var, term_coef, term = mod_term_data
@@ -384,3 +387,30 @@ class Relation(object):
         sorted_vars, sorted_coefs = zip(*sorted_var_coef_pairs) if sorted_var_coef_pairs else (tuple(), tuple())
         self.variable_names = list(sorted_vars)
         self.variable_coeficients = list(sorted_coefs)
+
+    def calc_approximate_automaton_size(self) -> int:
+        """
+        Calculate the approximate size for the automaton encoding this constraint.
+
+        Requires the represented relation to be a directly evaluable atomic constraint (linear relation without mod/div
+        terms or congruence).
+        """
+        if self.variable_names:
+            return sum(map(abs, self.variable_coeficients))
+        if self.modulo_terms:
+            return abs(self.modulo_terms[0].modulo)
+        return 0
+
+    @staticmethod
+    def new_lin_relation(variable_names: List[str] = [], variable_coeficients: List[int] = [],
+                         absolute_part: int = 0, operation: str = '=') -> Relation:
+        return Relation(variable_names=variable_names, variable_coeficients=variable_coeficients,
+                        absolute_part=absolute_part, operation=operation,
+                        div_term_coeficients=[], div_terms=[], modulo_terms=[], modulo_term_coeficients=[])
+
+    @staticmethod
+    def new_congruence_relation(modulo_terms: List[ModuloTerm] = [], modulo_term_coeficients: List[int] = [],
+                                absolute_part: int = 0) -> Relation:
+        return Relation(variable_names=[], variable_coeficients=[], absolute_part=absolute_part, operation='=',
+                        div_term_coeficients=[], div_terms=[], modulo_terms=modulo_terms,
+                        modulo_term_coeficients=modulo_term_coeficients)

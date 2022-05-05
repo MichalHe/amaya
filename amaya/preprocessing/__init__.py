@@ -1,3 +1,4 @@
+from itertools import chain
 from typing import (
     Dict,
     Generator,
@@ -16,7 +17,9 @@ from amaya.ast_definitions import (
     NodeEncounteredHandlerStatus,
 )
 from amaya.relations_structures import (
+    DivTerm,
     ModuloTerm,
+    NonlinearTermReplacementInfo,
     Relation,
 )
 from amaya.preprocessing.ite_preprocessing import (
@@ -77,6 +80,65 @@ def is_ast_bool_equavalence(ast: AST_Node, bool_fn_symbols: Set[str]):
     )
 
 
+def generate_atomic_constraints_for_replaced_mod_terms(
+        replacement_infos: List[NonlinearTermReplacementInfo[ModuloTerm]]) -> List[Relation]:
+    """
+    Generate the atomic constraints limiting the range of the variables replacing modulo terms, as well as
+    the congruence constraints.
+
+    The returned constraints are sorted according to the predicted size of their automata in an ascending order.
+
+    :param replacement_info: Information about what mod term was replaced by what variable.
+    """
+    constraints: List[Relation] = []
+    for replacement_info in replacement_infos:
+        reminder_lower_bound = Relation.new_lin_relation(variable_names=[replacement_info.variable],
+                                                         variable_coeficients=[-1], absolute_part=0, operation='<=')
+
+        reminder_upper_bound = Relation.new_lin_relation(variable_names=[replacement_info.variable],
+                                                         variable_coeficients=[1], operation='<=',
+                                                         absolute_part=replacement_info.term.modulo - 1)
+
+        # Modify the original modulo term by subtracting the replacement variable, and use it to form the congruence
+        modulo_term = ModuloTerm(variables=replacement_info.term.variables + (replacement_info.variable,),
+                                 variable_coeficients=replacement_info.term.variable_coeficients + (-1,),
+                                 constant=replacement_info.term.constant, modulo=replacement_info.term.modulo)
+        modulo_term = modulo_term.into_sorted()
+        congruence = Relation.new_congruence_relation(modulo_terms=[modulo_term],  modulo_term_coeficients=[1])
+
+        constraints.extend((reminder_lower_bound, reminder_upper_bound, congruence))
+
+    return sorted(constraints, key=lambda constraint: constraint.calc_approximate_automaton_size())
+
+
+def generate_atomic_constraints_for_replaced_div_terms(
+        replacement_infos: List[NonlinearTermReplacementInfo[DivTerm]]) -> List[Relation]:
+    """
+    Generate the atomic constraints limiting the value of the variables that replaced div terms.
+
+    :param replacement_info: Information about what div term was replaced by what variable.
+    """
+    constraints: List[Relation] = []
+    for replacement_info in replacement_infos:
+        _vars = replacement_info.term.variables + (replacement_info.variable,)
+        _var_coefs = replacement_info.term.variable_coeficients + (-replacement_info.term.divisor,)
+
+        # Sort the variables and their coefficients according to their names
+        _vars, _var_coefs = zip(*sorted(zip(_vars, _var_coefs), key=lambda pair: pair[0]))
+
+        reminder_lower_bound = Relation.new_lin_relation(variable_names=list(_vars),
+                                                         variable_coeficients=[-coef for coef in _var_coefs],
+                                                         absolute_part=0, operation='<=')
+        reminder_upper_bound = Relation.new_lin_relation(variable_names=list(_vars),
+                                                         variable_coeficients=list(_var_coefs),
+                                                         absolute_part=replacement_info.term.divisor - 1,
+                                                         operation='<=')
+
+        constraints.extend((reminder_lower_bound, reminder_upper_bound))
+
+    return constraints
+
+
 def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode, bool_fn_symbols: Set[str]) -> AST_Node:
     """
     Walks the AST and replaces its subtrees encoding relations (atomic formulas) to canoical representation - Relation.
@@ -97,48 +159,20 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode, bool_fn_symbols:
         if relation.direct_construction_exists():
             return relation
 
-        relation_without_modulos, replacement_infos = relation.replace_nonlinear_terms_with_variables()
-        assert replacement_infos, 'Relation did not have a direct construction, yet there were no modulos inside(?)'
+        relation_without_modulos, mod_replacements, div_replacements = relation.replace_nonlinear_terms_with_variables()
+
+        # Guard that we are not expanding something that should have an construction
+        failure_desc = 'Relation did not have a direct construction, yet there were no modulos inside(?)'
+        assert mod_replacements or div_replacements, failure_desc
 
         # We need to add relations expressing modulo/reminder domains etc.
         resulting_relations: List[Relation] = [relation_without_modulos]
-        for replacement_info in replacement_infos:
+        resulting_relations += generate_atomic_constraints_for_replaced_div_terms(div_replacements)
+        resulting_relations += generate_atomic_constraints_for_replaced_mod_terms(mod_replacements)
 
-            # (variables-inside-modulo - modulo-var) mod orignal-modulo ~ 0
-
-            modulo_term = ModuloTerm(variables=replacement_info.term.variables + (replacement_info.variable,),
-                                     variable_coeficients=replacement_info.term.variable_coeficients + (-1,),
-                                     constant=replacement_info.term.constant,
-                                     modulo=replacement_info.term.modulo)
-            modulo_term = modulo_term.into_sorted()
-
-            reminder_lower_bound = Relation(variable_names=[replacement_info.variable],
-                                            variable_coeficients=[-1],
-                                            modulo_terms=[],
-                                            modulo_term_coeficients=[],
-                                            absolute_part=0,
-                                            operation='<=')
-
-            reminder_upper_bound = Relation(variable_names=[replacement_info.variable],
-                                            variable_coeficients=[1],
-                                            modulo_terms=[],
-                                            modulo_term_coeficients=[],
-                                            absolute_part=replacement_info.term.modulo - 1,
-                                            operation='<=')
-
-            resulting_relations.append(reminder_lower_bound)
-            resulting_relations.append(reminder_upper_bound)
-
-            congruence_relation = Relation(variable_names=[],
-                                           variable_coeficients=[],
-                                           modulo_terms=[modulo_term],
-                                           modulo_term_coeficients=[1],
-                                           absolute_part=0,
-                                           operation='=')
-
-            resulting_relations.append(congruence_relation)
-
-        variable_binding_list = [[variable, 'Int'] for variable in sorted(map(lambda info: info.variable, replacement_infos))]
+        variable_binding_list = [
+            [var, 'Int'] for var in sorted(map(lambda info: info.variable, chain(div_replacements, mod_replacements)))
+        ]
         return ['exists', variable_binding_list, ['and', *resulting_relations]]
     else:
         new_subtree: AST_NaryNode = []
