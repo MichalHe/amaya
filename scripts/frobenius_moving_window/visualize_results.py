@@ -21,7 +21,7 @@ arg_parser = argparse.ArgumentParser(description=__doc__)
 arg_parser.add_argument('-t', '--used-timeout',
                         help='The timeout (in seconds) used when running the benchmarks.',
                         dest='timeout',
-                        type=int,
+                        type=float,
                         default=120)
 
 
@@ -100,7 +100,7 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
     """
     Plots the datasets.
     """
-    fig, ax = plt.subplots(figsize=(14, 7))
+    fig, ax = plt.subplots(figsize=(12, 6))
 
     dataset_representative = datasets[0]
     x_values = [i + 1 for i in range(len(dataset_representative.runtimes))]
@@ -126,7 +126,7 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
 
         for dataset in datasets:
             # Select the dataset valid range (without the added padding timeouts)
-            first_timeout_i = dataset.runtimes.index(timeout)
+            first_timeout_i = dataset.runtimes.index(timeout) if timeout in dataset.runtimes else len(dataset.runtimes)
             valid_x_values = x_values[0:first_timeout_i+1]  # include the first timeout too
             valid_y_values = dataset.runtimes[0:first_timeout_i+1]
             
@@ -144,21 +144,23 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
                 if len(valid_x_values) > 10:
                     vv = len(valid_x_values)
                     valid_x_values = [
-                        valid_x_values[0],
                         valid_x_values[1],
+                        valid_x_values[2],
+                        valid_x_values[vv//2-1],
                         valid_x_values[vv//2],
-                        valid_x_values[vv//2 + 1],
-                        valid_x_values[vv//2 + 2],
-                        valid_x_values[-2],
+                        valid_x_values[-5],
+                        valid_x_values[-4],
+                        valid_x_values[-3],
                     ]
                     
                     valid_y_values = [
-                        valid_y_values[0],
                         valid_y_values[1],
+                        valid_y_values[2],
+                        valid_y_values[vv//2-1],
                         valid_y_values[vv//2],
-                        valid_y_values[vv//2 + 1],
-                        valid_y_values[vv//2 + 2],
-                        valid_y_values[-2],
+                        valid_y_values[-5],
+                        valid_y_values[-4],
+                        valid_y_values[-3],
                     ]
 
                 fitted_params = scipy.optimize.curve_fit(exponential, valid_x_values, valid_y_values)
@@ -168,11 +170,18 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
                                            a=fitted_params[0][0],
                                            b=fitted_params[0][1],
                                            c=fitted_params[0][2])
+                exp_y_points = exp_y_points[exp_y_points < timeout + 3]
 
-            plt.plot(exp_x_sample_points, exp_y_points, linestyle='--', linewidth=0.6)
+            plt.plot(exp_x_sample_points[0:len(exp_y_points)], exp_y_points, linestyle='--', linewidth=0.9)
 
     if draw_patch:
-        worst_dataset = min(datasets, key=lambda dataset: dataset.runtimes.index(timeout))
+        def min_timeout(dataset):
+            if timeout in dataset.runtimes:
+                return dataset.runtimes.index(timeout)
+            else:
+                return len(dataset.runtimes)
+
+        worst_dataset = min(datasets, key=min_timeout)
         rectangle_left_bottom = (dataset.runtimes.index(timeout) + 0.5, timeout - 0.5)
         height = 1.0
         width = len(dataset.runtimes) - dataset.runtimes.index(timeout)
@@ -180,14 +189,14 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
         ax.add_patch(rectangle)
 
     plt.axhline(y=timeout, color='black', linestyle='--', linewidth=0.5)
-    plt.text((x_values[0] + x_values[-1])/2, timeout+2, f'Timeout={timeout}s', ha='center')
+    plt.text((x_values[0] + x_values[-1])/2, timeout+1.3, f'Timeout={timeout}s', ha='center')
 
-    plt.legend(bbox_to_anchor=(0.73, 0.1))
+    plt.legend()  # To specify legend position manually: plt.legend(bbox_to_anchor=(0.73, 0.1))
     plt.tight_layout()
-    plt.title('Frobenius coin problem runtime comparison')
-    plt.subplots_adjust(left=0.05,
-                        bottom=0.15,
-                        right=0.95,
+    # plt.title('Plane projection onto an axis')
+    plt.subplots_adjust(left=0.08,
+                        bottom=0.2,
+                        right=0.92,
                         top=0.92,
                         wspace=0.4,
                         hspace=0.4)
@@ -195,9 +204,9 @@ def plot_datasets(datasets: List[Dataset], timeout: int = 120, interpolate: bool
 
 datasets = read_datasets_from_args(args.dataset)
 pad_datasets_with_timeout(datasets, args.timeout)
-plot_datasets(datasets, interpolate=args.interpolate)
+plot_datasets(datasets, interpolate=args.interpolate, timeout=args.timeout)
 
 if args.save_path:
-    plt.savefig(args.save_path, dpi=300, format='pdf')
+    plt.savefig(args.save_path, dpi=200, format='pdf')
 else:
     plt.show()
