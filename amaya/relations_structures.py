@@ -1,5 +1,8 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+    field,
+)
 from typing import (
     Callable,
     List,
@@ -8,9 +11,124 @@ from typing import (
 )
 
 
+@dataclass
+class PresburgerExpr:
+    absolute_part: int = 0
+    variables: Dict[str, int] = field(default_factory=dict)
+    modulo_terms: Dict[ModuloTerm, int] = field(default_factory=dict)
+    div_terms: Dict[DivTerm, int] = field(default_factory=dict)
+
+    def _invert_signs_immutable(self, coeficient_mapping: Dict[Any, int]) -> Dict[Any, int]:
+        """Invert/negate signs in given coeficient_mapping."""
+        new_coef_mapping: Dict[Any, int] = {term: -coef for term, coef in coeficient_mapping.items()}
+        return new_coef_mapping
+
+    def _subtract_coeficients_immutable(self,
+                                        coef_mapping_left: Dict[Any, int],
+                                        coef_mapping_right: Dict[Any, int]) -> Dict[Any, int]:
+        subtraction_result = dict(coef_mapping_left)
+        for item in coef_mapping_right:
+            if item in subtraction_result:
+                subtraction_result[item] -= coef_mapping_right[item]
+            else:
+                subtraction_result[item] = -coef_mapping_right[item]
+        return subtraction_result
+
+    def _add_coeficients_immutable(self,
+                                   coef_mapping_left: Dict[Any, int],
+                                   coef_mapping_right: Dict[Any, int]) -> Dict[Any, int]:
+        subtraction_result = dict(coef_mapping_left)
+        for item in coef_mapping_right:
+            if item in subtraction_result:
+                subtraction_result[item] += coef_mapping_right[item]
+            else:
+                subtraction_result[item] = coef_mapping_right[item]
+        return subtraction_result
+
+    def __neg__(self) -> PresburgerExpr:
+        new_variables = self._invert_signs_immutable(self.variables)
+        modulo_terms = self._invert_signs_immutable(self.modulo_terms)
+        div_terms = self._invert_signs_immutable(self.div_terms)
+
+        return PresburgerExpr(
+            absolute_part=-self.absolute_part,
+            variables=new_variables,
+            modulo_terms=modulo_terms,
+            div_terms=div_terms,
+        )
+
+    def __sub__(self, other_expr: PresburgerExpr) -> PresburgerExpr:
+        abs_val = self.absolute_part - other_expr.absolute_part
+        variables = self._subtract_coeficients_immutable(self.variables, other_expr.variables)
+        modulo_terms = self._subtract_coeficients_immutable(self.modulo_terms, other_expr.modulo_terms)
+        div_terms = self._subtract_coeficients_immutable(self.div_terms, other_expr.div_terms)
+
+        return PresburgerExpr(
+            absolute_part=abs_val,
+            variables=variables,
+            modulo_terms=modulo_terms,
+            div_terms=div_terms,
+        )
+
+    def __add__(self, other_expr: PresburgerExpr) -> PresburgerExpr:
+        abs_val = self.absolute_part + other_expr.absolute_part
+        variables = self._add_coeficients_immutable(self.variables, other_expr.variables)
+        modulo_terms = self._add_coeficients_immutable(self.modulo_terms, other_expr.modulo_terms)
+        div_terms = self._add_coeficients_immutable(self.div_terms, other_expr.div_terms)
+
+        return PresburgerExpr(
+            absolute_part=abs_val,
+            variables=variables,
+            modulo_terms=modulo_terms,
+            div_terms=div_terms,
+        )
+
+    def __mul__(self, other: PresburgerExpr):
+        # In Presburger arithmetic, only multiplication by a constant is allowed
+
+        # Determine which operand is constant
+        if self.is_constexpr():
+            const_expr: PresburgerExpr = self
+            non_const_expr: PresburgerExpr = other
+        elif other.is_constexpr():
+            const_expr: PresburgerExpr = other
+            non_const_expr: PresburgerExpr = self
+        else:
+            raise ValueError(
+                f'Atempting to multiply variables by variables, which is forbidden in PA: {self} * {other}'
+            )
+
+        new_variables: Dict[str, int] = dict()
+        multiplier = const_expr.absolute_part
+
+        new_variables = {var_name: multiplier * var_coef for var_name, multiplier in non_const_expr.variables.items()}
+        new_mod_terms = {
+            var_name: multiplier * var_coef for var_name, var_coef in non_const_expr.modulo_terms.items()
+        }
+        new_div_terms = {
+            var_name: multiplier * var_coef for var_name, var_coef in non_const_expr.div_terms.items()
+        }
+
+        return PresburgerExpr(
+            absolute_part=const_expr.absolute_part * non_const_expr.absolute_part,
+            variables=new_variables,
+            modulo_terms=new_mod_terms,
+            div_terms=new_div_terms,
+        )
+
+    @staticmethod
+    def from_single_modulo_term(modulo_term: ModuloTerm) -> PresburgerExpr:
+        """Wraps the given modulo term in PresburgerExpr."""
+        return PresburgerExpr(absolute_part=0, variables={}, modulo_terms={modulo_term: 1})
+
+    def is_constexpr(self) -> bool:
+        """Checks whether the expression contains no variables."""
+        return not (self.variables or self.modulo_terms or self.div_terms)
+
+
 @dataclass(frozen=True)
 class ModuloTerm:
-    '''Represents modulo term of form: `a.x + b.y ... + C ~=~ 0` (where ~=~ is the symbol for congruent)'''
+    """Represents modulo term of form: `a.x + b.y ... + C ~=~ 0` (where ~=~ is the symbol for congruent)."""
     variables: Tuple[str, ...]
     variable_coeficients: Tuple[int, ...]
     constant: int
@@ -26,13 +144,13 @@ class ModuloTerm:
         return str(self)
 
     @staticmethod
-    def from_expression(expr, modulo) -> ModuloTerm:
-        '''
+    def from_expression(expr: PresburgerExpr, modulo: int) -> ModuloTerm:
+        """
         Create ModuloTerm from PresburgerExpr - the result of evaluation subtrees in modulo term SMT form.
 
         :param PresburgerExpr expr: Result of evaluating the first AST in [mod AST AST]
         :param int modulo: Result of evaluating the second AST in [mod AST AST]
-        '''
+        """
         variables = tuple(sorted(expr.variables.keys()))
         coeficients = tuple(expr.variables[variable] for variable in variables)
         constant = expr.absolute_part
@@ -54,6 +172,31 @@ class ModuloTerm:
                           constant=self.constant, modulo=self.modulo)
 
 
+@dataclass(frozen=True)
+class DivTerm(object):
+    """Represents single SMT-LIB div term."""
+    variables: Tuple[str, ...]
+    variable_coeficients: Tuple[str, ...]
+    constant: int
+    divisor: int
+
+    def __str__(self) -> str:
+        sign = '+' if self.constant >= 0 else '-'
+        var_terms = (f'{var_coef}{var}' for var_coef, var in zip(self.variable_coeficients, self.variables))
+        var_term_str = ' '.join(var_terms)
+        return f'({var_term_str} {sign} {self.constant}) div {self.divisor})'
+
+    @staticmethod
+    def from_expression(expr: PresburgerExpr, divisor: int) -> DivTerm:
+        variable_coef_pairs = sorted(expr.variables.items(), key=lambda pair: pair[0])
+        variables, var_coefficients = zip(*variable_coef_pairs)
+        return DivTerm(
+            constant=expr.absolute_part,
+            variables=variables,
+            variable_coeficients=var_coefficients,
+            divisor=divisor
+        )
+
 @dataclass
 class ModuloReplacementInfo:
     term: ModuloTerm
@@ -61,11 +204,22 @@ class ModuloReplacementInfo:
 
 
 @dataclass
-class Relation:
+class Relation(object):
+    """
+    Represents one atomic PrA constraint.
+    
+    Might contain modulo terms or div terms that are not evaluable directly and must be expressed in terms 
+    of existential quantifier.
+    """
     variable_names: List[str]
     variable_coeficients: List[int]
+
     modulo_terms: List[ModuloTerm]
     modulo_term_coeficients: List[int]
+
+    div_terms: List[DivTerm]
+    div_term_coeficients: List[int]
+
     absolute_part: int
     operation: str
 
@@ -103,19 +257,27 @@ class Relation:
             return False
 
     def __str__(self):
-        linear_component = []
-        for coef, variable in zip(self.variable_coeficients, self.variable_names):
-            sign = '+' if coef >= 0 else ''
-            linear_component.append('{0}{1}.{2}'.format(sign, coef, variable))
+        linear_terms = (
+            '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, var_name) for coef, var_name in zip(
+                self.variable_coeficients, self.variable_names
+            )
+        )
 
-        modulo_components = []
-        for mod_term, coef in zip(self.modulo_terms, self.modulo_term_coeficients):
-            sign = '+' if coef >= 0 else ''
-            modulo_components.append('{0}{1}.{2}'.format(sign, coef, mod_term))
+        modulo_terms = (
+            '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, mod_term) for coef, mod_term in zip(
+                self.modulo_terms, self.modulo_term_coeficients
+            )
+        )
 
-        return 'Relation({0} {1} {2} {3})'.format(
-            ' '.join(linear_component),
-            ' '.join(modulo_components),
+        div_terms = (
+            '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, div_term) for coef, div_term in zip(
+                self.div_term_coeficients, self.div_terms
+            )
+        )
+        
+        relation_lhs_parts = (' '.join(linear_terms), ' '.join(modulo_terms), ' '.join(div_terms))
+        return 'Relation({0} {1} {2})'.format(
+            ' '.join(lhs_part for lhs_part in relation_lhs_parts if lhs_part),
             self.operation,
             self.absolute_part
         )

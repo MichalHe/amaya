@@ -671,10 +671,9 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         # the variable names so that we can do vizualization properly
         ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
 
-        reordered_relation = Relation(variable_names=var_names,
-                                      variable_coeficients=var_coefs,
-                                      modulo_terms=[],
-                                      modulo_term_coeficients=[],
+        reordered_relation = Relation(variable_names=var_names, variable_coeficients=var_coefs,
+                                      modulo_terms=[], modulo_term_coeficients=[],
+                                      div_terms=[], div_term_coeficients=[],
                                       absolute_part=relation.absolute_part,
                                       operation=relation.operation)
 

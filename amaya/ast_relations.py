@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+
 from typing import (
     Dict,
     Set,
@@ -7,123 +8,23 @@ from typing import (
     Any
 )
 from amaya import logger
-from amaya.relations_structures import Relation, ModuloTerm
+from amaya.relations_structures import (
+    DivTerm,
+    ModuloTerm,
+    PresburgerExpr,
+    Relation,
+)
 from amaya.utils import number_to_bit_tuple
 
 
-@dataclass
-class PresburgerExpr:
-    absolute_part: int
-    variables: Dict[str, int]
-    modulo_terms: Dict[ModuloTerm, int]
-
-    def _invert_signs_immutable(self, coeficient_mapping: Dict[Any, int]) -> Dict[Any, int]:
-        """Invert/negate signs in given coeficient_mapping."""
-        new_coef_mapping: Dict[Any, int] = {}
-        for item in coeficient_mapping:
-            new_coef_mapping[item] = -coeficient_mapping[item]
-        return new_coef_mapping
-
-    def _subtract_coeficients_immutable(self,
-                                        coef_mapping_left: Dict[Any, int],
-                                        coef_mapping_right: Dict[Any, int]) -> Dict[Any, int]:
-        subtraction_result = dict(coef_mapping_left)
-        for item in coef_mapping_right:
-            if item in subtraction_result:
-                subtraction_result[item] -= coef_mapping_right[item]
-            else:
-                subtraction_result[item] = -coef_mapping_right[item]
-        return subtraction_result
-
-    def _add_coeficients_immutable(self,
-                                   coef_mapping_left: Dict[Any, int],
-                                   coef_mapping_right: Dict[Any, int]) -> Dict[Any, int]:
-        subtraction_result = dict(coef_mapping_left)
-        for item in coef_mapping_right:
-            if item in subtraction_result:
-                subtraction_result[item] += coef_mapping_right[item]
-            else:
-                subtraction_result[item] = coef_mapping_right[item]
-        return subtraction_result
-
-    def __neg__(self) -> PresburgerExpr:
-        new_variables = self._invert_signs_immutable(self.variables)
-        modulo_terms = self._invert_signs_immutable(self.modulo_terms)
-
-        return PresburgerExpr(
-            absolute_part=-self.absolute_part,
-            variables=new_variables,
-            modulo_terms=modulo_terms
-        )
-
-    def __sub__(self, other_expr: PresburgerExpr) -> PresburgerExpr:
-        abs_val = self.absolute_part - other_expr.absolute_part
-        variables = self._subtract_coeficients_immutable(self.variables, other_expr.variables)
-        modulo_terms = self._subtract_coeficients_immutable(self.modulo_terms, other_expr.modulo_terms)
-
-        return PresburgerExpr(
-            absolute_part=abs_val,
-            variables=variables,
-            modulo_terms=modulo_terms
-        )
-
-    def __add__(self, other_expr: PresburgerExpr) -> PresburgerExpr:
-        abs_val = self.absolute_part + other_expr.absolute_part
-        variables = self._add_coeficients_immutable(self.variables, other_expr.variables)
-        modulo_terms = self._add_coeficients_immutable(self.modulo_terms, other_expr.modulo_terms)
-
-        return PresburgerExpr(
-            absolute_part=abs_val,
-            variables=variables,
-            modulo_terms=modulo_terms
-        )
-
-    def __mul__(self, other: PresburgerExpr):
-        # In Presburger arithmetic, only multiplication by a constant is allowed
-
-        # Determine which operand is constant
-        if self.is_constexpr():
-            const_expr: PresburgerExpr = self
-            non_const_expr: PresburgerExpr = other
-        elif other.is_constexpr():
-            const_expr: PresburgerExpr = other
-            non_const_expr: PresburgerExpr = self
-        else:
-            # Both must be non-const
-            raise ValueError(f'Atempting to multiply variables by variables, which is forbidden in PA: {self} * {other}')
-
-        new_variables: Dict[str, int] = dict()
-        for var_name, var_value in non_const_expr.variables.items():
-            new_variables[var_name] = const_expr.absolute_part * var_value
-
-        new_mod_terms: Dict[ModuloTerm, int] = dict()
-        for mod_term, coef in non_const_expr.modulo_terms.items():
-            new_mod_terms[mod_term] = const_expr.absolute_part * coef
-
-        return PresburgerExpr(
-            absolute_part=const_expr.absolute_part * non_const_expr.absolute_part,
-            variables=new_variables,
-            modulo_terms=new_mod_terms
-        )
-
-    @staticmethod
-    def from_single_modulo_term(modulo_term: ModuloTerm) -> PresburgerExpr:
-        """Wraps the given modulo term in PresburgerExpr."""
-        return PresburgerExpr(absolute_part=0, variables={}, modulo_terms={modulo_term: 1})
-
-    def is_constexpr(self) -> bool:
-        """Checks whether the expression contains no variables."""
-        return not (self.variables or self.modulo_terms)
-
-
-def evaluate_expression(expr) -> PresburgerExpr:
+def evaluate_expression_ast(expr) -> PresburgerExpr:
     """
     Evaluates the given expression AST and returns the (normalized) result.
 
     Example:
         expr=[+ [* 10 x] y] ----> 10x + y
     """
-    if not type(expr) == list:
+    if not isinstance(expr, list):
         # It is an atom, which is either int, or variable
         try:
             atom_int_value = int(expr)
@@ -143,21 +44,21 @@ def evaluate_expression(expr) -> PresburgerExpr:
     operation = expr[0]
     if operation == '-':
         if len(expr) == 2:
-            return -evaluate_expression(expr[1])  # Negate expr
+            return -evaluate_expression_ast(expr[1])  # Negate expr
         else:
-            operand1 = evaluate_expression(expr[1])
-            operand2 = evaluate_expression(expr[2])
+            operand1 = evaluate_expression_ast(expr[1])
+            operand2 = evaluate_expression_ast(expr[2])
             return operand1 - operand2
     elif operation == '+':
-        acc = evaluate_expression(expr[1])
+        acc = evaluate_expression_ast(expr[1])
         for operand in expr[2:]:
-            acc += evaluate_expression(operand)
+            acc += evaluate_expression_ast(operand)
         return acc
     elif operation == '*':
-        operand1 = evaluate_expression(expr[1])
-        operand2 = evaluate_expression(expr[2])
+        operand1 = evaluate_expression_ast(expr[1])
+        operand2 = evaluate_expression_ast(expr[2])
 
-        # (* (+ 10 x) (- 20 y)) --> forbidden in presburger arithmetics
+        # (* (+ 10 x) (- 20 y)) --> PrA disallows variable multiplication - would violate Godel's first incompleteness
         try:
             return operand1 * operand2
         except ValueError:
@@ -166,13 +67,23 @@ def evaluate_expression(expr) -> PresburgerExpr:
             raise ValueError(err)
     elif operation == 'mod':
         # (mod (+ x y) 10)
-        variables_expr = evaluate_expression(expr[1])
-        modul = evaluate_expression(expr[2])  # The modulo might not be a literal (constant), but must be a const expr
+        variables_expr = evaluate_expression_ast(expr[1])
+        modul = evaluate_expression_ast(expr[2])  # The modulo might be a a constexpr not just a literal
 
-        assert modul.is_constexpr(), f'The modulo term does not have a constant as a right operand: {modul}'
+        if not modul.is_constexpr():
+            raise(f'The modulo term does not have a constant as a right operand: {modul}')
 
         modulo_term = ModuloTerm.from_expression(variables_expr, modul.absolute_part)
         return PresburgerExpr.from_single_modulo_term(modulo_term)
+    elif operation == 'div':
+        expr_to_divide = evaluate_expression_ast(expr[1])
+        divisor = evaluate_expression_ast(expr[2])
+
+        if not divisor.is_constexpr():
+            raise ValueError(f'The divisor inside a div term must be a constant expression: {expr}')
+
+        div_term = DivTerm.from_expression(expr_to_divide, divisor.absolute_part)
+        return PresburgerExpr(div_terms={div_term: 1})
 
     else:
         raise ValueError(f'Unsupported operation type: {operation} in expr: {expr}')
@@ -229,12 +140,18 @@ def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr,
     for modulo_term, modulo_term_coeficient in unified_expr.modulo_terms.items():
         modulo_terms.append(modulo_term)
         modulo_term_coeficients.append(modulo_term_coeficient)
+    
+    div_terms, div_term_coeficients = (
+        tuple(map(list, zip(*unified_expr.div_terms.items()))) if unified_expr.div_terms else ([], [])
+    )
 
     return Relation(
         variable_names=relation_variable_names,
         variable_coeficients=relation_variable_coeficients,
         modulo_terms=modulo_terms,
         modulo_term_coeficients=modulo_term_coeficients,
+        div_terms=div_terms,
+        div_term_coeficients=div_term_coeficients,
         absolute_part=relation_abs,
         operation=rel_op
     )
@@ -252,8 +169,8 @@ def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Rel
     op, lhs, rhs = ast
     logger.debug(f'Operation: \'{op}\', Left side: \'{lhs}\', Right side: \'{rhs}\'')
 
-    lhs_expr = evaluate_expression(lhs)
-    rhs_expr = evaluate_expression(rhs)
+    lhs_expr = evaluate_expression_ast(lhs)
+    rhs_expr = evaluate_expression_ast(rhs)
 
     normalized_expr = normalize_atomic_presburger_formula(op, lhs_expr, rhs_expr)
 
@@ -274,7 +191,7 @@ def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Rel
         normalized_expr.variable_names = var_names
 
     if normalized_expr.operation == '<':
-        conversion_message = 'Converting sharp inequality into non-sharp one (from={0},'.format(normalized_expr)
+        conversion_message = 'Converting the sharp inequality into a non-sharp one (from={0},'.format(normalized_expr)
         normalized_expr.operation = '<='
         normalized_expr.absolute_part -= 1
         conversion_message += ' to={0})'.format(normalized_expr)
