@@ -537,60 +537,79 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     tokens = lex(source_text)
     ast = build_syntax_tree(tokens)
 
-    smt_info = get_smt_info(ast)
-    asserts = get_asserts_from_ast(ast)
+    eval_result: Optional[NFA] = None
+    smt_info: Dict[str, Any] = {}
+    function_symbols: Dict[str, FunctionSymbol] = {}
+    formulae_to_assert: List[AST_Node] = []
+    for top_level_statement in ast:
+        if not isinstance(top_level_statement, list):
+            raise ValueError(f'Unknown top-level statement in given input file. Statement: {top_level_statement}')
+        if len(top_level_statement) == 0:
+            logger.warning(f'Unknown top-level S-Expression found in given input file - is the file malformed?')
+            continue
 
-    assert len(asserts) > 0, 'Cannot perform evaluation without any asserts present in the SMT source.'
+        statement_root = top_level_statement[0]
+        if statement_root == 'smt-info':
+            if not len(top_level_statement) == 3:
+                raise ValueError('Invalid syntax for the smt-info S-expression. Expresssion: {top_level_statement}')
+            smt_info[top_level_statement[1]] = top_level_statement[2]
 
-    logger.info(f'Extracted smt-info: {smt_info}')
-    logger.info(f'Detected {len(asserts)} assert statements from the source text.')
+        elif statement_root == 'assert':
+            if not len(top_level_statement) == 2:
+                raise ValueError('Invalid syntax for the assert S-expression. Expresssion: {top_level_statement}')
+            formulae_to_assert.append(top_level_statement[1])
 
-    eval_ctx = EvaluationContext()
+        elif statement_root == 'declare-fun':
+            if len(top_level_statement) != 4:
+                raise ValueError(f'Invalid syntax: declare-fun has invalid form: {top_level_statement}')
+            decl_fun = top_level_statement
 
-    function_symbols = get_declared_function_symbols(ast)
-    constant_symbols = list(filter(lambda function_symbol: function_symbol.arity == 0, function_symbols))
-    for constant_symbol in constant_symbols:
-        eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
+            sym_name: str = decl_fun[1]
+            sym_args = [
+                (arg_name, VariableType.from_smt_type_string(arg_type)) for arg_name, arg_type_raw in decl_fun[2]
+            ]
+            sym_ret_type = VariableType.from_smt_type_string(decl_fun[3])
 
-    if len(asserts) > 1:
-        # There are more than one asserts, the resulting formula is SAT only
-        # when all of them are --> conjunction
-        assert_conjunction = ['and']
-        for _assert in asserts:
-            assert_conjunction.append(_assert[1])  # Append the formulae in asserts
+            function_symbols[sym_name] = FunctionSymbol(name=sym_name, arity=len(sym_args),args=sym_args,
+                                                        return_type=sym_ret_type)
 
-        assert_tree_to_evaluate = ['assert', assert_conjunction]
-    else:
-        assert_tree_to_evaluate = asserts[0]  # If there is just 1, do not transform AST
+        elif statement_root == 'check-sat':
+            if eval_result:
+                raise ValueError('Multiple check-sat commands are not supported!')
 
-    preprocessing.preprocess_ast(assert_tree_to_evaluate)  # Preprocessing is performed in place
+            logger.debug('Executing amaya (%d asserts collected) with smt-info: %s', len(formulae_to_assert), smt_info)
+            if not formulae_to_assert:
+                raise ValueError('Cannot check-sat without any asserts.')
 
-    bool_symbols = {
-        var_name for var_name, v_info in eval_ctx.global_variables.items() if v_info.type == VariableType.BOOL
-    }
-    assert_tree_to_evaluate = preprocessing.reduce_relation_asts_to_evaluable_leaves(assert_tree_to_evaluate, bool_symbols)
+            ctx = EvaluationContext()
+            for fun_symbol in function_symbols.values():
+                ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
 
-    # We are interested only in the number of different variables found in the
-    # assert tree
-    all_vars = get_all_used_variables(assert_tree_to_evaluate, eval_ctx)
-    vars_with_ids = [(var_name, var_id) for var_name, var_id, _ in all_vars]
+            # If there are multiple assert statements, evaluate their conjunction
+            formula_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
 
-    # Generate consequent IDs to which the variable names will be bound at
-    # later stages
+            preprocessing.preprocess_ast(formula_to_evaluate)  # Preprocessing is performed in place
 
-    logger.info(f'Identified {len(vars_with_ids)} different variables in'
-                'the assertion tree. Creating the overall alphabet.')
+            bool_symbols = {
+                var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL
+            }
+            formula_to_evaluate = preprocessing.reduce_relation_asts_to_evaluable_leaves(formula_to_evaluate,
+                                                                                         bool_symbols)
 
-    alphabet = LSBF_Alphabet.from_variable_id_pairs(vars_with_ids)
-    logger.info(f'The created overall alphabet: {alphabet}')
+            # Count all distinct variables in the formula
+            all_vars = get_all_used_variables(formula_to_evaluate, ctx)
+            vars_with_ids = [(var_name, var_id) for var_name, var_id, _ in all_vars]
+            alphabet = LSBF_Alphabet.from_variable_id_pairs(vars_with_ids)
 
-    eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet)
-    for constant_symbol in constant_symbols:
-        eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
+            eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet)
+            for constant_symbol in function_symbols.values():
+                eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
 
-    logger.info(f'Proceeding to assert tree evaluation (backend={solver_config.backend_type.name})')
-    nfa = run_evaluation_procedure(assert_tree_to_evaluate[1], eval_ctx)  # Evaluate the formula in the assert tree
-
+            logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
+            nfa = run_evaluation_procedure(formula_to_evaluate, eval_ctx)
+            eval_result = nfa
+        elif statement_root == 'exit':
+            return (nfa, smt_info)
     return (nfa, smt_info)
 
 
@@ -988,7 +1007,6 @@ def evaluate_bool_equivalence_expr(ast: AST_NaryNode, ctx: EvaluationContext, _d
     return positive_branch.union(negative_branch)
 
 
-
 def run_evaluation_procedure(ast: AST_Node,
                              ctx: EvaluationContext,
                              _debug_recursion_depth: int = 0) -> NFA:
@@ -1046,14 +1064,6 @@ def run_evaluation_procedure(ast: AST_Node,
     return result
 
 
-def get_smt_info(ast) -> Dict[str, Any]:
-    smt_info: Dict[str, Any] = dict()
-    for top_level_statement in ast:
-        statement_fn = top_level_statement[0]
-        if statement_fn == 'set-info':
-            info_category = top_level_statement[1]
-            info_value = top_level_statement[2]
-
-            smt_info[info_category] = info_value
-
+def update_smt_info(smt_info: Dict[str, Any], statement_statement: AST_NaryNode):
+    smt_info[info_category] = info_value
     return smt_info
