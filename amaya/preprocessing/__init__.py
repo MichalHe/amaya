@@ -59,7 +59,7 @@ def is_presburger_term(ast: AST_Node, bool_vars: Set[str]) -> bool:
     """
     Returns true if the given ast represents a Presburger arithmetics term.
     """
-    if isinstance(ast, str):
+    if not isinstance(ast, list):
         return ast not in bool_vars
     root = ast[0]
     return root in {'+', '-', '*', 'mod', 'div'}
