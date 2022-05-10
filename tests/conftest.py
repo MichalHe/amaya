@@ -22,7 +22,7 @@ class ResolutionState:
 
     def get(self):
         if self.automaton_state is None:
-            raise ValueError('Attempting to read from resolvent state without assigning the value first.')
+            raise ValueError(f'{self._id} Attempting to read from resolvent state without assigning the value first.')
         return self.automaton_state
 
     def __repr__(self) -> str:
