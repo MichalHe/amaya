@@ -259,9 +259,6 @@ class MTBDD_NFA(NFA):
         The resulting automaton is complete - a transition to trapstate is
         added where needed.
         """
-
-        if self.automaton_type & AutomatonType.DFA:
-            return self
         logger.debug('Performing MTBDD NFA determinization.')
 
         work_queue = [tuple(self.initial_states)]
