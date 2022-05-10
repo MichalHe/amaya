@@ -454,8 +454,9 @@ class NFA(object):
         transition_symbol = (1, ) if var_value else (0, )
         cylindrified_symbol = overall_alphabet.cylindrify_symbol_of_projected_alphabet([var_id], transition_symbol)
 
-        nfa.update_transition_fn(0, cylindrified_symbol, 1)  # Var = True --> accepting state
-        nfa.update_transition_fn(1, cylindrified_symbol, 1)
+        nfa.update_transition_fn(0, cylindrified_symbol, 1)
+        universal_symbol = tuple('*' for i in range(len(overall_alphabet.variable_numbers)))
+        nfa.update_transition_fn(1, universal_symbol, 1)
 
         nfa.extra_info = {}
         nfa.extra_info['bool_var_value'] = var_value
