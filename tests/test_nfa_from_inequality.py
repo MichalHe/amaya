@@ -1,121 +1,93 @@
-import pytest
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import NFA
+from amaya.relations_structures import Relation
+from amaya.presburger.constructions.integers import build_nfa_from_linear_inequality
+from tests.conftest import ResolutionState
 
-from alphabet import LSBF_Alphabet
-from automatons import NFA
-from relations_structures import Relation
-from presburger_algorithms import build_nfa_from_linear_inequality
+import pytest
 
 
 @pytest.fixture
 def ineq() -> Relation:
-    return Relation(
-        variable_names=['x', 'y'],
-        variable_coeficients=[2, -1],
-        absolute_part=2,
-        modulo_term_coeficients=[],
-        modulo_terms=[],
-        operation='<='
-    )
+    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[2, -1],
+                                     operation='<=', absolute_part=2)
 
 
-@pytest.fixture
-def ineq2() -> Relation:
-    return Relation(
-        variable_names=['x', 'y'],
-        variable_coeficients=[-3, 2],
-        absolute_part=7,
-        modulo_term_coeficients=[],
-        modulo_terms=[],
-        operation='<='
-    )
-
-
-def alphabet() -> LSBF_Alphabet:
-    return LSBF_Alphabet.from_variable_ids([1, 2])
-
-
-def test_nfa_buildup_simple(ineq: Relation, alphabet: LSBF_Alphabet):
+def test_nfa_buildup_simple(ineq: Relation):
+    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
     nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, NFA)
     assert nfa
 
-    expected_states = [2, 1, 0, -1, -2, 'FINAL']
-    assert len(nfa.states) == len(expected_states)
-    for e_state in expected_states:
-        assert nfa.has_state_with_value(e_state)
+    expected_states = {
+        '2': ResolutionState('2'),
+        '1': ResolutionState('1'),
+        '0': ResolutionState('0'),
+        '-1': ResolutionState('-1'),
+        '-2': ResolutionState('-2'),
+        'qf': ResolutionState('qf'),
+    }
+
     assert len(nfa.final_states) == 1
     assert len(nfa.initial_states) == 1
-    assert len(nfa.alphabet.symbols) == 4
-
-    expected_transitions = [
-        (2, (0, 0), 1),
-        (1, (1, 0), -1),
-        (-1, (1, 1), -1),
-        (-1, (1, 0), -2),
-        (-2, (1, 0), -2),
-        (-2, (1, 0), 'FINAL'),
-        (0, (0, 0), 0),
-        (0, (0, 0), 'FINAL'),
-    ]
-
-    for expected_transition in expected_transitions:
-        origin, symbol, dest = expected_transition
-        transition_targets = nfa.get_transition_target(origin, symbol)
-        assert transition_targets
-        assert dest in transition_targets
-
-    for symbol in nfa.alphabet.symbols:
-        # FINAL should be reachable via all symbols from initial_state 2
-        assert 'FINAL' in nfa.get_transition_target(2, symbol)
-
-
-def test_nfa_buildup(ineq2):
-    nfa = build_nfa_from_inequality(ineq2)
-    assert nfa
-
-    expected_states = [7, 5, 4, 3, 2, 1, 0, -1, -2, 'FINAL']
     assert len(nfa.states) == len(expected_states)
-    for e_state in expected_states:
-        assert nfa.has_state_with_value(e_state)
 
     expected_transitions = [
-        (-1, (1, 0), 1),
-        (-1, (0, 0), -1),
-        (-1, (0, 1), -2),
-        (-1, (1, 1), 0),
+        (expected_states['2'], (0, 0), expected_states['1']),
+        (expected_states['2'], (0, 1), expected_states['1']),
+        (expected_states['2'], (1, 0), expected_states['0']),
+        (expected_states['2'], (1, 1), expected_states['0']),
 
-        (-2, (0, 0), -1),
-        (-2, (1, 0), 0),
-        (-2, (0, 1), -2),
-        (-2, (1, 1), -1),
+        (expected_states['1'], (0, 0), expected_states['0']),
+        (expected_states['1'], (0, 1), expected_states['1']),
+        (expected_states['1'], (1, 0), expected_states['-1']),
+        (expected_states['1'], (1, 1), expected_states['0']),
 
-        (0, (0, 0), 0),
-        (0, (1, 1), 0),
+        (expected_states['0'], (0, 0), expected_states['0']),
+        (expected_states['0'], (0, 1), expected_states['0']),
+        (expected_states['0'], (1, 0), expected_states['-1']),
+        (expected_states['0'], (1, 1), expected_states['-1']),
+
+        (expected_states['-1'], (0, 0), expected_states['-1']),
+        (expected_states['-1'], (0, 1), expected_states['0']),
+        (expected_states['-1'], (1, 0), expected_states['-2']),
+        (expected_states['-1'], (1, 1), expected_states['-1']),
+
+        (expected_states['-2'], (0, 0), expected_states['-1']),
+        (expected_states['-2'], (0, 1), expected_states['-1']),
+        (expected_states['-2'], (1, 0), expected_states['-2']),
+        (expected_states['-2'], (1, 1), expected_states['-2']),
     ]
 
-    for expected_transition in expected_transitions:
-        origin, symbol, dest = expected_transition
-        transition_targets = nfa.get_transition_target(origin, symbol)
-        assert transition_targets
-        assert dest in transition_targets
+    expected_fin_transitions = [
+        (expected_states['2'], (0, 0)),
+        (expected_states['2'], (0, 1)),
+        (expected_states['2'], (1, 0)),
+        (expected_states['2'], (1, 1)),
 
-    unexpected_transitions = [
-        (-2, (1, 1), 0),
-        (7, (1, 1), 2),
-        (4, (1, 1), 5),
+        (expected_states['1'], (0, 0)),
+        (expected_states['1'], (0, 1)),
+        (expected_states['1'], (1, 0)),
+        (expected_states['1'], (1, 1)),
+
+        (expected_states['0'], (0, 0)),
+        (expected_states['0'], (1, 0)),
+        (expected_states['0'], (1, 1)),
+
+        (expected_states['-1'], (1, 0)),
+        (expected_states['-1'], (1, 1)),
+
+        (expected_states['-2'], (1, 0)),
     ]
 
-    for unexpected_transition in unexpected_transitions:
-        origin, symbol, dest = unexpected_transition
-        transition_targets = nfa.get_transition_target(origin, symbol)
-        if transition_targets:
-            assert dest not in transition_targets
-        else:
-            assert not transition_targets
+    expected_states['2'].bind(next(iter(nfa.initial_states)))
+    expected_states['qf'].bind(next(iter(nfa.final_states)))
 
-    # FINAL should be reachable from any state except FINAL, via 0,1
+    for origin, symbol, dest in expected_transitions:
+        transition_targets = set(nfa.get_transition_target(origin.get(), symbol)).difference(nfa.final_states)
+        assert len(transition_targets) == 1
+        dest.bind(next(iter(transition_targets)))
 
-    for origin in expected_states:
-        symbol = (0, 1)
-        if origin == 'FINAL':
-            continue
-        assert 'FINAL' in nfa.get_transition_target(origin, symbol)
+
+    for origin, symbol in expected_fin_transitions:
+        transition_targets = set(nfa.get_transition_target(origin.get(), symbol))
+        assert expected_states['qf'].get() in transition_targets
