@@ -1,5 +1,6 @@
 from amaya.alphabet import LSBF_Alphabet
 from amaya.automatons import NFA
+from amaya.mtbdd_automatons import MTBDD_NFA
 from amaya.relations_structures import Relation
 from amaya.presburger.constructions.integers import build_nfa_from_linear_inequality
 from tests.conftest import ResolutionState
@@ -7,15 +8,30 @@ from tests.conftest import ResolutionState
 import pytest
 
 
+alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
+
 @pytest.fixture
 def ineq() -> Relation:
     return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[2, -1],
                                      operation='<=', absolute_part=2)
 
 
-def test_nfa_buildup_simple(ineq: Relation):
-    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
-    nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, NFA)
+@pytest.fixture()
+def ineq1() -> Relation:
+    """Returns relation: x - y <= 0."""
+    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, -1],
+                                     absolute_part=0, operation="<=")
+
+
+@pytest.fixture()
+def ineq2() -> Relation:
+    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
+                                     absolute_part=1, operation="<=")
+
+
+@pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
+def test_ineq0(automaton_cls: NFA, ineq: Relation):
+    nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, automaton_cls)
     assert nfa
 
     expected_states = {
@@ -91,3 +107,112 @@ def test_nfa_buildup_simple(ineq: Relation):
     for origin, symbol in expected_fin_transitions:
         transition_targets = set(nfa.get_transition_target(origin.get(), symbol))
         assert expected_states['qf'].get() in transition_targets
+
+
+@pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
+def test_ineq1(automaton_cls: NFA, ineq1: Relation):
+    nfa = build_nfa_from_linear_inequality(ineq1, [('x', 1), ('y', 2)], alphabet, automaton_cls)
+
+    assert len(nfa.states) == 3
+    assert len(nfa.initial_states) == 1
+    assert len(nfa.final_states) == 1
+
+    initial_state = next(iter(nfa.initial_states))
+    final_state = next(iter(nfa.final_states))
+
+    state_0 = ResolutionState()
+    state_m1 = ResolutionState()
+    state_f = ResolutionState()
+
+    state_0.bind(initial_state)
+    state_f.bind(final_state)
+
+    expected_transitions = [
+        (state_0, (0, 0), state_0),
+        (state_0, (0, 1), state_0),
+        (state_0, (1, 1), state_0),
+        (state_0, (1, 0), state_m1),
+
+        (state_m1, (0, 0), state_m1),
+        (state_m1, (1, 0), state_m1),
+        (state_m1, (1, 1), state_m1),
+        (state_m1, (0, 1), state_0),
+    ]
+
+    expected_accepting_symbols = [
+        (state_0, [(0, 0), (1, 0), (1, 1)]),
+        (state_m1, [(1, 0)])
+    ]
+
+    for origin, symbol, destination in expected_transitions:
+        dest_states = set(nfa.get_transition_target(origin.get(), symbol)) - nfa.final_states
+        destination.bind(next(iter(dest_states)))
+
+    for state, final_symbols in expected_accepting_symbols:
+        for symbol in final_symbols:
+            dest_states = nfa.get_transition_target(state.get(), symbol)
+            final_dest_states = set(dest_states).intersection(set(nfa.final_states))
+            assert len(final_dest_states) == 1
+
+
+            assert {state_f.get()} == final_dest_states
+
+
+@pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
+def test_ineq2(automaton_cls: NFA, ineq2: Relation):
+    nfa = build_nfa_from_linear_inequality(ineq2, [('x', 1), ('y', 2)], alphabet, automaton_cls)
+
+    assert len(nfa.states) == 5
+    assert len(nfa.initial_states) == 1
+    assert len(nfa.final_states) == 1
+
+    initial_state = next(iter(nfa.initial_states))
+
+    states = dict((i, ResolutionState()) for i in [1, 0, -1, -2])
+
+    states[1].bind(initial_state)
+
+    expected_transitions = [
+        (1, (0, 0), 0),
+        (1, (0, 1), 0),
+        (1, (1, 0), 0),
+        (1, (1, 1), -1),
+
+        (0, (0, 0), 0),
+        (0, (0, 1), -1),
+        (0, (1, 0), -1),
+        (0, (1, 1), -1),
+
+        (-1, (0, 0), -1),
+        (-1, (0, 1), -1),
+        (-1, (1, 0), -1),
+        (-1, (1, 1), -2),
+
+        (-2, (0, 0), -1),
+        (-2, (0, 1), -2),
+        (-2, (1, 0), -2),
+        (-2, (1, 1), -2),
+    ]
+
+    for origin, symbol, destination in expected_transitions:
+        _origin = states[origin].get()
+        dest_states = set(nfa.get_transition_target(_origin, symbol))
+        dest_nonfinal_states = dest_states - nfa.final_states
+
+        assert len(dest_nonfinal_states) == 1
+        _destination = states[destination]
+        _destination.bind(next(iter(dest_nonfinal_states)))
+
+    expected_accepting_symbols = [
+        (1, [(0, 0), (0, 1), (1, 0), (1, 1)]),
+        (0, [(0, 0), (0, 1), (1, 0), (1, 1)]),
+        (-1, [(0, 1), (1, 0), (1, 1)]),
+        (-2, [(1, 1)]),
+    ]
+
+    for state, accepting_symbols in expected_accepting_symbols:
+        for accepting_symbol in accepting_symbols:
+            dest_states = set(nfa.get_transition_target(state, accepting_symbol))
+            dest_final_states = nfa.final_states.intersection(dest_states)
+            assert len(dest_final_states) == 1
+
