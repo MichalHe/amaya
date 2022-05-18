@@ -549,7 +549,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             continue
 
         statement_root = top_level_statement[0]
-        if statement_root == 'smt-info':
+        if statement_root == 'set-info':
             if not len(top_level_statement) == 3:
                 raise ValueError('Invalid syntax for the smt-info S-expression. Expresssion: {top_level_statement}')
             smt_info[top_level_statement[1]] = top_level_statement[2]
