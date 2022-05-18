@@ -200,7 +200,7 @@ def determinize_bdd(initial_states: List, final_states: List,
 
 Metastate = Tuple[int, ...]
 
-def abstract_determinize(nfa: NFA, fn: Callable[Metastate, Metastate]) -> DFA:
+def abstract_determinize(nfa: NFA, fn: Callable[[Metastate], Metastate]) -> DFA:
     """ 
     Determinize given NFA with metastate modification/compression function.
     """
