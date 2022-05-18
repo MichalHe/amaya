@@ -201,6 +201,9 @@ if 'specified_files' in args:
     runner_mode = RunnerMode.BENCHMARK
 elif 'input_file' in args:
     runner_mode = RunnerMode.GET_SAT
+else:
+    print('No execution mode specified. See run-amaya.py --help for more information.', file=sys.stderr)
+    sys.exit(1)
 logger.debug(f'Chosen runner mode: {runner_mode}')
 
 if args.quiet:
