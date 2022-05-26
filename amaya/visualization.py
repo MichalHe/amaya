@@ -125,8 +125,8 @@ class AutomatonVisRepresentation:
 
     def _compute_state_colors_by_sccs(self) -> Dict[int, Tuple[str, str]]:
         """
-        Computes a dictionary mapping state to the color of the SCC they are in. 
-            
+        Computes a dictionary mapping state to the color of the SCC they are in.
+
         SCCs of size 1 are ignored.
         """
         state_colors: Dict[int, Tuple[str, str]] = {}
@@ -134,18 +134,18 @@ class AutomatonVisRepresentation:
         graph_edges = defaultdict(set)
         for source, dummy_symbols, destination in self.transitions:
             graph_edges[source].add(destination)
-        
+
         # Ignore SCCs with only 1 node, they are not interesting
         sccs = [scc for scc in find_sccs_kosaruju(graph_edges) if len(scc) > 1]
-        
+
         colors = get_color_palette_with_min_size(len(sccs))
-        
+
         # Assign colors to states based on the SCC they are in
         for i, scc in enumerate(sccs):
             for state in scc:
-                state_colors[state] = colors[i] 
+                state_colors[state] = colors[i]
         return state_colors
-        
+
 
     def into_graphviz(self, highlight_sccs: bool = False) -> Digraph:
         """Transforms the stored automaton represenation into graphviz (dot)."""
@@ -162,12 +162,12 @@ class AutomatonVisRepresentation:
             if state in state_colors:
                 state_color = state_colors[state]
                 return {
-                        'fillcolor': state_color[0], 
+                        'fillcolor': state_color[0],
                         'fontcolor': state_color[1],
                         'style': 'filled'
                 }
             return {}
-               
+
 
         for state in self.states:
             state_label = str(self.state_labels.get(state, state))
@@ -193,7 +193,7 @@ class AutomatonVisRepresentation:
         Converts the automaton representation to the VTF format.
 
         VTF format:
-             https://github.com/ondrik/automata-benchmarks/blob/c554e59dab98ea1f985431ccaf6c142821717cfc/vtf/README.md 
+             https://github.com/ondrik/automata-benchmarks/blob/c554e59dab98ea1f985431ccaf6c142821717cfc/vtf/README.md
         """
         # VTF format example:
         # @NFA-BDD          # NFAs with transitions in BDD
@@ -229,10 +229,10 @@ class AutomatonVisRepresentation:
                         vtf += '{0} {1} {2}\n'.format(source, ''.join(map(str, symbol)), destination)
                 else:
                     vtf += '{0} {1} {2}\n'.format(
-                            source, 
+                            source,
                             ''.join(map(str, compressed_symbol)).replace('*', 'x'),
                             destination)
-                    
+
 
         return vtf
 

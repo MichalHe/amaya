@@ -2,6 +2,7 @@ from collections import (
     deque,
     defaultdict,
 )
+from random import randint
 from typing import (
     Any,
     Callable,
@@ -178,7 +179,7 @@ def get_color_palette_with_min_size(min_palette_size: int) -> ColorPalette:
     if min_palette_size <= len(COLOR_PALETTE):
         return COLOR_PALETTE
     else:
-        missing_color_cnt = len(COLOR_PALETTE) - min_palette_size
+        missing_color_cnt = min_palette_size - len(COLOR_PALETTE)
         random_colors = ['{r:02x}{g:02x}{b:02x}' for r, g, b in (
                             (randint(0, 255), randint(0, 255), randint(0, 255)) for i in range(missing_color_cnt)
                         )]
