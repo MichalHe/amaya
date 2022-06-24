@@ -262,34 +262,52 @@ class Relation(object):
         else:
             return False
 
-    def __str__(self):
-        linear_terms = (
-            '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, var_name) for coef, var_name in zip(
-                self.variable_coeficients, self.variable_names
-            )
-        )
+    def _format_term_type_into_string(self,
+                                      term_coefs: Iterable[int],
+                                      terms: Union[List[str], List[DivTerm], List[ModuloTerm]],
+                                      use_latex_notation: bool = False) -> Generator[str, None, None]:
+        if use_latex_notation:
+            var_coef_iterator = iter(zip(term_coefs, terms))
+            first_var_coef_name_pair = next(var_coef_iterator, None) 
+            if not first_var_coef_name_pair:
+                return
+            first_var_coef, first_var_name = first_var_coef_name_pair
+            yield '{0}{1}'.format(first_var_coef if first_var_coef != 1 else '', first_var_name)
+            for coef, var_name in var_coef_iterator:
+                yield '{sign} {coef_abs}{var_name}'.format(
+                    sign='+' if coef >= 0 else '-', coef_abs=abs(coef) if abs(coef) != 1 else '', var_name=var_name
+                )
+        else:
+            for coef, var_name in zip(term_coefs, terms):
+                yield '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, var_name)
 
-        modulo_terms = (
-            '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, mod_term) for coef, mod_term in zip(
-                self.modulo_term_coeficients, self.modulo_terms
-            )
-        )
+    def into_string(self, use_latex_notation: bool = False) -> str:
+        linear_terms = self._format_term_type_into_string(self.variable_coeficients, self.variable_names,
+                                                          use_latex_notation=use_latex_notation)
 
-        div_terms = (
-            '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, div_term) for coef, div_term in zip(
-                self.div_term_coeficients, self.div_terms
-            )
-        )
+        modulo_terms = self._format_term_type_into_string(self.modulo_term_coeficients, self.modulo_terms,
+                                                          use_latex_notation=use_latex_notation)
+
+        div_terms = self._format_term_type_into_string(self.div_term_coeficients, self.div_terms,
+                                                          use_latex_notation=use_latex_notation)
 
         relation_lhs_parts = (' '.join(linear_terms), ' '.join(modulo_terms), ' '.join(div_terms))
-        return 'Relation({0} {1} {2})'.format(
+
+        operation = self.operation
+        if use_latex_notation:
+            operation = {'<=': '\\le', '>=': '\\ge'}.get(operation, operation)
+
+        return '{0} {1} {2}'.format(
             ' '.join(lhs_part for lhs_part in relation_lhs_parts if lhs_part),
-            self.operation,
+            operation,
             self.absolute_part
         )
 
+    def __str__(self):
+        return self.into_string(use_latex_notation=False)
+
     def __repr__(self):
-        return str(self)
+        return 'Relation(' + self.into_string(use_latex_notation=False) + ')'
 
     def get_used_variables(self) -> List[str]:
         '''Retrieve a collection of all the variables used in this relation.'''

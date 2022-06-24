@@ -22,6 +22,8 @@ from typing import (
 from amaya.alphabet import (
     LSBF_AlphabetSymbol,
 )
+from amaya.ast_definitions import AST_Node
+from amaya.relations_structures import Relation
 from amaya.utils import (
     COLOR_PALETTE,
     find_sccs_kosaruju,
@@ -308,3 +310,68 @@ class AutomatonVisRepresentation:
 
         self.transitions = compressed_transitions
         return self
+
+
+AST_TO_LATEX_TREE_TABLE = {
+    'forall': '\\forall',
+    'exists': '\\exists',
+    'and': '\\land',
+    'or': '\\lor',
+    '->': '\\rightarrow',
+    'not': '\\neg',
+}
+
+
+def _math_node(contents: str) -> str:
+    return '\\node {$' + contents + '$}\n'
+
+def _child_node(contents: str, tab_prefix: str) -> str:
+    return tab_prefix + 'child{\n' + contents + tab_prefix + '}\n'
+
+def _convert_ast_into_latex_tree(ast: AST_Node, depth: int = 0) -> str:
+    """
+    Convert given ast into a latex TikZ tree.
+    
+    Requires that the ast is FOL formula - it cannot contain let expressions.
+    """
+    tab_prefix = '\t' * depth
+
+    if isinstance(ast, str):
+        # The current node is a variable - construct a tree node
+        return tab_prefix + _math_node(ast)
+    elif isinstance(ast, Relation):
+        # Handle atomic relations
+        atom: Relation = ast
+        return tab_prefix + _math_node(ast.into_string(use_latex_notation=True))
+    node_type = ast[0]
+
+    # Handle quantifiers / logical connectives
+    latex_node_label = AST_TO_LATEX_TREE_TABLE.get(node_type)
+
+    if not latex_node_label:
+        raise ValueError(f'Cannot convert formula to latex tree - unknown node type: {node_type}')
+    
+    # Construct the part of the latex tree for this node
+    if node_type in {'forall', 'exists'}:
+        # Add variables being bound to quantifier tree nodes 
+        bound_vars = (var for var, dummy_var_type in ast[1])
+        latex_node_label = '{0}({1})'.format(latex_node_label, ', '.join(bound_vars))
+
+        # Construct an unary tikz node
+        current_node = tab_prefix + _math_node(latex_node_label)
+        return current_node + _child_node(_convert_ast_into_latex_tree(ast[2], depth+1), tab_prefix)
+    elif node_type in {'and', 'or'}:
+        # Handle n-ary connectives - make n-ary node in the resulting tree
+        latex_subtrees = (
+            _child_node(_convert_ast_into_latex_tree(subtree, depth+1), tab_prefix) for subtree in ast[1:]
+        )
+        current_node = tab_prefix + _math_node(latex_node_label)
+        return current_node + ''.join(latex_subtrees)
+    elif node_type in {'not'}:
+        # Construct an unary tikz node
+        current_node = tab_prefix + _math_node(latex_node_label)
+        return tab_prefix + current_node + _child_node(_convert_ast_into_latex_tree(ast[1], depth+1), tab_prefix)
+
+
+def convert_ast_into_latex_tree(ast: AST_Node):
+    return _convert_ast_into_latex_tree(ast, depth=0) + ';'

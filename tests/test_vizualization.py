@@ -6,6 +6,8 @@ from amaya.automatons import (
     AutomatonVisRepresentation,
     NFA, 
 )
+from amaya.relations_structures import Relation
+from amaya.visualization import convert_ast_into_latex_tree
 
 import pytest
 
@@ -103,3 +105,36 @@ def test_colorize_dot():
 def test_uncompress_transition_symbols(compressed_symbol, expected_symbols):
     actual = sorted(AutomatonVisRepresentation._uncompress_symbol(compressed_symbol))
     assert actual == sorted(expected_symbols)
+
+
+@pytest.mark.parametrize(
+    ('ast', 'expected_tree'),  # expected and actual will have whitespaces removed when compared
+    (
+        (
+            ['exists', [['x', 'Int'], ['y', 'Int']], 
+                ['and', 
+                    Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
+                                              absolute_part=0, operation='<='), 
+                    Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, -1],
+                                              absolute_part=0, operation='>=')]],
+                (r'\node {$\exists(x, y)$} child{ \node {$\land$} '
+                 r'child{ \node {$x + y \le 0$}} child{ \node {$x - y \ge 0$}}};')
+        ),
+        (
+            # Frobenius coin problem
+            ['forall', [['x', 'Int'], ['y', 'Int']], 
+                ['not', Relation.new_lin_relation(variable_names=['x', 'y', 'p'], variable_coeficients=[7, 9, -1],
+                                                  absolute_part=0, operation='=')]],
+            r'\node {$\forall(x, y)$} child{ \node {$\neg$} child{ \node {$7x + 9y - p = 0$}}};'
+        ),
+        (
+            Relation.new_lin_relation(variable_names=['x', 'y', 'p'], variable_coeficients=[7, 9, -1],
+                                      absolute_part=0, operation='='),
+            r'\node {$ 7x + 9y - p = 0$} ;'
+        )
+    )
+)
+def test_convert_ast_into_latex_tree(ast, expected_tree):
+    expected = expected_tree.replace(' ', '')
+    actual = convert_ast_into_latex_tree(ast).replace(' ', '').replace('\n', '').replace('\t', '')
+    assert actual == expected
