@@ -3,6 +3,7 @@ from dataclasses import (
     dataclass,
     field,
 )
+import functools
 from typing import (
     Callable,
     List,
@@ -11,9 +12,6 @@ from typing import (
     Tuple,
     TypeVar,
 )
-
-
-T = TypeVar('T')
 
 
 @dataclass
@@ -89,9 +87,7 @@ class PresburgerExpr:
         )
 
     def __mul__(self, other: PresburgerExpr):
-        # In Presburger arithmetic, only multiplication by a constant is allowed
-
-        # Determine which operand is constant
+        # Only multiplication by a constant is allowed - determine which operand is constant
         if self.is_constexpr():
             const_expr: PresburgerExpr = self
             non_const_expr: PresburgerExpr = other
@@ -203,6 +199,9 @@ class DivTerm(object):
         )
 
 
+T = TypeVar('T', DivTerm, ModuloTerm)
+
+
 @dataclass
 class NonlinearTermReplacementInfo(Generic[T]):
     term: T
@@ -268,7 +267,7 @@ class Relation(object):
                                       use_latex_notation: bool = False) -> Generator[str, None, None]:
         if use_latex_notation:
             var_coef_iterator = iter(zip(term_coefs, terms))
-            first_var_coef_name_pair = next(var_coef_iterator, None) 
+            first_var_coef_name_pair = next(var_coef_iterator, None)
             if not first_var_coef_name_pair:
                 return
             first_var_coef, first_var_name = first_var_coef_name_pair
@@ -418,6 +417,62 @@ class Relation(object):
         if self.modulo_terms:
             return abs(self.modulo_terms[0].modulo)
         return 0
+
+
+    def rename_frozen_terms(self,
+                            terms: List[T],
+                            renaming: Dict[str, VariableRenamingInfo],
+                            term_constr: Callable[[Tuple[str], T], T]) -> Optional[Tuple[bool, List[T]]]:
+        """
+        Rename the variables in the given terms according to supplied renaming.
+
+        Returns a tuple containing:
+            - a boolean indicating whether was any variable renamed
+            - a list of the renamed terms
+        """
+        renamed_terms = []
+        was_any_variable_renamed = False
+        for term in terms:
+            renamed_variables = tuple(renaming[var].new_name if var in renaming else var for var in term.variables)
+            if renamed_variables != term.variables:
+                was_any_variable_renamed = True
+                renamed_term = term_constr(renamed_variables, term)
+                renamed_terms.append(renamed_term)
+            else:
+                renamed_terms.append(term)
+        return was_any_variable_renamed, renamed_terms
+
+
+    def rename_variables(self, renaming: Dict[str, VariableRenamingInfo]) -> bool:
+        """Rename the variables used in this relation. Returns True if any variable was renamed."""
+        was_any_variable_renamed = False
+        new_var_names = [renaming[var].new_name if var in renaming else var for var in self.variable_names]
+
+        if new_var_names != self.variable_names:
+            self.variable_names = new_var_names
+            was_any_variable_renamed = True
+
+        # Modulo and Div terms are frozen - they have to be recreated with correct variables
+        was_any_variable_inside_modulo_renamed, self.modulo_terms = self.rename_frozen_terms(
+            self.modulo_terms, renaming,
+            lambda renamed_vars, mod_term: ModuloTerm(variables=renamed_vars,
+                                                      variable_coeficients=mod_term.variable_coeficients,
+                                                      modulo=mod_term.modulo, constant=mod_term.constant)
+        )
+        was_any_variable_renamed |= was_any_variable_inside_modulo_renamed
+
+        was_any_variable_inside_div_renamed, self.div_terms = self.rename_frozen_terms(
+            self.div_terms, renaming,
+            lambda renamed_vars, div_term: DivTerm(variables=renamed_vars,
+                                                   variable_coeficients=div_term.variable_coeficients,
+                                                   divisor=div_term.divisor, constant=div_term.constant)
+        )
+        was_any_variable_renamed |= was_any_variable_inside_div_renamed
+
+        self.sort_variables_alphabetically()
+
+        return was_any_variable_renamed
+
 
     @staticmethod
     def new_lin_relation(variable_names: List[str] = [], variable_coeficients: List[int] = [],
