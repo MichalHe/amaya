@@ -102,6 +102,7 @@ def _convert_formula_to_pnf(ast: AST_Node, context: PrenexingContext):
         for var, ranaming_info in variable_renaming_map_for_current_quantifier.items():
             # Use None to mark an entry for removal
             old_value = context.variable_renaming_map[var] if var in context.variable_renaming_map else None
+            renaming_map_difference[var] = old_value
         context.variable_renaming_map.update(variable_renaming_map_for_current_quantifier)
 
         # Push the quantifier with the renaming it introduced
@@ -112,7 +113,7 @@ def _convert_formula_to_pnf(ast: AST_Node, context: PrenexingContext):
 
         # Pop the current quantifier - restore the renaming context
         context.quantifiers_above.pop(-1)
-        for var, old_value in renaming_map_difference:
+        for var, old_value in renaming_map_difference.items():
             if old_value:
                 context.variable_renaming_map[var] = old_value
             else:

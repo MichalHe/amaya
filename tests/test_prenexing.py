@@ -88,16 +88,40 @@ def test_prenexing_variable_renaming():
     relation2_renamed = Relation.new_lin_relation(variable_names=['x-1', 'z'], variable_coeficients=[2, 1],
                                                   operation='<', absolute_part=9)
 
-    expected_result = [
+    expected_result = ['exists', [['x', 'Int']],
+                       ['exists', [['x-1', 'Int']], ['and', relation1_renamed, relation2_renamed]]]
+
+    assert result == expected_result
+    
+    ast = [
         'exists', [['x', 'Int']],
+        [
+            'and',
+            [
+                'exists', [['x', 'Int']], 
+                Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
+                                          absolute_part=0, operation='<')
+            ],
+            Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 2],
+                                      absolute_part=2, operation='=')
+        ]
+    ]
+    
+    result = convert_formula_to_pnf(ast)
+
+    expected_result = [
+        'exists', [['x', 'Int']], 
         [
             'exists', [['x-1', 'Int']],
             [
-                'and',
-                relation1_renamed,
-                relation2_renamed,
+                'and', 
+                Relation.new_lin_relation(variable_names=['x-1', 'y'], variable_coeficients=[1, 1],
+                                          absolute_part=0, operation='<'),
+                Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 2],
+                                          absolute_part=2, operation='=')
             ]
         ]
     ]
 
     assert result == expected_result
+
