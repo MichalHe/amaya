@@ -1,4 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+    field,
+)
 from enum import IntEnum
 
 
@@ -10,6 +13,11 @@ class SolutionDomain(IntEnum):
 class BackendType(IntEnum):
     NATIVE = 1
     MTBDD = 2
+
+
+@dataclass
+class PreprocessingConfig:
+    perform_prenexing: bool = False
 
 
 @dataclass
@@ -25,6 +33,9 @@ class SolverConfig(object):
 
     vis_display_only_free_vars: bool = False
     """Export transition symbols with bits only for the free variables in the corresponding automaton."""
+
+    preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
+    """Preprocessing configuration options."""
 
 
 solver_config = SolverConfig()

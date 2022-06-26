@@ -26,9 +26,14 @@ from amaya.preprocessing.ite_preprocessing import (
     expand_ite_expressions_inside_presburger_relation,
     ite_expansion_handler,
 )
+from amaya.preprocessing.prenexing import convert_formula_to_pnf
 from amaya import (
     logger,
     utils,
+)
+from amaya.config import (
+    SolverConfig,
+    solver_config,
 )
 
 
@@ -392,15 +397,16 @@ def replace_forall_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
     return NodeEncounteredHandlerStatus(True, False)
 
 
-def preprocess_ast(ast):
-    '''Peforms preprocessing on the given AST. The following proprocessing operations are performed:
+def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -> AST_Node:
+    """
+    Peforms preprocessing on the given AST. The following proprocessing operations are performed:
         - universal quantifiers are replaced with existential quantifiers,
         - implications are expanded: `A => B` <<-->> `~A or B`,
         - consequent negation pairs are removed,
 
     Params:
         ast - The SMT tree to be preprocessed. The preprocessing is performed in place.
-    '''
+    """
 
     logger.info('Entering the first preprocessing pass: Folding in arithmetic expressions.')
     folds_performed = fold_in_let_bindings(ast, [], [])
@@ -418,6 +424,10 @@ def preprocess_ast(ast):
         '<': expand_ite_expressions_inside_presburger_relation,
         '=>': expand_implications_handler,
     }
+
+    # Apply preprocessing passes configurable by the CLI
+    if solver_config.preprocessing.perform_prenexing:
+        ast = convert_formula_to_pnf(ast)
 
     second_pass_context = {
         'forall_replaced_cnt': 0,
@@ -442,3 +452,5 @@ def preprocess_ast(ast):
     }
     transform_ast(ast, third_pass_context, third_pass_transformations)
     logger.info(f'Removed {third_pass_context["negation_pairs_removed_cnt"]} negation pairs.')
+
+    return ast

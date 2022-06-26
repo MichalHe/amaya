@@ -10,7 +10,6 @@ from typing import (
 )
 
 from amaya.ast_definitions import AST_Node, AST_NaryNode
-from amaya.preprocessing import ast_iter_subtrees
 from amaya.relations_structures import Relation
 
 class QuantifierPolarity(IntEnum):

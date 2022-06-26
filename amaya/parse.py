@@ -541,6 +541,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     smt_info: Dict[str, Any] = {}
     function_symbols: Dict[str, FunctionSymbol] = {}
     formulae_to_assert: List[AST_Node] = []
+
     for top_level_statement in ast:
         if not isinstance(top_level_statement, list):
             raise ValueError(f'Unknown top-level statement in given input file. Statement: {top_level_statement}')
@@ -588,7 +589,8 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             # If there are multiple assert statements, evaluate their conjunction
             formula_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
 
-            preprocessing.preprocess_ast(formula_to_evaluate)  # Preprocessing is performed in place
+            # @Note: Preprocessing will modify the given list
+            formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate)
 
             bool_symbols = {
                 var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL

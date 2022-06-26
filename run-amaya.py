@@ -105,6 +105,14 @@ argparser.add_argument('-M',
                        help=('Minimize the automatons eagerly, after automaton operation is performed.'
                              'Requires `native` backend to be used.'))
 
+argparser.add_argument('-p',
+                       '--preprocessing',
+                       action='append',
+                       dest='preprocessing_switches',
+                       default=[],
+                       choices=['prenex'],
+                       help='Controls preprocessing transformations applied on input the formula.')
+
 subparsers = argparser.add_subparsers(help='Runner operation')
 get_sat_subparser = subparsers.add_parser('get-sat')
 
@@ -229,6 +237,9 @@ solution_domain_str_to_type = {
 solver_config.solution_domain = solution_domain_str_to_type[args.domain]
 solver_config.minimize_eagerly = args.minimize_eagerly
 
+# Read supplied preprocessing switches and convert them into cfg
+if 'prenex' in args.preprocessing_switches:
+    solver_config.preprocessing.perform_prenexing = True
 
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""
