@@ -35,8 +35,9 @@ from amaya import logger
 from amaya import parse
 from amaya.config import (
     BackendType,
+    MinimizationAlgorithms,
     solver_config,
-    SolutionDomain
+    SolutionDomain,
 )
 
 
@@ -97,13 +98,12 @@ argparser.add_argument('--domain',
                              'from atomic presburger formulae. NATURALS support'
                              'is very questionable currently.'))
 
-argparser.add_argument('-M',
-                       '--minimize-eagerly',
-                       action='store_true',
-                       dest='minimize_eagerly',
-                       default=False,
-                       help=('Minimize the automatons eagerly, after automaton operation is performed.'
-                             'Requires `native` backend to be used.'))
+argparser.add_argument('-m',
+                       '--minimize',
+                       choices=('hopcroft', 'brzozowski'),
+                       dest='minimization_method',
+                       default=None,
+                       help='Minimize the automatons eagerly using the specified minimization algorithm.')
 
 argparser.add_argument('-p',
                        '--preprocessing',
@@ -235,11 +235,21 @@ solution_domain_str_to_type = {
     'integers': SolutionDomain.INTEGERS,
 }
 solver_config.solution_domain = solution_domain_str_to_type[args.domain]
-solver_config.minimize_eagerly = args.minimize_eagerly
 
 # Read supplied preprocessing switches and convert them into cfg
 if 'prenex' in args.preprocessing_switches:
     solver_config.preprocessing.perform_prenexing = True
+
+if args.minimization_method == 'hopcroft':
+    solver_config.minimization_method = MinimizationAlgorithms.HOPCROFT
+elif args.minimization_method == 'brzozowski':
+    solver_config.minimization_method = MinimizationAlgorithms.BRZOZOWSKI
+    if solver_config.backend_type == BackendType.MTBDD:
+        print('Brzozowski minimization is not supported with the MTBDD backend.', file=sys.stderr)
+        sys.exit(1)
+else:
+    solver_config.minimization_method = MinimizationAlgorithms.NONE
+
 
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""

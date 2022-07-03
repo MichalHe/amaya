@@ -491,7 +491,7 @@ class NFA(object):
             state_labels=self.state_labels
         )
 
-    def minimize(self) -> NFA:
+    def minimize_brzozowski(self) -> NFA:
         """Minimize using the Brzozowski NFA minimization procedure."""
 
         def reverse_automaton(nfa: NFA) -> NFA:
@@ -527,7 +527,7 @@ class NFA(object):
 
         return minimal_dfa
 
-    def hopcroft_minimization(self) -> NFA:
+    def minimize_hopcroft(self) -> NFA:
         """
         Minimizes the automaton using the Hopcroft minimization.
 
@@ -543,7 +543,7 @@ class NFA(object):
         while work_list:
             current_partition = work_list.pop(-1)
             for symbol in alphabet_symbols:
-                X = set()  # Set of all states that can reach current partition via symbol
+                X = set()  # Set of all states that can reach the current partition via symbol
                 for state in current_partition:
                     state_pre = self.transition_fn.get_state_pre_with_symbol(state, symbol)
                     X.update(state_pre)

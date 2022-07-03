@@ -15,6 +15,12 @@ class BackendType(IntEnum):
     MTBDD = 2
 
 
+class MinimizationAlgorithms(IntEnum):
+    NONE = 0
+    HOPCROFT = 1
+    BRZOZOWSKI = 2
+
+
 @dataclass
 class PreprocessingConfig:
     perform_prenexing: bool = False
@@ -24,7 +30,7 @@ class PreprocessingConfig:
 class SolverConfig(object):
     """Solver configuration options."""
     solution_domain: SolutionDomain = SolutionDomain.INTEGERS
-    minimize_eagerly: bool = False
+    minimization_method: MinimizationAlgorithms = MinimizationAlgorithms.NONE
     # Performance tracking options
     backend_type: BackendType = BackendType.NATIVE
     track_operation_runtime: bool = False

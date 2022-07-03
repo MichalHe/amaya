@@ -28,6 +28,7 @@ from amaya.automatons import (
 from amaya import logger
 from amaya.config import (
     BackendType,
+    MinimizationAlgorithms,
     solver_config,
     SolutionDomain,
 )
@@ -661,7 +662,9 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         modulo_term_ordered = ModuloTerm(variables=var_names,
                                          variable_coeficients=var_coefs,
                                          constant=modulo_term.constant,
-                                         modulo=modulo_term.constant)
+                                         modulo=modulo_term.modulo)
+
+        relation.modulo_terms[0] = modulo_term_ordered
 
         logger.debug(f'Reordered modulo term from: %s to %s', modulo_term, modulo_term_ordered)
 
@@ -671,6 +674,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
         nfa = relations_to_dfa.build_presburger_modulo_dfa(relation, variable_id_pairs,
                                                            ctx.get_alphabet(), automaton_constr)
+        import pdb; pdb.set_trace()
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.BUILD_NFA_FROM_CONGRUENCE)
         return nfa
 
@@ -699,7 +703,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
         assert automaton_building_function
         nfa = automaton_building_function(reordered_relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
-        ctx.emit_evaluation_introspection_info(nfa, operation)
+        ctx.emit_evaluation_introspection_info(nfa.determinize(), operation)
 
         emit_evaluation_progress_info(
             f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})',
@@ -781,22 +785,28 @@ def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _de
 
 def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
     """
-    Wrap the NFA.minimize with introspection emission, timings and logging, if
-    eager minimization is configured.
+    Perform the configured minimization on given NFA.
+
+    Minimization result is monitored for runtime, and its results are emitted to context's introspection handle
+    for visualization.
 
     :param nfa: Automaton to minimize.
     :param ctx: Evaluation context that will store information about measured timings.
     :returns: Minimized DFA equivalent to the given NFA.
     """
-    if not solver_config.minimize_eagerly:
+    if solver_config.minimization_method == MinimizationAlgorithms.NONE:
         return nfa
 
     ctx.stats_operation_starts(ParsingOperation.MINIMIZE, nfa, None)
-    min_dfa = nfa.minimize()
-    logger.info(f'Minimization applied - inputs has {len(nfa.states)} states, result {len(min_dfa.states)}.')
-    ctx.stats_operation_ends(min_dfa)
-    ctx.emit_evaluation_introspection_info(min_dfa, ParsingOperation.MINIMIZE)
-    return min_dfa
+    if solver_config.minimization_method == MinimizationAlgorithms.BRZOZOWSKI:
+        minimized_dfa = nfa.minimize_brzozowski()
+    else:
+        minimized_dfa = nfa.minimize_hopcroft()
+
+    logger.info('Minimization applied - inputs has %d states, result %d.', len(nfa.states), len(minimized_dfa.states))
+    ctx.stats_operation_ends(minimized_dfa)
+    ctx.emit_evaluation_introspection_info(minimized_dfa, ParsingOperation.MINIMIZE)
+    return minimized_dfa
 
 
 def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
@@ -833,6 +843,9 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
         # Apply the provided reduction function.
         ctx.stats_operation_starts(reduction_operation, reduction_result, next_operand_automaton)
         reduction_result = reduction_fn(reduction_result, next_operand_automaton)
+
+        # reduction_result = reduction_result.determinize()
+
         ctx.stats_operation_ends(reduction_result)
 
         # Emit the evaluation information before minimization
@@ -957,6 +970,8 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
 
     nfa = minimize_automaton_if_configured(nfa, ctx)
+
+    ctx.emit_evaluation_introspection_info(nfa.determinize(), ParsingOperation.NFA_DETERMINIZE)
 
     emit_evaluation_progress_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
 
