@@ -1,6 +1,16 @@
 from __future__ import annotations
 import ctypes as ct
-from typing import Dict, Any, Set, Tuple, Union, List, Iterable, Optional
+from typing import (
+    Any, 
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 from collections import defaultdict
 import pathlib
 import os
@@ -8,12 +18,30 @@ import os
 from amaya import logger
 from amaya.alphabet import LSBF_AlphabetSymbol
 
+if TYPE_CHECKING:
+    from amaya.mtbdd_automatons import MTBDD_NFA
+
 
 amaya_root_path = pathlib.Path(__file__).parent.absolute()
 mtbdd_wrapper = ct.CDLL(os.path.join(amaya_root_path, 'amaya-mtbdd.so'))
 mtbdd_wrapper.init_machinery()
 
 c_side_state_type = ct.c_int64
+
+
+class Serialized_NFA(ct.Structure):
+    """Entire MTBDD-NFA serialized to be passed to C side."""
+    _fields_ = [
+        ('states', ct.POINTER(c_side_state_type)),
+        ('state_count', ct.c_uint64),
+        ('initial_state', c_side_state_type),
+        ('final_states', ct.POINTER(c_side_state_type)),
+        ('final_state_count', ct.c_uint64),
+        ('mtbdds', ct.POINTER(ct.c_ulong)),
+        ('vars', ct.POINTER(ct.c_uint64)),
+        ('var_count', ct.c_uint64),
+    ]
+
 
 mtbdd_wrapper.amaya_mtbdd_build_single_terminal.argtypes = (
     ct.c_uint32,             # Automaton ID
@@ -177,13 +205,17 @@ mtbdd_wrapper.amaya_get_states_in_mtbdd_leaves.restype = ct.POINTER(ct.c_int64) 
 mtbdd_wrapper.amaya_sylvan_clear_cache.argtypes = ()
 mtbdd_wrapper.amaya_sylvan_clear_cache.restype = None
 
+mtbdd_wrapper.amaya_minimize_hopcroft.argtypes = (ct.POINTER(Serialized_NFA), )
+mtbdd_wrapper.amaya_minimize_hopcroft.restype = ct.POINTER(Serialized_NFA)
+
 # mtbdd_wrapper.amaya_print_dot.argtypes = (
 #     ct.c_ulong,
 #     ct.c_int32
 # )
 
+# TODO: fix the shared lib - this symbol is not available ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
+mtbdd_false = 0
 
-mtbdd_false = ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
 MTBDD = ct.c_ulong
 Symbol = Tuple[Union[str, int], ...]
 
@@ -1115,3 +1147,42 @@ class MTBDDTransitionFn():
 
         for i in range(_out_state_cnt.value):
             states_in_leaves.append(_out_states[i])
+
+    @staticmethod
+    def minimize_hopcroft(dfa: MTBDD_NFA) -> MTBDD_NFA:
+        """Call to the MTBDD backend to minimize the given DFA"""  
+        from amaya.mtbdd_automatons import MTBDD_NFA  # We have to import it here to avoid circular imports
+        
+        _states = tuple(dfa.states)
+        _mtbdds = tuple(dfa.transition_fn.mtbdds.get(s, mtbdd_false) for s in _states)
+        mtbdds = (ct.c_ulong * len(dfa.states))(*_mtbdds)
+        
+        serialized_dfa = Serialized_NFA(
+            states=(c_side_state_type * len(dfa.states))(*_states),
+            state_count=len(dfa.states),
+            initial_state=c_side_state_type(next(iter(dfa.initial_states))),
+            final_states=(c_side_state_type * len(dfa.final_states))(*tuple(dfa.final_states)),
+            final_state_count=len(dfa.final_states),
+            mtbdds=mtbdds,
+            vars=(ct.c_uint64 * len(dfa.used_variables))(*dfa.used_variables),
+            var_count=ct.c_uint64(len(dfa.used_variables))
+        )
+
+        minimized_serialized_dfa = mtbdd_wrapper.amaya_minimize_hopcroft(serialized_dfa).contents
+
+        minimized_dfa = MTBDD_NFA(
+            states={minimized_serialized_dfa.states[i] for i in range(minimized_serialized_dfa.state_count)},
+            initial_states={minimized_serialized_dfa.initial_state},
+            final_states={
+                minimized_serialized_dfa.final_states[i] for i in range(minimized_serialized_dfa.final_state_count)
+            },
+            used_variables=dfa.used_variables,
+            alphabet=dfa.alphabet
+        )
+
+        for i in range(minimized_serialized_dfa.state_count):
+            state = minimized_serialized_dfa.states[i]
+            mtbdd = minimized_serialized_dfa.mtbdds[i]
+            minimized_dfa.transition_fn.mtbdds[state] = mtbdd
+
+        return minimized_dfa

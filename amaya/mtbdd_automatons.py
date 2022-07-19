@@ -570,3 +570,7 @@ class MTBDD_NFA(NFA):
             # In case the language of the automaton is empty keep at least 1 nonaccepting state so that functions 
             # generating unique states by taking max(self.states) will not crash
             self.states.add(0)
+
+    def minimize_hopcroft(self) -> MTBDD_NFA:
+        """Minimize the underlying automaton using hopcroft's minimization algorithm."""
+        return MTBDDTransitionFn.minimize_hopcroft(self)
