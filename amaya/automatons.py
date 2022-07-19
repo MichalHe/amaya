@@ -577,36 +577,62 @@ class NFA(object):
                             intersect_partition if len(intersect) < len(difference) else difference_partition
                         )
 
-        minimized_nfa = NFA(automaton_type=AutomatonType.DFA,
+        minimized_dfa = NFA(automaton_type=AutomatonType.DFA,
                             alphabet=self.alphabet,
                             used_variables=self.used_variables)
-        partition_enumeration: Dict[Tuple[int, ...], int] = dict((part, i) for i, part in enumerate(partitions))
-        minimized_nfa.states = set(partition_enumeration.values())
 
-        original_state_to_partition: Dict[int, Tuple[int, ...]] = {}
+        state_to_its_partition_map: Dict[int, Tuple[int, ...]] = {}
         for partition in partitions:
             for state in partition:
-                original_state_to_partition[state] = partition
+                state_to_its_partition_map[state] = partition
 
-        for partition in partitions:
-            min_state = partition_enumeration[partition]
-            partition_state = next(iter(partition))
+        initial_state = next(iter(self.initial_states))  # There is only 1 initial state
+        partition_with_initial_state = state_to_its_partition_map[initial_state]
+        partitions_to_explore = {partition_with_initial_state}
 
-            for symbol, dest_state in self.transition_fn.get_out_transitions_for_state(partition_state):
-                dest_partition = original_state_to_partition[dest_state]
-                dest_min_state = partition_enumeration[dest_partition]
+        partition_to_its_label_map: Dict[Tuple[int, ...], int] = {partition_with_initial_state: 0}
 
-                minimized_nfa.update_transition_fn(min_state, symbol, dest_min_state)
+        # Partition with the initial state has number 0
+        minimized_dfa.states.add(0)
+        minimized_dfa.initial_states.add(0)
+        next_avaiable_partition_number = 1  # State=0 was already assigned to partition containing the initial state
 
-            if partition_state in self.final_states:
-                minimized_nfa.add_final_state(min_state)
+        explored_partition_labels: Set[int] = set()
 
-            for state in partition:
-                if state in self.initial_states:
-                    minimized_nfa.add_initial_state(min_state)
-                    break
+        while partitions_to_explore:
+            partition = next(iter(partitions_to_explore))
+            partitions_to_explore.remove(partition)
+            partition_label = partition_to_its_label_map[partition]
 
-        return minimized_nfa
+            minimized_dfa.states.add(partition_label)
+            explored_partition_labels.add(partition_label)
+
+            # All the states in the partition are considered equivalent, therefore it is sufficient to use only one
+            # to discovered transitions to other partitions
+            some_partiton_state = next(iter(partition))
+
+            for symbol, dest_state in self.transition_fn.get_out_transitions_for_state(some_partiton_state):
+                dest_partition = state_to_its_partition_map[dest_state]
+
+                # The destination partition might not be explored yet, so it might not have a state number assigned
+                if dest_partition in partition_to_its_label_map:
+                    dest_partition_label = partition_to_its_label_map[dest_partition]
+                else:
+                    dest_partition_label = next_avaiable_partition_number
+                    partition_to_its_label_map[dest_partition] = next_avaiable_partition_number
+                    next_avaiable_partition_number += 1;
+
+                minimized_dfa.update_transition_fn(partition_label, symbol, dest_partition_label)
+
+                if dest_partition_label not in explored_partition_labels:
+                    partitions_to_explore.add(dest_partition)
+
+            # Again, states in a partitions are equivalent, therefore there cannot be an accepting and a non-accepting
+            # state in the same partition (all are either accepting or non-accepting)
+            if some_partiton_state in self.final_states:
+                minimized_dfa.add_final_state(partition_label)
+
+        return minimized_dfa
 
 
 @dataclass
