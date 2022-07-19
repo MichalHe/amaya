@@ -1,19 +1,27 @@
+from typing import (
+    Type,
+    TypeVar,
+)
+
 from amaya.alphabet import LSBF_Alphabet
 from amaya.automatons import (
     AutomatonType,
     DFA,
     NFA
 )
+from amaya.mtbdd_automatons import MTBDD_NFA
 from tests.conftest import ResolutionState
 
 import pytest
 
 
-@pytest.fixture
-def wiki_automaton() -> NFA:
+T = TypeVar('T', NFA, MTBDD_NFA)
+
+
+def make_wiki_automaton(automaton_cls: Type[T]) -> T:
     variable_id_pairs = (('x', 1),)
     alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
-    nfa = NFA(alphabet=alphabet, automaton_type=AutomatonType.DFA)
+    nfa = automaton_cls(alphabet=alphabet, automaton_type=AutomatonType.DFA)
     state_labels = {
         0: 'a',
         1: 'b',
@@ -53,16 +61,16 @@ def wiki_automaton() -> NFA:
     return nfa
 
 
-@pytest.fixture
-def automaton2() -> DFA:
+def make_automaton2(automaton_cls: Type[T]) -> T:
     variable_id_pairs = [('x', 1)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
 
-    dfa = DFA(alphabet=alphabet,
-              automaton_type=AutomatonType.DFA,
-              states={0, 1, 2, 3, 4, 5},
-              final_states={3, 5},
-              initial_states={0})
+    dfa = automaton_cls(alphabet=alphabet,
+                        automaton_type=AutomatonType.DFA,
+                        states={0, 1, 2, 3, 4, 5},
+                        final_states={3, 5},
+                        initial_states={0},
+                        used_variables=[1])
 
     transitions = (
         (0, (0,), 1),
@@ -84,7 +92,8 @@ def automaton2() -> DFA:
     return dfa
 
 
-def test_wiki_automaton(wiki_automaton: NFA):
+@pytest.mark.parametrize('dfa', (make_wiki_automaton(NFA), make_wiki_automaton(MTBDD_NFA)))
+def test_wiki_automaton(dfa: NFA):
     """
     Checks that the hopcrofts minimization works correctly on the automaton found on Wikipedia minimiazation article.
 
@@ -107,7 +116,7 @@ def test_wiki_automaton(wiki_automaton: NFA):
         (state2, (1,), state2),
     )
 
-    minimized_automaton = wiki_automaton.hopcroft_minimization()
+    minimized_automaton = dfa.minimize_hopcroft()
 
     assert len(minimized_automaton.states) == 3
     assert len(minimized_automaton.initial_states) == 1
@@ -126,27 +135,24 @@ def test_wiki_automaton(wiki_automaton: NFA):
     assert state1.get() in minimized_automaton.final_states
 
 
-def test_automaton2(automaton2: NFA):
+@pytest.mark.parametrize('dfa', (make_automaton2(NFA), make_automaton2(MTBDD_NFA)))
+def test_automaton2(dfa: NFA):
 
     state0 = ResolutionState('0')
     state1 = ResolutionState('1')
-    state2 = ResolutionState('2')
 
     expected_transitions = (
-        (state0, (0,), state1),
-        (state0, (1,), state2),
-        (state1, (0,), state0),
-        (state1, (1,), state2),
-        (state2, (0,), state2),
-        (state2, (1,), state2),
+        (state0, (0,), state0),
+        (state0, (1,), state1),
+        (state1, (0,), state1),
+        (state1, (1,), state1),
     )
 
-    minimized_dfa = automaton2.hopcroft_minimization()
+    minimized_dfa = dfa.minimize_hopcroft()
 
-    assert len(minimized_dfa.states) == 3
+    assert len(minimized_dfa.states) == 2
     assert len(minimized_dfa.initial_states) == 1
     assert len(minimized_dfa.final_states) == 1
-
     state0.bind(next(iter(minimized_dfa.initial_states)))
 
     # _rs stands for resolution state
@@ -155,4 +161,4 @@ def test_automaton2(automaton2: NFA):
         assert len(post) == 1, 'Minimized automaton is not DFA'
         dest_rs.bind(next(iter(post)))
 
-    assert state2.get() in minimized_dfa.final_states
+    assert state1.get() in minimized_dfa.final_states
