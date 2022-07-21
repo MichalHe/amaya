@@ -185,9 +185,10 @@ class AutomatonVisRepresentation:
         for origin_state, transition_symbols, dest_state in self.transitions:
             origin_label = str(self.state_labels.get(origin_state, origin_state))
             dest_label = str(self.state_labels.get(dest_state, dest_state))
+            edge_label = compute_html_label_for_symbols(self.variable_names, list(transition_symbols))
             graph.edge(origin_label,
                        dest_label,
-                       label=compute_html_label_for_symbols(self.variable_names, list(transition_symbols)))
+                       label=edge_label)
         return graph
 
     def into_vtf(self, uncompress_symbols=False) -> str:

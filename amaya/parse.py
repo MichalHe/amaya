@@ -12,6 +12,7 @@ from typing import (
     Dict,
     Callable,
     Optional,
+    Sequence,
 )
 
 from amaya.ast_relations import (
@@ -301,10 +302,14 @@ class EvaluationContext:
                                  self.get_variable_id(variable_name)))
         return assigned_ids
 
-    def add_global_variable(self, var_name: str, var_type: VariableType = VariableType.UNSET):
+    def add_global_variable(self, var_name: str, var_type: VariableType = VariableType.UNSET) -> int:
         if var_name not in self.global_variables:
             var_id = self._generate_new_variable_id()
             self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
+            return var_id
+        else:
+            # @Broken: Report an error about declaring a function symbol multiple times
+            return self.global_variables[var_name].id
 
     def get_automaton_class_for_current_backend(self):
         return self.automata_cls
@@ -373,7 +378,7 @@ def strip_comments(source: str) -> str:
 
 def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[str, int, VariableType]]:  # NOQA
     """
-    Traverse the given AST and collect the used variables.
+    Traverse the given AST and collect the variables that are referenced.
 
     The variables are collected in a context sensitive manner, recognizing that equally named variables
     are not the same when bound by different quantifiers.
@@ -396,17 +401,24 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
                     var_info.usage_count += 1  # The variable was used somewhere
                     variables_used.add((var_info.name, var_info.id, var_info.type))
 
+            # @Broken: This does not consider div terms, however, it should.
             return variables_used
-        # Dealing with a standalone string
+        
+        # If tree is not a Relation then it is a standalone string leaf
         if ctx.get_let_binding_value(tree) is not None:
-            return set()
+            # @Broken: This is likely broken if the let formula is uses variable 'x' and is used in two different
+            #          quantifier contexts, both of which are binding 'x'. If there are no other variables used in such 
+            #          in the quantified formulae, only one distinct variable is found.
+            return set()  # It is a let-variable, the AST it represents was already processed
         else:
+            # tree is a reference to a normal variable, consult with context whether this is the first encounter
             info = ctx.get_variable_info(tree)
             return set([(info.name, info.id, info.type)])
 
     root = tree[0]
-
-    assert root not in ['<', '<=', '>=', '>'], 'Relations should get proca essed beforehand in a separate pass.'
+    
+    assert_failure_desc = 'Relations should be reduced into direcly evaluable leaves at this point.'
+    assert root not in ['<', '<=', '>=', '>'], assert_failure_desc
 
     if root == '=':
         # Relations are preprocessed in a separate pass - this must be a Boolean equivalence
@@ -434,8 +446,7 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
             vars = vars.union(term_vars)
         return vars
     elif root in ['let']:
-        # Let has the following structure:
-        # (let (<variable_binding>+) <term>)
+        # Let has the following structure (let (<variable_binding>+) <term>)
         ctx.new_let_binding_context()
         variables_inside_let_bindings: Set[Tuple[str, int, VariableType]] = set()
         for variable_binding in tree[1]:
@@ -446,7 +457,7 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
         ctx.pop_binding_context()
         return term_vars.union(variables_inside_let_bindings)
     else:
-        raise ValueError(f'Unhandled branch when exploring the SMT tree. {tree}')
+        raise ValueError(f'Unhandled branch when exploring the SMT tree. Tree: {tree}')
 
 
 def get_declared_function_symbols(top_level_smt_statements: List) -> List[FunctionSymbol]:
@@ -518,6 +529,20 @@ def get_asserts_from_ast(ast):
     return _asserts
 
 
+def add_only_used_function_constants_to_context(ctx: EvaluationContext,
+                                                used_variables: Set[Tuple[str, int, VariableType]],
+                                                declared_function_symbols: Sequence[FunctionSymbol]):
+    """Adds only used declared function constants to ctx."""
+    starting_id = ctx.next_available_variable_id
+    used_variable_ids = set(var_info[1] for var_info in used_variables)
+
+    function_symbol_ids = [i + starting_id for i in range(len(declared_function_symbols))]
+    for i, function_symb in enumerate(declared_function_symbols):
+        variable_id = i + starting_id
+        if variable_id in used_variable_ids:
+            ctx.add_global_variable(var_name=function_symb.name, var_type=function_symb.return_type)
+
+
 def perform_whole_evaluation_on_source_text(source_text: str,
                                             emit_introspect: IntrospectHandle = lambda nfa, op: None
                                             ) -> Tuple[NFA, Dict[str, str]]:
@@ -540,7 +565,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
     eval_result: Optional[NFA] = None
     smt_info: Dict[str, Any] = {}
-    function_symbols: Dict[str, FunctionSymbol] = {}
+    function_symbol_to_info_map: Dict[str, FunctionSymbol] = {}
     formulae_to_assert: List[AST_Node] = []
 
     for top_level_statement in ast:
@@ -572,8 +597,8 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             ]
             sym_ret_type = VariableType.from_smt_type_string(decl_fun[3])
 
-            function_symbols[sym_name] = FunctionSymbol(name=sym_name, arity=len(sym_args),args=sym_args,
-                                                        return_type=sym_ret_type)
+            function_symbol_to_info_map[sym_name] = FunctionSymbol(name=sym_name, arity=len(sym_args), args=sym_args,
+                                                                   return_type=sym_ret_type)
 
         elif statement_root == 'check-sat':
             if eval_result:
@@ -584,7 +609,9 @@ def perform_whole_evaluation_on_source_text(source_text: str,
                 raise ValueError('Cannot check-sat without any asserts.')
 
             ctx = EvaluationContext()
-            for fun_symbol in function_symbols.values():
+            function_symbols = sorted(function_symbol_to_info_map.values(), key=lambda symbol: symbol.name)
+
+            for fun_symbol in function_symbols:
                 ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
 
             # If there are multiple assert statements, evaluate their conjunction
@@ -601,12 +628,19 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             # Count all distinct variables in the formula
             all_vars = get_all_used_variables(formula_to_evaluate, ctx)
-            vars_with_ids = [(var_name, var_id) for var_name, var_id, _ in all_vars]
+
+            # There might be declared global function constants that are not used in the formula. If the asserted 
+            # formula does not talk about these variables, they are not needed during the procedure and they would only
+            # slow down the procedure. At the moment we don't generate values for these variables in a model.
+            # @Note: Not sure whether they need to be a part of the generated model, check with Z3
+            unused_global_function_constant_offset = min(var_info[1] for var_info in all_vars) - 1
+            vars_with_ids = [
+                (var_name, (var_id - unused_global_function_constant_offset)) for var_name, var_id, _ in all_vars
+            ]
             alphabet = LSBF_Alphabet.from_variable_id_pairs(vars_with_ids)
 
             eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet)
-            for constant_symbol in function_symbols.values():
-                eval_ctx.add_global_variable(constant_symbol.name, var_type=constant_symbol.return_type)
+            add_only_used_function_constants_to_context(eval_ctx, all_vars, function_symbols)
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
             nfa = run_evaluation_procedure(formula_to_evaluate, eval_ctx)
@@ -674,7 +708,6 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
         nfa = relations_to_dfa.build_presburger_modulo_dfa(relation, variable_id_pairs,
                                                            ctx.get_alphabet(), automaton_constr)
-        import pdb; pdb.set_trace()
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.BUILD_NFA_FROM_CONGRUENCE)
         return nfa
 
@@ -703,7 +736,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
         assert automaton_building_function
         nfa = automaton_building_function(reordered_relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
-        ctx.emit_evaluation_introspection_info(nfa.determinize(), operation)
+        ctx.emit_evaluation_introspection_info(nfa, operation)
 
         emit_evaluation_progress_info(
             f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})',
