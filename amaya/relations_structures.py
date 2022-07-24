@@ -308,7 +308,7 @@ class Relation(object):
     def __repr__(self):
         return 'Relation(' + self.into_string(use_latex_notation=False) + ')'
 
-    def get_used_variables(self) -> List[str]:
+    def get_used_variables(self) -> Set[str]:
         '''Retrieve a collection of all the variables used in this relation.'''
         used_variables = set(self.variable_names)
         for modulo_term in self.modulo_terms:

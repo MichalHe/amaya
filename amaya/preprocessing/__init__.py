@@ -27,6 +27,7 @@ from amaya.preprocessing.ite_preprocessing import (
     ite_expansion_handler,
 )
 from amaya.preprocessing.prenexing import convert_formula_to_pnf
+from amaya.preprocessing.antiprenexing import perform_antiprenexing
 from amaya import (
     logger,
     utils,
@@ -425,9 +426,10 @@ def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -
         '=>': expand_implications_handler,
     }
 
-    # Apply preprocessing passes configurable by the CLI
     if solver_config.preprocessing.perform_prenexing:
         ast = convert_formula_to_pnf(ast)
+    if solver_config.preprocessing.perform_antiprenexing:
+        ast = perform_antiprenexing(ast)
 
     second_pass_context = {
         'forall_replaced_cnt': 0,

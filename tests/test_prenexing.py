@@ -124,4 +124,3 @@ def test_prenexing_variable_renaming():
     ]
 
     assert result == expected_result
-

@@ -110,7 +110,7 @@ argparser.add_argument('-p',
                        action='append',
                        dest='preprocessing_switches',
                        default=[],
-                       choices=['prenex'],
+                       choices=['prenexing', 'antiprenexing'],
                        help='Controls preprocessing transformations applied on input the formula.')
 
 subparsers = argparser.add_subparsers(help='Runner operation')
@@ -237,8 +237,13 @@ solution_domain_str_to_type = {
 solver_config.solution_domain = solution_domain_str_to_type[args.domain]
 
 # Read supplied preprocessing switches and convert them into cfg
-if 'prenex' in args.preprocessing_switches:
+if 'prenexing' in args.preprocessing_switches:
     solver_config.preprocessing.perform_prenexing = True
+if 'antiprenexing' in args.preprocessing_switches:
+    solver_config.preprocessing.perform_antiprenexing = True
+
+if solver_config.preprocessing.perform_antiprenexing and solver_config.preprocessing.perform_prenexing:
+    print('Configuration error: Cannot apply prenexing and antiprenexing simultaneously.', file=sys.stderr)
 
 if args.minimization_method == 'hopcroft':
     solver_config.minimization_method = MinimizationAlgorithms.HOPCROFT

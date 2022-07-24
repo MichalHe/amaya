@@ -24,6 +24,7 @@ class MinimizationAlgorithms(IntEnum):
 @dataclass
 class PreprocessingConfig:
     perform_prenexing: bool = False
+    perform_antiprenexing: bool = False
 
 
 @dataclass
