@@ -95,5 +95,4 @@ def push_quantifiers_inside_on_tagged_ast(root: Tagged_AST_Node,
 def perform_antiprenexing(formula: AST_Node) -> AST_Node:
     """Push quantifiers present in the formula as deep as possible."""
     tagged_ast = tag_ast_nodes_with_variables_used_inside_their_ast(formula)
-    print(tagged_ast)
     return push_quantifiers_inside_on_tagged_ast(tagged_ast, carried_quantifiers=set())

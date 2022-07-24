@@ -36,6 +36,10 @@ from amaya.config import (
 import amaya.presburger.constructions.naturals as relations_to_dfa
 import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
+from amaya.preprocessing import (
+    antiprenexing,
+    prenexing
+)
 from amaya.ast_definitions import (
     AST_NaryNode,
     AST_Node,
@@ -625,6 +629,15 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             }
             formula_to_evaluate = preprocessing.reduce_relation_asts_to_evaluable_leaves(formula_to_evaluate,
                                                                                          bool_symbols)
+
+            if solver_config.preprocessing.perform_antiprenexing:
+                logger.info('Performing antiprenexing of: %s', formula_to_evaluate)
+                formula_to_evaluate = preprocessing.antiprenexing.perform_antiprenexing(formula_to_evaluate)
+                logger.info('Antiprenexing done, Result: %s', formula_to_evaluate)
+            elif solver_config.preprocessing.perform_prenexing:
+                logger.info('Performing prenexing on: %s', formula_to_evaluate)
+                formula_to_evaluate = preprocessing.prenexing.convert_formula_to_pnf(formula_to_evaluate)
+                logger.info('Prenexing performed. Result: %s', formula_to_evaluate)
 
             # Count all distinct variables in the formula
             all_vars = get_all_used_variables(formula_to_evaluate, ctx)

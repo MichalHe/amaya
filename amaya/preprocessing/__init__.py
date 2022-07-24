@@ -26,8 +26,6 @@ from amaya.preprocessing.ite_preprocessing import (
     expand_ite_expressions_inside_presburger_relation,
     ite_expansion_handler,
 )
-from amaya.preprocessing.prenexing import convert_formula_to_pnf
-from amaya.preprocessing.antiprenexing import perform_antiprenexing
 from amaya import (
     logger,
     utils,
@@ -36,29 +34,6 @@ from amaya.config import (
     SolverConfig,
     solver_config,
 )
-
-
-def will_mod_automaton_accept_anything_after_projection(mod_term: ModuloTerm) -> bool:
-    """
-    Check whether the automaton for constructed congruence accepts everything after added modulo var is projected away.
-
-    Assumes that the generated congurence relation will have 0 as absolute part.
-    """
-    original_coefs = mod_term.variable_coeficients
-    original_var_cnt = len(mod_term.variable_coeficients)
-    symbols = (utils.number_to_bit_tuple(i, tuple_size=original_var_cnt) for i in range(2**original_var_cnt))
-    all_symbols_go_to_final = True
-    for sym in symbols:
-        dot = utils.vector_dot(sym, original_coefs)
-        mod = (dot if dot > 0 else dot + mod_term.modulo)
-
-        # Extend the computed dot with the added modulo var and ints coef (precomputed dot)
-        mod0 = mod
-        mod1 = (mod + 1) % mod_term.modulo
-        if mod0 == 0 or mod1 == 0:
-            all_symbols_go_to_final = False
-            break
-    return all_symbols_go_to_final
 
 
 def is_presburger_term(ast: AST_Node, bool_vars: Set[str]) -> bool:
@@ -425,11 +400,6 @@ def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -
         '<': expand_ite_expressions_inside_presburger_relation,
         '=>': expand_implications_handler,
     }
-
-    if solver_config.preprocessing.perform_prenexing:
-        ast = convert_formula_to_pnf(ast)
-    if solver_config.preprocessing.perform_antiprenexing:
-        ast = perform_antiprenexing(ast)
 
     second_pass_context = {
         'forall_replaced_cnt': 0,
