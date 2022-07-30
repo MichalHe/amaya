@@ -114,9 +114,8 @@ class VariableInfo:
 class EvaluationContext:
     def __init__(self,
                  emit_introspect=lambda nfa, operation: None,
-                 alphabet: Optional[LSBF_Alphabet] = None  # From previous passes
-                 ):
-        self.binding_stack: List[Dict[str, NFA]] = []
+                 alphabet: Optional[LSBF_Alphabet] = None):
+
         self.introspect_handle = emit_introspect
 
         # Evaluation stats
@@ -124,7 +123,6 @@ class EvaluationContext:
         self.stats: List[EvaluationStat] = []
         self.pending_operations_stack: List[Any] = []
 
-        # Variables (not the `let` ones)
         self.next_available_variable_id = 1  # Number them from 1, MTBDDs require
         self.variables_info_stack: List[Dict[str, VariableInfo]] = []
         self.global_variables: Dict[str, VariableInfo] = {}
@@ -139,37 +137,8 @@ class EvaluationContext:
 
     def get_alphabet(self) -> LSBF_Alphabet:
         if self.alphabet is None:
-            raise ValueError('Requesting an overall alphabet from the evaluation context when None has been set.')
+            raise ValueError('Requesting the overall alphabet from the evaluation context when None has been set.')
         return self.alphabet
-
-    def get_let_binding_value(self, var_name: str) -> Optional[NFA]:
-        """
-        Retrieves the value of a lexical binding introduced via the SMTLIB `let` construct.
-
-        Currently we suppose the bindings bind names to the automatons.
-        """
-        for binding_record in reversed(self.binding_stack):
-            if var_name in binding_record:
-                return binding_record[var_name]
-        return None
-
-    def new_let_binding_context(self):
-        """Creates a new binding frame/context."""
-        self.binding_stack.append(dict())
-
-    def insert_let_binding(self, var_name: str, nfa: NFA):
-        """Insters a new `let` binding of the given var_name to the given nfa."""
-        self.binding_stack[-1][var_name] = nfa
-
-    def insert_all_bindings_into_current_context(self, bindings: Dict[str, NFA]):
-        """
-        Insert the given bindings the current let binding context.
-        """
-        for var_name, nfa in bindings.items():
-            self.insert_let_binding(var_name, nfa)
-
-    def pop_binding_context(self):
-        self.binding_stack.pop(-1)
 
     def emit_evaluation_introspection_info(self, nfa: NFA, operation: ParsingOperation):
         self.introspect_handle(nfa, operation)
@@ -323,6 +292,7 @@ def emit_evaluation_progress_info(msg: str, depth: int):
     logger.info('  ' * depth + msg)
 
 
+# @Cleanup: Remove this function or move it to the utils module
 def pretty_print_smt_tree(tree, printer=None, depth=0):
     if printer is None:
         printer = print
@@ -348,10 +318,9 @@ def pretty_print_smt_tree(tree, printer=None, depth=0):
         printer(PRETTY_PRINT_INDENT * depth + f'{tree}')
 
 
+# @Cleanup: Rename this to something more readable, or do it in preprocessing
 def parse_variable_bindings_list_to_internal_repr(bindings: List[Tuple[str, str]]) -> Dict[str, VariableType]:
-    """
-    Parse the given variable bindings.
-    """
+    """Parse the given variable bindings."""
     var_info: Dict[str, VariableType] = {}
     for binding in bindings:
         var_name, var_type_smt_str = binding
@@ -407,20 +376,14 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
 
             # @Broken: This does not consider div terms, however, it should.
             return variables_used
-        
-        # If tree is not a Relation then it is a standalone string leaf
-        if ctx.get_let_binding_value(tree) is not None:
-            # @Broken: This is likely broken if the let formula is uses variable 'x' and is used in two different
-            #          quantifier contexts, both of which are binding 'x'. If there are no other variables used in such 
-            #          in the quantified formulae, only one distinct variable is found.
-            return set()  # It is a let-variable, the AST it represents was already processed
-        else:
-            # tree is a reference to a normal variable, consult with context whether this is the first encounter
-            info = ctx.get_variable_info(tree)
-            return set([(info.name, info.id, info.type)])
+
+        # Tree is a reference to a normal variable, consult with context whether this is the first encounter
+        # @FIXME: We should not declare a new variable on the spot as it has not been declared - we don't know its type.
+        info = ctx.get_variable_info(tree)
+        return set([(info.name, info.id, info.type)])
 
     root = tree[0]
-    
+
     assert_failure_desc = 'Relations should be reduced into direcly evaluable leaves at this point.'
     assert root not in ['<', '<=', '>=', '>'], assert_failure_desc
 
@@ -430,9 +393,6 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
 
 
     if root in ['exists']:
-        # When we are entering the new context (\\exists) we can bound at max
-        # only those variables that are bound by the \\exists, nothing more -
-        # all other variables then belong to the enclosing scopes
         ctx.push_new_variable_info_frame()
         variable_bindings = parse_variable_bindings_list_to_internal_repr(tree[1])
         ctx.add_multiple_variables_to_current_frame(variable_bindings)
@@ -449,38 +409,10 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
             term_vars = get_all_used_variables(conj_term, ctx)
             vars = vars.union(term_vars)
         return vars
-    elif root in ['let']:
-        # Let has the following structure (let (<variable_binding>+) <term>)
-        ctx.new_let_binding_context()
-        variables_inside_let_bindings: Set[Tuple[str, int, VariableType]] = set()
-        for variable_binding in tree[1]:
-            variable_name, variable_tree = variable_binding
-            ctx.insert_let_binding(variable_name, NFA(LSBF_Alphabet({}, [], set()), AutomatonType.NFA))
-            variables_inside_let_bindings = variables_inside_let_bindings.union(get_all_used_variables(variable_tree, ctx))
-        term_vars = get_all_used_variables(tree[2], ctx)
-        ctx.pop_binding_context()
-        return term_vars.union(variables_inside_let_bindings)
+
     else:
+        # @Cleanup: This message is very ambiguous
         raise ValueError(f'Unhandled branch when exploring the SMT tree. Tree: {tree}')
-
-
-def get_declared_function_symbols(top_level_smt_statements: List) -> List[FunctionSymbol]:
-    """Retrieves the top-level declared function symbols from the internal SMT representation."""
-    declared_function_symbols: List[FunctionSymbol] = []
-    for statement in top_level_smt_statements:
-        if statement[0] == 'declare-fun':
-            symbol_name: str = statement[1]
-            symbol_arg_list: List = statement[2]
-            symbol_ret_type: VariableType = VariableType.from_smt_type_string(statement[3])
-            symbol_args = []
-            for arg_name, arg_type in symbol_arg_list:
-                symbol_args.append((arg_name, VariableType.from_smt_type_string(arg_type)))
-
-            declared_function_symbols.append(FunctionSymbol(symbol_name,
-                                                            len(symbol_args),
-                                                            symbol_args,
-                                                            symbol_ret_type))
-    return declared_function_symbols
 
 
 def lex(source: str) -> List[str]:
@@ -524,15 +456,6 @@ def build_syntax_tree(tokens: List[str]):
     return stack
 
 
-def get_asserts_from_ast(ast):
-    # TODO: Remove this
-    _asserts = []
-    for top_level_expr in ast:
-        if top_level_expr[0] == 'assert':
-            _asserts.append(top_level_expr)
-    return _asserts
-
-
 def add_only_used_function_constants_to_context(ctx: EvaluationContext,
                                                 used_variables: Set[Tuple[str, int, VariableType]],
                                                 declared_function_symbols: Sequence[FunctionSymbol]):
@@ -547,6 +470,7 @@ def add_only_used_function_constants_to_context(ctx: EvaluationContext,
             ctx.add_global_variable(var_name=function_symb.name, var_type=function_symb.return_type)
 
 
+# @Cleanup: This should be renamed to something like evaluate_smt2
 def perform_whole_evaluation_on_source_text(source_text: str,
                                             emit_introspect: IntrospectHandle = lambda nfa, op: None
                                             ) -> Tuple[NFA, Dict[str, str]]:
@@ -642,7 +566,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             # Count all distinct variables in the formula
             all_vars = get_all_used_variables(formula_to_evaluate, ctx)
 
-            # There might be declared global function constants that are not used in the formula. If the asserted 
+            # There might be declared global function constants that are not used in the formula. If the asserted
             # formula does not talk about these variables, they are not needed during the procedure and they would only
             # slow down the procedure. At the moment we don't generate values for these variables in a model.
             # @Note: Not sure whether they need to be a part of the generated model, check with Z3
@@ -760,13 +684,14 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
     # as the variable IDs could not be determined beforehand.
     for var_name, var_id in variable_id_pairs:
         var_info = ctx.lookup_variable(var_name)
-        assert var_info, ('Failed to retrieve variable info from evaluation context to increment variable ussage '
+        assert var_info, ('Failed to retrieve variable info from evaluation context to increment variable usage '
                           'counter after an automaton for an atomic constraint was built.')
         var_info.usage_count += 1
 
     return nfa
 
 
+# @Cleanup: Fold this function in if it is even used
 def build_automaton_for_boolean_variable(var_name: str, var_value: bool, ctx: EvaluationContext) -> NFA:
     """Construct an automaton corresponding the given boolean variable."""
     logger.debug(f'Building an equivalent automaton for the bool variable {var_name}, with value {var_value}.')
@@ -774,56 +699,26 @@ def build_automaton_for_boolean_variable(var_name: str, var_value: bool, ctx: Ev
     return ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), var_id, var_value)
 
 
-def evaluate_let_bindings(binding_list: List[str, AST_Node], ctx: EvaluationContext) -> Dict[str, NFA]:
-    """
-    Construct automata for the individual formulae bound to let variables in the given binding list.
-    """
-    logger.debug(f'Evaluating binding list of size: {len(binding_list)}')
-    binding: Dict[str, NFA] = {}
-    for var_name, expr in binding_list:
-        logger.debug(f'Building automaton for var {var_name} with expr: {expr}')
-        nfa = run_evaluation_procedure(expr, ctx)  # Indirect recursion, here we go
-        binding[var_name] = nfa
-
-    return binding
-
-
+# @Cleanup: How is this function even used? We now have Relations in the AST, so we typically take the else branch.
 def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _depth: int) -> NFA:
     """
     Construct automaton accepting solutions of the formula given by its AST.
 
-    If the given ast is a AST Leaf, the evaluation context is checked for the definition of the symbol - first whether
-    the given literal is a Boolean variable (direct construction exists), or whether it is a let variable (that is
-    bound to an entire AST).
-
     If the given ast is not a leaf, the evaluation procedure is ran to build the NFA encoding the AST.
     """
     if isinstance(operand_ast, str):
-        # If it is a string, then it should reference a let variable bound to some formula,
-        # or a Boolean variable that can be converted to Automaton directly
-
         logger.debug('Requested the automaton for an operand that is an AST Leaf (str).'
                      'Searching variable scopes for its definition.')
 
         variable_info = ctx.lookup_variable(operand_ast)
-        is_bool_var = (variable_info and variable_info.type == VariableType.BOOL)
 
-        if is_bool_var:
+        if (variable_info and variable_info.type == VariableType.BOOL):
             logger.debug(f'Found definition for %s - symbol defined as a boolean variable.', operand_ast)
             variable_info.usage_count += 1
             return build_automaton_for_boolean_variable(operand_ast, True, ctx)
-        else:
-            logger.debug(f'The variable %s is not boolean, searching `let` bindings.', operand_ast)
 
-        nfa = ctx.get_let_binding_value(str(operand_ast))
-        if nfa is None:
-            mgs = ('The variable `%s` was not defines as boolean, nor it is a let variable.'
-                    'Cannot construct automaton for undefined variable.')
-            logger.fatal(msg, operand_ast)
-            raise ValueError(f'Undefined variable `{operand_ast}`.')
-        else:
-            logger.debug('Value query for variable `%s` OK.', operand_ast)
-        return nfa
+        raise ValueError(f'Found an AST Leaf that cannot be evaluated: {operand_ast}')
+
     else:
         # The operand in not an AST Leaf - evaluate it first
         return run_evaluation_procedure(operand_ast, ctx, _debug_recursion_depth=_depth+1)
@@ -861,7 +756,7 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
                                      reduction_operation: ParsingOperation,
                                      _depth: int) -> NFA:
     """
-    Abstract binary conjuction evaluation algorithm.
+    Abstract binary conjunction evaluation algorithm.
 
     Perform the evaluation of AND and OR expressions in an abstract fashion using the provided
     reduction function (used to compose the individual operands into a result).
@@ -872,18 +767,6 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
     reduction_result = get_automaton_for_operand(first_operand, ctx, _depth)
 
     for next_operand in expr[2:]:
-        # Detect and perform on the fly construction
-        if isinstance(next_operand, Relation):
-            operand_mod = next_operand.is_conguence_equality()
-            doing_intersect = reduction_operation == ParsingOperation.NFA_INTERSECT
-            if operand_mod and doing_intersect:
-                pass
-                # FIXME(codeboy): This is temporary - remove the comments after
-                # the MTBDD bug was fixed.
-
-                # modulo_variables = sorted(map(lambda pair: pair[1], ctx.get_multiple_variable_ids(next_operand.get_used_variables())))
-                # pa.on_the_fly_intersection(reduction_result, modulo_variables, next_operand)
-
         next_operand_automaton = get_automaton_for_operand(next_operand, ctx, _depth)
 
         # Apply the provided reduction function.
@@ -899,7 +782,9 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
 
         reduction_result = minimize_automaton_if_configured(reduction_result, ctx)
 
-        emit_evaluation_progress_info(f' >> {reduction_operation}(lhs, rhs) (result size: {len(reduction_result.states)}, automaton_type={reduction_result.automaton_type})', _depth)
+        emit_evaluation_progress_info((f' >> {reduction_operation}(lhs, rhs) '
+                                       f'(result size: {len(reduction_result.states)}, '
+                                       f'automaton_type={reduction_result.automaton_type})'), _depth)
 
     return reduction_result
 
@@ -936,6 +821,7 @@ def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: in
     assert len(not_expr) == 2
     operand = get_automaton_for_operand(not_expr[1], ctx, _depth)
 
+    # @Cleanup: I think we don't have to handle Bool automatons in an explicit manner - check whether we need this code.
     if (operand.automaton_type & AutomatonType.BOOL):
         assert len(operand.used_variables) == 1
 
@@ -982,9 +868,9 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
 
     vars_info = ctx.get_variables_info_for_current_frame()
 
-    # We need to establish an order of individual projections applied, so that
-    # we can tell when we are applying the last projection - after which we
-    # will apply only one padding closure instead of after every projection
+    # We need to establish an order of individual projections applied, so that we can tell when we are projecting away
+    # the last variable in this quantifier, because we don't need to do padding closure after every single variable
+    # projection - we have to do it only after the variable has been projected away.
     projected_var_ids: List[int] = list()
     for var_name in variable_bindings:
         current_var_info = vars_info[var_name]
@@ -1004,7 +890,7 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
         logger.debug(f'Projecting away variable {var_id}')
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
 
-        # Do not skip only after the last projection
+        # It is sufficient to do the padding closure only after the last variable is projected away
         skip_pad_closure = False if var_id == last_var_id else True
 
         projection_result = nfa.do_projection(var_id, skip_pad_closure=skip_pad_closure)
@@ -1017,38 +903,10 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
 
     nfa = minimize_automaton_if_configured(nfa, ctx)
 
-    ctx.emit_evaluation_introspection_info(nfa.determinize(), ParsingOperation.NFA_DETERMINIZE)
-
     emit_evaluation_progress_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
 
     ctx.pop_variable_frame()
     return nfa
-
-
-def evaluate_let_expr(let_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
-    """
-    Evaluate the given let expression and returns the resulting automaton.
-    """
-    # `let` has this structure [`let`, `<binding_list>`, <term>]
-
-    assert len(let_expr) == 3
-    binding_list = let_expr[1]
-    expr_using_let_bindings = let_expr[2]
-
-    ctx.new_let_binding_context()
-
-    # The variables in bindings can be evaluated to their automatons.
-    bindings = evaluate_let_bindings(binding_list, ctx)
-    logger.debug(f'Extracted bindings {bindings.keys()}')
-
-    ctx.insert_all_bindings_into_current_context(bindings)
-
-    # The we evaluate the term, in fact represents the value of the
-    # whole `let` block
-    term_nfa = run_evaluation_procedure(expr_using_let_bindings, ctx, _depth + 1)
-
-    ctx.pop_binding_context()
-    return term_nfa
 
 
 def evaluate_bool_equivalence_expr(ast: AST_NaryNode, ctx: EvaluationContext, _depth: int = 0) -> NFA:
@@ -1083,28 +941,20 @@ def run_evaluation_procedure(ast: AST_Node,
     """
 
     if not isinstance(ast, list):
-        # This means that either we hit an SMT2 term (boolean variable) or
-        # the tree is malformed, therefore, we cannot continue.
-
         if isinstance(ast, Relation):
             return build_automaton_from_presburger_relation_ast(ast, ctx, _debug_recursion_depth)
 
-        # Is the term a bool variable?
+        # Check whether the thing we have encountered is a Boolean variable. If not, the input formula is malformed.
+        # @Cleanup: This should all be done in preprocessing - instead of having a string for a boolean variable
+        #           that we check every time, the tree should already be preprocessed to contain a Boolean variable,
+        #           or the error should have been reported to the user.
         is_bool_var = False
         maybe_variable_type = ctx.get_variable_type_if_defined(ast)
         if maybe_variable_type is not None and maybe_variable_type == VariableType.BOOL:
-            is_bool_var = True
-
-        if is_bool_var:
             logger.debug('Reached a SMT2 term %s, which was queried as a boolean variable.', ast)
             return build_automaton_for_boolean_variable(var_name=ast, var_value=True, ctx=ctx)
-        else:
-            nfa = ctx.get_let_binding_value(ast)
-            if nfa is None:
-                raise ValueError(f'SMT2 identifier `{ast}` is not a let variable, nor a Boolean variable. '
-                                 'Don\'t know how to constuct an automaton')
-            else:
-                return nfa
+
+        raise ValueError('Cannot evaluate atom: %s.', ast)
 
     node_name = ast[0]
     emit_evaluation_progress_info(f'eval_smt_tree({ast}), node_name={node_name}', _debug_recursion_depth)
@@ -1114,7 +964,6 @@ def run_evaluation_procedure(ast: AST_Node,
         'or': evaluate_or_expr,
         'not': evaluate_not_expr,
         'exists': evaluate_exists_expr,
-        'let': evaluate_let_expr,
         '=': evaluate_bool_equivalence_expr,
     }
 
@@ -1125,8 +974,3 @@ def run_evaluation_procedure(ast: AST_Node,
 
     result = evaluation_function(ast, ctx, _debug_recursion_depth)
     return result
-
-
-def update_smt_info(smt_info: Dict[str, Any], statement_statement: AST_NaryNode):
-    smt_info[info_category] = info_value
-    return smt_info

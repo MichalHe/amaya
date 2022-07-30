@@ -255,68 +255,48 @@ def transform_ast(ast: AST_Node,  # NOQA
     ctx['history'].pop(-1)
 
 
-def fold_in_let_bindings(ast: AST_Node,
-                         bindings_stack: List[Dict[str, AST_Node]],
-                         path: List[Tuple[AST_Node, int]]) -> int:
-    """
-    Fold in the expressions (ASTs) bound to variables inside previous let blocks (ala macro expansion).
-
-    The given AST is modified in place.
-    """
-    if type(ast) != list:
+def expand_let_macros(ast: AST_Node,
+                         macro_def_scopes: List[Dict[str, AST_Node]]):
+    """Perform let macro expansion."""
+    if not isinstance(ast, list):
         # We've encountered a string leaf, check if it is bound to something, if yes, expand it.
-        for bindings in reversed(bindings_stack):
-            if ast in bindings:
-                parent, position_in_parent = path[-1]
-                parent[position_in_parent] = bindings[ast]
-                return 1
-        return 0
+        for macro_def_scope in reversed(macro_def_scopes):
+            if ast in macro_def_scope:
+                return macro_def_scope[ast]
+        return ast
 
     node_name = ast[0]
-    folds_performed: int = 0
+
     if node_name == 'let':
-        # First try to fold in variables from previous let expressions.
-        binding_list = ast[1]
-        for i, binding in enumerate(binding_list):
-            _, binding_ast = binding
-            path.append((ast, i))
-            folds_performed += fold_in_let_bindings(binding_ast, bindings_stack, path)
-            path.pop(-1)
+        # The new S-expressions in the let binding might contain variables pointing to previously bound S-expressions.
+        # We have to first fold in the macros carried to this node into the new S-expressions - only we can use them.
+        macro_defs = ast[1]
+        macro_defs_with_prev_macros_folded_in = [
+            (macro_name, expand_let_macros(macro_body, macro_def_scopes)) for macro_name, macro_body in macro_defs
+        ]
 
-        # Identify bindings that stand for a literal, or an arithmetic
-        # expression - those must be folded in
-        bindings_list_without_folded: List[List[AST_Leaf, AST_NaryNode]] = []
-        bindings_stack.append({})
-        for let_var_name, binding_ast in ast[1]:
-            is_arithmetic_expr = type(binding_ast) == list and binding_ast[0] in ['-', '+', '*', 'mod']
-            is_literal = type(binding_ast) == str
-            if is_arithmetic_expr or is_literal:
-                # The current binding must be folded in oder to be able to
-                # evaluate the tree
-                bindings_stack[-1][let_var_name] = binding_ast
-            else:
-                bindings_list_without_folded.append([let_var_name, binding_ast])
+        # Make a new macro definition scope, and populate it with the current macro definitions
+        macro_def_scopes.append(dict(macro_defs_with_prev_macros_folded_in))
 
-        # Continue folding down the line.
-        path.append((ast, 2))
-        folds_performed += fold_in_let_bindings(ast[2], bindings_stack, path)
-        path.pop(-1)
+        # Continue down the tree, however, return only the AST subtree from the current let expr with the macros folded in - remove the let node
+        folded_subtree = expand_let_macros(ast[2], macro_def_scopes)
 
-        # Check whether some binding in the `let` was left
-        if not bindings_list_without_folded:
-            # No bingings were left, remove the `let` node alltogether.
-            assert path
-            parent, position_in_parent = path[-1]
-            parent[position_in_parent] = ast[2]
-
-        bindings_stack.pop(-1)
-        return folds_performed
+        macro_def_scopes.pop(-1)
+        return folded_subtree
+    elif node_name in ('exists', 'forall'):
+        ast_with_folded_macros = [node_name, ast[1]]
+        for subtree in ast[2:]:
+            subtree_with_folded_macro = expand_let_macros(subtree, macro_def_scopes)
+            ast_with_folded_macros.append(subtree_with_folded_macro)
+        return ast_with_folded_macros
+    elif node_name in ('and', 'or', 'not', '=', '<=', '<', '>=', '>', '+', '-', '*', 'mod', 'div', 'ite', '=>'):
+        ast_with_folded_macros = [node_name]
+        for subtree in ast[1:]:
+            subtree_with_folded_macro = expand_let_macros(subtree, macro_def_scopes)
+            ast_with_folded_macros.append(subtree_with_folded_macro)
+        return ast_with_folded_macros
     else:
-        for subtree, parent_backlink in ast_iter_subtrees(ast):
-            path.append(parent_backlink)
-            folds_performed += fold_in_let_bindings(subtree, bindings_stack, path)
-            path.pop(-1)
-        return folds_performed
+        raise ValueError(f'Cannot fold in macros into the AST: {ast=}')
 
 
 def expand_implications_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
@@ -384,11 +364,11 @@ def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -
         ast - The SMT tree to be preprocessed. The preprocessing is performed in place.
     """
 
-    logger.info('Entering the first preprocessing pass: Folding in arithmetic expressions.')
-    folds_performed = fold_in_let_bindings(ast, [], [])
-    logger.info(f'Performed {folds_performed} folds.')
+    logger.debug('[Preprocessing] original AST: %s', ast)
+    ast = expand_let_macros(ast, [])
+    logger.debug('[Preprocessing] AST after let macro expansion: %s', ast)
 
-    logger.info('Entering the second preprocessing pass: `ite` expansion, `forall` removal, modulo operator expansion.')
+    logger.info('Entering the second preprocessing pass: `ite` expansion, `forall` removal.')
 
     second_pass_transformations = {
         'forall': replace_forall_with_exists_handler,
@@ -403,17 +383,17 @@ def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -
 
     second_pass_context = {
         'forall_replaced_cnt': 0,
-        'modulos_replaced_cnt': 0,
         'ite_expansions_cnt': 0,
         'implications_expanded_cnt': 0
     }
     transform_ast(ast, second_pass_context, second_pass_transformations)
 
+    logger.debug('[Preprocessing] AST after ite expansion, implications rewriting, and forall rewriting: %s', ast)
+
     logger.info('First pass stats: ')
-    logger.info(f'Replaced {second_pass_context["forall_replaced_cnt"]} forall quantifiers with exists.')
-    logger.info(f'Transformed {second_pass_context["modulos_replaced_cnt"]} modulo expressions into \\exists formulas.')
-    logger.info(f'Expanded {second_pass_context["ite_expansions_cnt"]} ite expressions outside of atomic Presburfer formulas.')
-    logger.info(f'Expanded {second_pass_context["implications_expanded_cnt"]} implications.')
+    logger.info('Replaced %d forall quantifiers with exists.', second_pass_context["forall_replaced_cnt"])
+    logger.info('Expanded %d ite expressions outside of atomic Presburfer formulas.', second_pass_context["ite_expansions_cnt"])
+    logger.info('Expanded %d implications.', second_pass_context["implications_expanded_cnt"])
 
     logger.info('Entering the third preprocessing pass: double negation removal.')
     third_pass_transformations = {
@@ -423,6 +403,6 @@ def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -
         'negation_pairs_removed_cnt': 0,
     }
     transform_ast(ast, third_pass_context, third_pass_transformations)
-    logger.info(f'Removed {third_pass_context["negation_pairs_removed_cnt"]} negation pairs.')
+    logger.info('Removed %d negation pairs.', third_pass_context["negation_pairs_removed_cnt"])
 
     return ast
