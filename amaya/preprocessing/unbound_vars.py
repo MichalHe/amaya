@@ -53,12 +53,18 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
         # @FIXME: This is wrong - we should reflect the variable coefficient when we are determining whether it has
         #         a bound
         if relation.operation in ('<=', '<', '='):
-            for var_name in relation.variable_names:
-                relation_with_bounds_info.bounds[var_name].has_upper_bound = True
+            for var_coef, var_name in zip(relation.variable_coeficients, relation.variable_names):
+                if var_coef > 0:
+                    relation_with_bounds_info.bounds[var_name].has_upper_bound = True
+                elif var_coef < 0:
+                    relation_with_bounds_info.bounds[var_name].has_lower_bound = True
 
         if relation.operation in ('>', '>=', '='):
-            for var_name in relation.variable_names:
-                relation_with_bounds_info.bounds[var_name].has_lower_bound = True
+            for var_coef, var_name in zip(relation.variable_coeficients, relation.variable_names):
+                if var_coef > 0:
+                    relation_with_bounds_info.bounds[var_name].has_lower_bound = True
+                elif var_coef < 0:
+                    relation_with_bounds_info.bounds[var_name].has_upper_bound = True
 
         return relation_with_bounds_info
     elif isinstance(ast, str):
@@ -125,7 +131,6 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
                                                   bounds=subtree_bounds_info.bounds)
 
     raise ValueError(f'[Variable bounds analysis] Cannot descend into AST - unknown node: {node_type=}, {ast=}')
-
 
 
 def will_relation_be_always_satisfied_due_to_unbound_var(relation: Relation,

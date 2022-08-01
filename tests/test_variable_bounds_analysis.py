@@ -1,4 +1,7 @@
-from amaya.relations_structures import Relation
+from amaya.relations_structures import (
+    ModuloTerm,
+    Relation,
+)
 from amaya.preprocessing.unbound_vars import (
     AST_Leaf_Node_With_Bounds_Info,
     AST_Internal_Node_With_Bounds_Info,
@@ -96,3 +99,39 @@ def test_variable_bounds_analysis_deeper_ast():
     assert not actual_result.bounds['x'].has_upper_bound
     assert actual_result.bounds['y'].has_lower_bound
     assert not actual_result.bounds['y'].has_upper_bound
+
+
+def test_variable_bounds_analysis_ultimate_automizer_fragment():
+    modulo_term = ModuloTerm(variables=('u',), variable_coeficients=(1,), constant=0, modulo=299993)
+    # Variable information: Free variables={'w'}, Bound vars={'u', 'v'}
+    ast = ['exists', [['u', 'Int'], ['v', 'Int']],
+           ['and',
+             # (<= 23 w)
+             Relation.new_lin_relation(variable_names=['w'], variable_coeficients=[-1],
+                                       absolute_part=23, operation='<='),
+             # (<= (mod u 299993) (+ v 300007))
+             Relation(variable_names=['v'], variable_coeficients=[-1],
+                      modulo_terms=[modulo_term], modulo_term_coeficients=[1],
+                      div_terms=[], div_term_coeficients=[],
+                      absolute_part=300007, operation='<='),
+             # (<= 0 u)
+             Relation.new_lin_relation(variable_names=['u'], variable_coeficients=[-1],
+                                       absolute_part=0, operation='<='),
+	     # (<= (+ (* 5 w) 517989) u))))
+             Relation.new_lin_relation(variable_names=['w', 'u'], variable_coeficients=[5, -1],
+                                       absolute_part=-517989, operation='<='),
+           ]
+    ]
+
+    ast_with_bounds_info = perform_variable_bounds_analysis_on_ast(ast)
+
+    assert isinstance(ast_with_bounds_info, AST_Quantifier_Node_With_Bounds_Info)
+
+    assert ast_with_bounds_info.bounds['w'].has_lower_bound
+    assert ast_with_bounds_info.bounds['w'].has_upper_bound
+
+    assert ast_with_bounds_info.bounds['u'].has_lower_bound
+    assert not ast_with_bounds_info.bounds['u'].has_upper_bound
+
+    assert ast_with_bounds_info.bounds['v'].has_lower_bound
+    assert not ast_with_bounds_info.bounds['v'].has_upper_bound
