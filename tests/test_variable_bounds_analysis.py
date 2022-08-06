@@ -72,9 +72,9 @@ def test_variable_bounds_analysis_with_or():
     assert actual_result.node_type == 'or'
     assert len(actual_result.children) == 2
 
-    assert not actual_result.bounds['x'].has_upper_bound
-    assert not actual_result.bounds['x'].has_lower_bound
-    assert not actual_result.bounds['y'].has_lower_bound
+    assert actual_result.bounds['x'].has_upper_bound
+    assert actual_result.bounds['x'].has_lower_bound
+    assert actual_result.bounds['y'].has_lower_bound
     assert not actual_result.bounds['y'].has_upper_bound
 
 
@@ -96,7 +96,7 @@ def test_variable_bounds_analysis_deeper_ast():
     assert len(actual_result.children) == 1
 
     assert actual_result.bounds['x'].has_lower_bound
-    assert not actual_result.bounds['x'].has_upper_bound
+    assert actual_result.bounds['x'].has_upper_bound
     assert actual_result.bounds['y'].has_lower_bound
     assert not actual_result.bounds['y'].has_upper_bound
 

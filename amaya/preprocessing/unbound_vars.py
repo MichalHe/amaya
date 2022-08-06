@@ -88,39 +88,13 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
 
         internal_node_with_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type,
                                                                             children=subtrees_with_bounds)
-        if node_type == 'and':
-            for subtree_with_bounds in subtrees_with_bounds:
-                for var_name, bounds_info in subtree_with_bounds.bounds.items():
-                    internal_node_with_bounds_info.bounds[var_name].has_lower_bound |= bounds_info.has_lower_bound
-                    internal_node_with_bounds_info.bounds[var_name].has_upper_bound |= bounds_info.has_upper_bound
-        else:
-            # FIXME: This is wrong - this would mean that we will be making local modifications in predicates (leaves)
-            #        based on information we got from other branch of the 'or' node. However, the in the modified
-            #        predicates the variable might have both bounds (e.g. it is a part of an 'and'). We should
-            #        propagate bounds information same way as with 'and'. It will be a less detailed information, but
-            #        we will deal with that later.
-            #
-            # We collect bounds information so we can simplify existential quantification. Therefore, we need certainty
-            # that the variables is unbound, thus we consider the variable as having an upper bound only when it has
-            # a bound in both branches of disjunction.
-            all_vars_in_subtrees = functools.reduce(
-                set.union, (set(subtree_bounds_info.bounds.keys()) for subtree_bounds_info in subtrees_with_bounds)
-            )
-            vars_unbound_in_some_branch: Set[str] = set()
-
-            for subtree_with_bounds in subtrees_with_bounds:
-                for var_name, bounds_info in subtree_with_bounds.bounds.items():
-                    if var_name not in internal_node_with_bounds_info.bounds:
-                        internal_node_with_bounds_info.bounds[var_name] = Variable_Bounds_Info(has_lower_bound=True,
-                                                                                               has_upper_bound=True)
-                    internal_node_with_bounds_info.bounds[var_name].has_lower_bound &= bounds_info.has_lower_bound
-                    internal_node_with_bounds_info.bounds[var_name].has_upper_bound &= bounds_info.has_upper_bound
-
-                vars_unbound_in_some_branch |= all_vars_in_subtrees.difference(subtree_with_bounds.bounds.keys())
-
-            for var_unbound_in_some_branch in vars_unbound_in_some_branch:
-                internal_node_with_bounds_info.bounds[var_unbound_in_some_branch].has_upper_bound = False
-                internal_node_with_bounds_info.bounds[var_unbound_in_some_branch].has_lower_bound = False
+        # NOTE(OR-nodes): We collect bounds information so we can simplify existential quantification. Therefore,
+        # we need certainty that a variable is unbound in all branches of the OR-node. Otherwise we would simplify
+        # relations in an OR-node branch based on information coming from another branch, which is obviously wrong.
+        for subtree_with_bounds in subtrees_with_bounds:
+            for var_name, bounds_info in subtree_with_bounds.bounds.items():
+                internal_node_with_bounds_info.bounds[var_name].has_lower_bound |= bounds_info.has_lower_bound
+                internal_node_with_bounds_info.bounds[var_name].has_upper_bound |= bounds_info.has_upper_bound
 
         return internal_node_with_bounds_info
 
