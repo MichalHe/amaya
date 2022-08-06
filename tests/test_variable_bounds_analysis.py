@@ -101,6 +101,27 @@ def test_variable_bounds_analysis_deeper_ast():
     assert not actual_result.bounds['y'].has_upper_bound
 
 
+def test_variable_bounds_analysis_constrained_mod_terms():
+    
+    mod_term = ModuloTerm(variables=('x',), variable_coeficients=(1,), constant=0, modulo=13)
+
+    left_relation = Relation(variable_names=[], variable_coeficients=[],
+                             div_terms=[], div_term_coeficients=[],
+                             modulo_terms=[mod_term], modulo_term_coeficients=[-1],
+                             operation='>', absolute_part=-8)
+    right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
+                                                      operation='>=', absolute_part=-10)
+
+    ast = ['and', left_relation, right_relation]
+
+    result = perform_variable_bounds_analysis_on_ast(ast)
+
+    assert len(result.mod_term_bounds) == 1
+    assert mod_term in result.mod_term_bounds
+    assert result.mod_term_bounds[mod_term].lower_bound == 0
+    assert result.mod_term_bounds[mod_term].upper_bound == 7
+
+
 def test_variable_bounds_analysis_ultimate_automizer_fragment():
     modulo_term = ModuloTerm(variables=('u',), variable_coeficients=(1,), constant=0, modulo=299993)
     # Variable information: Free variables={'w'}, Bound vars={'u', 'v'}

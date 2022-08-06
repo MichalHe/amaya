@@ -16,16 +16,23 @@ from amaya.relations_structures import Relation
 
 
 @dataclass
-class Variable_Bounds_Info:
+class Bounds_Info:
     has_upper_bound: bool = False
     has_lower_bound: bool = False
+
+
+@dataclass
+class Mod_Term_Bounds:
+    lower_bound: int
+    upper_bound: int
 
 
 @dataclass
 class AST_Internal_Node_With_Bounds_Info:
     node_type: str
     children: AST_Node_With_Bounds_Info
-    bounds: Dict[str, Variable_Bounds_Info] = field(default_factory=lambda: defaultdict(Variable_Bounds_Info))
+    bounds: Dict[str, Bounds_Info] = field(default_factory=lambda: defaultdict(Bounds_Info))
+    mod_term_bounds: Dict[ModuloTerm, Mod_Term_Bounds] = field(default_factory=dict)
 
 
 @dataclass
@@ -33,25 +40,61 @@ class AST_Quantifier_Node_With_Bounds_Info:
     node_type: str
     children: AST_Node_With_Bounds_Info
     bindings: List[Tuple[str, str]]
-    bounds: Dict[str, Variable_Bounds_Info] = field(default_factory=lambda: defaultdict(Variable_Bounds_Info))
+    bounds: Dict[str, Bounds_Info] = field(default_factory=lambda: defaultdict(Bounds_Info))
+    mod_term_bounds: Dict[ModuloTerm, Mod_Term_Bounds] = field(default_factory=dict)
 
 
 @dataclass
 class AST_Leaf_Node_With_Bounds_Info:
     contents: Union[Relation, str]
-    bounds: Dict[str, Variable_Bounds_Info] = field(default_factory=lambda: defaultdict(Variable_Bounds_Info))
+    bounds: Dict[str, Bounds_Info] = field(default_factory=lambda: defaultdict(Bounds_Info))
+    mod_term_bounds: Dict[ModuloTerm, Mod_Term_Bounds] = field(default_factory=dict)
 
 
 AST_Node_With_Bounds_Info = Union[AST_Leaf_Node_With_Bounds_Info, AST_Quantifier_Node_With_Bounds_Info, AST_Internal_Node_With_Bounds_Info]
 
 
+def extract_bounds_set_on_mod_terms(relation: Relation, ast_node_with_bounds_info: AST_Node_With_Bounds_Info) -> bool:
+    # Detect restrictions put forth on the values of the modulo terms, e.g., `(x mod 10) >= 1` so if x does not have 
+    # an upper bound, we will replace the term with correct value and not, e.g., 0.
+    if len(relation.modulo_terms) == 1 and not relation.div_terms and not relation.variable_names:
+        mod_term = relation.modulo_terms[0]
+        mod_term_coef = relation.modulo_term_coeficients[0]
+        if mod_term_coef == 0:
+            return True  # Propagate, that the relation had the form this function looks for
+        if relation.operation == '=': 
+            mod_term_bounds = Mod_Term_Bounds(lower_bound=max(0, relation.absolute_part),
+                                              upper_bound=min(mod_term.modulo - 1, relation.absolute_part))
+        else: 
+            relation_rhs_constant = relation.absolute_part
+
+            # Change the relation predicate symbol to be only < or <=
+            if relation.operation in ('>', '<='):
+                mod_term_coef *= -1
+                relation_rhs_constant *= -1
+
+            # Change the relation predicate symbol to be only <=
+            if relation.operation in ('<', '>'): 
+                relation_rhs_constant -= 1
+
+            if mod_term_coef > 0:
+                mod_term_bounds = Mod_Term_Bounds(lower_bound=0, upper_bound=relation_rhs_constant)
+            elif mod_term_coef < 0:
+                mod_term_bounds = Mod_Term_Bounds(lower_bound=relation_rhs_constant, upper_bound=mod_term.modulo - 1)
+        ast_node_with_bounds_info.mod_term_bounds[mod_term] = mod_term_bounds
+        return True
+    return False
+    
+
 def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Bounds_Info:
     if isinstance(ast, Relation):
         relation: Relation = ast
         relation_with_bounds_info = AST_Leaf_Node_With_Bounds_Info(contents=relation)
+        
+        if extract_bounds_set_on_mod_terms(relation, relation_with_bounds_info):
+            # The relation has the form (x mod K) <> C, thus we don't have to continue as there are no variables
+            return relation_with_bounds_info
 
-        # @FIXME: This is wrong - we should reflect the variable coefficient when we are determining whether it has
-        #         a bound
         if relation.operation in ('<=', '<', '='):
             for var_coef, var_name in zip(relation.variable_coeficients, relation.variable_names):
                 if var_coef > 0:
@@ -80,7 +123,8 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
         quantifier_node_with_bounds_info = AST_Quantifier_Node_With_Bounds_Info(node_type=node_type,
                                                                                 children=[subtree_bounds_info],
                                                                                 bindings=ast[1],
-                                                                                bounds=subtree_bounds_info.bounds)
+                                                                                bounds=subtree_bounds_info.bounds,
+                                                                                mod_term_bounds=subtree_bounds_info.mod_term_bounds)
         return quantifier_node_with_bounds_info
 
     elif node_type in ('and', 'or'):
@@ -96,19 +140,28 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
                 internal_node_with_bounds_info.bounds[var_name].has_lower_bound |= bounds_info.has_lower_bound
                 internal_node_with_bounds_info.bounds[var_name].has_upper_bound |= bounds_info.has_upper_bound
 
+            for mod_term, mod_term_bounds in subtree_with_bounds.mod_term_bounds.items():
+                if mod_term not in internal_node_with_bounds_info.mod_term_bounds:
+                    internal_node_with_bounds_info.mod_term_bounds[mod_term] = mod_term_bounds
+                else:
+                    propagated_mod_term = internal_node_with_bounds_info.mod_term_bounds[mod_term]
+                    propagated_mod_term.lower_bound = max(propagated_mod_term.lower_bound, mod_term_bounds.lower_bound)
+                    propagated_mod_term.upper_bound = min(propagated_mod_term.upper_bound, mod_term_bounds.upper_bound)
+
         return internal_node_with_bounds_info
 
     elif node_type == 'not':
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[1])
         return AST_Internal_Node_With_Bounds_Info(node_type=node_type,
                                                   children=[subtree_bounds_info],
-                                                  bounds=subtree_bounds_info.bounds)
+                                                  bounds=subtree_bounds_info.bounds,
+                                                  mod_term_bounds=subtree_bounds_info.mod_term_bounds)
 
     raise ValueError(f'[Variable bounds analysis] Cannot descend into AST - unknown node: {node_type=}, {ast=}')
 
 
 def will_relation_be_always_satisfied_due_to_unbound_var(relation: Relation,
-                                                         quantified_vars_with_bounds: Dict[str, Variable_Bounds_Info]
+                                                         quantified_vars_with_bounds: Dict[str, Bounds_Info]
                                                          ) -> bool:
     # We know that the Relation can be always satisfied, and thus reduced to True if:
     # - it has the form of `ax + by ... >= C`, y has no upper bound and b > 0
@@ -135,7 +188,7 @@ def will_relation_be_always_satisfied_due_to_unbound_var(relation: Relation,
 
 
 def simplify_modulo_terms_with_unbound_vars_in_relation(relation: Relation,
-                                                        quantified_vars_with_bounds: Dict[str, Variable_Bounds_Info]
+                                                        quantified_vars_with_bounds: Dict[str, Bounds_Info]
                                                         ) -> Relation:
     simplified_relation = Relation(variable_names=relation.variable_names,
                                    variable_coeficients=relation.variable_coeficients,
@@ -167,7 +220,7 @@ def simplify_modulo_terms_with_unbound_vars_in_relation(relation: Relation,
 
 
 def remove_existential_quantification_of_unbound_vars(ast: AST_Node_With_Bounds_Info,
-                                                      quantified_vars_with_bounds: Dict[str, Variable_Bounds_Info]
+                                                      quantified_vars_with_bounds: Dict[str, Bounds_Info]
                                                       ) -> Union[bool, AST_Node_With_Bounds_Info]:
 
     if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
