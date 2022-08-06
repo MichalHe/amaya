@@ -120,29 +120,35 @@ def generate_atomic_constraints_for_replaced_div_terms(
     return constraints
 
 
-def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode, bool_fn_symbols: Set[str]) -> AST_Node:
-    """
-    Walks the AST and replaces its subtrees encoding relations (atomic formulas) to canoical representation - Relation.
-    Example:
-        (and (= x 0) (<= y 1))  --->  (and Relation(..) Relation(..))
-    """
-    if type(ast) != list:
+def condense_relation_asts_to_relations(ast: AST_NaryNode, bool_fn_symbols: Set[str]) -> AST_Node:
+    """Walks the AST and replaces subtrees representing atoms with Relation instances."""
+    if not isinstance(ast, list):
         return ast
+    
+    node_type = ast[0]
 
-    if ast[0] == '=':
-        if is_ast_bool_equavalence(ast, bool_fn_symbols):
-            return list(map(lambda _ast: reduce_relation_asts_to_evaluable_leaves(_ast, bool_fn_symbols), ast))
+    if node_type in ['<', '>', '<=', '>=', '=']:
+        # The = symbol can stand for either equivalence of two formulae, or Presbuger equality
+        if not (node_type == '=' and is_ast_bool_equavalence(ast, bool_fn_symbols)):
+            relation = relations.extract_relation(ast)
+            relation.ensure_canoical_form_if_equation()
+            return relation
 
-    if ast[0] in ['<', '>', '<=', '>=', '=']:
-        relation = relations.extract_relation(ast)
-        relation.ensure_canoical_form_if_equation()
+    reduced_subtrees = (
+        condense_relation_asts_to_relations(subtree, bool_fn_symbols) for subtree in ast[1:]
+    )
+    return [node_type, *reduced_subtrees]
 
+
+def rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNode):
+    if isinstance(ast, Relation):
+        relation: Relation = ast
         if relation.direct_construction_exists():
             return relation
 
         relation_without_modulos, mod_replacements, div_replacements = relation.replace_nonlinear_terms_with_variables()
 
-        # Guard that we are not expanding something that should have an construction
+        # Make sure we are not expanding something that should have a direct construction
         failure_desc = 'Relation did not have a direct construction, yet there were no modulos inside(?)'
         assert mod_replacements or div_replacements, failure_desc
 
@@ -152,16 +158,27 @@ def reduce_relation_asts_to_evaluable_leaves(ast: AST_NaryNode, bool_fn_symbols:
         resulting_relations += generate_atomic_constraints_for_replaced_mod_terms(mod_replacements)
 
         variable_binding_list = [
-            [var, 'Int'] for var in sorted(map(lambda info: info.variable, chain(div_replacements, mod_replacements)))
+            [var, 'Int'] for var in sorted(info.variable for info in chain(div_replacements, mod_replacements))
         ]
         return ['exists', variable_binding_list, ['and', *resulting_relations]]
-    else:
-        new_subtree: AST_NaryNode = []
-        for subtree in ast:
-            processed_subtree = reduce_relation_asts_to_evaluable_leaves(subtree, bool_fn_symbols)
-            new_subtree.append(processed_subtree)
-        return new_subtree
+    
+    if isinstance(ast, str):
+        return ast
 
+    node_type = ast[0]
+
+    if node_type in ('or', 'and', 'not', '='):
+        rewritten_subtrees = (
+            rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree) for subtree in ast[1:]
+        )
+        return [node_type, *rewritten_subtrees]
+    elif node_type == 'exists':
+        rewritten_subtrees = (
+            rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree) for subtree in ast[2:]
+        )
+        return [node_type, ast[1], *rewritten_subtrees]
+    
+    raise ValueError(f'Unknown node: {node_type=} {ast=}')
 
 def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AST_NaryNode, int]], None, None]:
     """
