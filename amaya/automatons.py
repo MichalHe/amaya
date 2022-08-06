@@ -305,6 +305,7 @@ class NFA(object):
             # Assumes that the variables are kept sorted - does not perform sorting again
             new_used_vars = [var_id for var_id in self.used_variables if var_id != variable_id]
             new_nfa.used_variables = new_used_vars
+            new_nfa.state_labels = self.state_labels
             return new_nfa
 
     def perform_pad_closure(self):
