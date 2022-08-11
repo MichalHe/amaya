@@ -127,7 +127,7 @@ def condense_relation_asts_to_relations(ast: AST_NaryNode, bool_fn_symbols: Set[
     """Walks the AST and replaces subtrees representing atoms with Relation instances."""
     if not isinstance(ast, list):
         return ast
-    
+
     node_type = ast[0]
 
     if node_type in ['<', '>', '<=', '>=', '=']:
@@ -164,7 +164,7 @@ def rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNod
             [var, 'Int'] for var in sorted(info.variable for info in chain(div_replacements, mod_replacements))
         ]
         return ['exists', variable_binding_list, ['and', *resulting_relations]]
-    
+
     if isinstance(ast, str):
         return ast
 
@@ -180,8 +180,9 @@ def rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNod
             rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree) for subtree in ast[2:]
         )
         return [node_type, ast[1], *rewritten_subtrees]
-    
+
     raise ValueError(f'Unknown node: {node_type=} {ast=}')
+
 
 def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AST_NaryNode, int]], None, None]:
     """
@@ -382,9 +383,20 @@ class VarDisambiguationInfo:
 def _disambiguate_variables_rec(ast: AST_Node,
                                 variable_rename_map: Dict[str, VarDisambiguationInfo]) -> AST_Node:
     if isinstance(ast, str):
-        var_disambiguation_info = variable_rename_map[ast]
-        return var_disambiguation_info.new_name  
+        if ast in variable_rename_map:
+            return variable_rename_map[ast].new_name
+        return ast
     elif isinstance(ast, int):
+        return ast
+    elif isinstance(ast, Relation):
+        # This branch is kept for robustness of this functionality, it might not be hit - depends on the amount of
+        # preprocessing work already done.
+        relation: Relation = ast
+        relation.variable_names = list(variable_rename_map[var_name] for var_name in relation.variable_names)
+        for mod_term in relation.modulo_terms:
+            mod_term.variables = tuple(variable_rename_map[var_name] for var_name in mod_term.variables)
+        for div_term in relation.div_terms:
+            div_term.variables = tuple(variable_rename_map[var_name] for var_name in div_term.variables)
         return ast
 
     assert isinstance(ast, list)
@@ -392,7 +404,7 @@ def _disambiguate_variables_rec(ast: AST_Node,
 
     if node_type in ('exists', 'forall'):
         new_variables = tuple(var_name for var_name, dummy_var_type in ast[1])
-        
+
         # Update variable_rename_map so that the variables can be renamed further down the AST
         disambiguated_quantifier_binding_list = []
         for i, var_name in enumerate(new_variables):
@@ -411,7 +423,7 @@ def _disambiguate_variables_rec(ast: AST_Node,
                 disambiguated_quantifier_binding_list.append([var_name, var_type])
 
         disambiguated_subast = _disambiguate_variables_rec(ast[2], variable_rename_map)
-        
+
         # Restore the names to which should the conflicting variables in the surrounding scope be renamed, however,
         # keep the new conflict count, in order to be able to generate unique variable names when new conflict is seen.
         for var_name, old_disambiguation_info in conflicting_disambiguation_entries.items():
@@ -419,14 +431,14 @@ def _disambiguate_variables_rec(ast: AST_Node,
             variable_rename_map[var_name] = VarDisambiguationInfo(new_name=old_disambiguation_info.new_name, conflict_count=new_conflict_count)
         return [node_type, disambiguated_quantifier_binding_list, disambiguated_subast]
 
-    elif node_type in ('and', 'or', 'not', '<=', '<', '>', '>=', '=', '+', '-', 'mod', 'div', 'g'):
+    elif node_type in ('and', 'or', 'not', '<=', '<', '>', '>=', '=', '+', '-', 'mod', 'div', '*'):
         disambiguated_subasts = (_disambiguate_variables_rec(subtree, variable_rename_map) for subtree in ast[1:])
         return [node_type, *disambiguated_subasts]
-    
-    raise NotImplementedError(f'[Variable name disambiguation] Unhandled {node_type=} while traversing ast.')
-        
 
-def disambiguate_variables(ast: AST_Node, constant_function_symbols: Iterable[FunctionSymbol]) -> AST_Node: 
+    raise NotImplementedError(f'[Variable name disambiguation] Unhandled {node_type=} while traversing ast.')
+
+
+def disambiguate_variables(ast: AST_Node, constant_function_symbols: Iterable[FunctionSymbol]) -> AST_Node:
     """Modifies the AST so that all variables have unique names."""
     variable_rename_map = {
         fn_symbol.name: VarDisambiguationInfo(new_name=fn_symbol.name, conflict_count=0) for fn_symbol in constant_function_symbols
@@ -434,7 +446,9 @@ def disambiguate_variables(ast: AST_Node, constant_function_symbols: Iterable[Fu
     return _disambiguate_variables_rec(ast, variable_rename_map)
 
 
-def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -> AST_Node:
+def preprocess_ast(ast: AST_Node,
+                   constant_function_symbols: Iterable[FunctionSymbol],
+                   solver_config: SolverConfig = solver_config) -> AST_Node:
     """
     Peforms preprocessing on the given AST. The following proprocessing operations are performed:
         - universal quantifiers are replaced with existential quantifiers,
@@ -485,5 +499,8 @@ def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -
     }
     transform_ast(ast, third_pass_context, third_pass_transformations)
     logger.info('Removed %d negation pairs.', third_pass_context["negation_pairs_removed_cnt"])
+    
+    if solver_config.preprocessing.disambiguate_variables:
+        ast = disambiguate_variables(ast, constant_function_symbols)
 
     return ast

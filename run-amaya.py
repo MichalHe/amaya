@@ -110,7 +110,7 @@ argparser.add_argument('-p',
                        action='append',
                        dest='preprocessing_switches',
                        default=[],
-                       choices=['prenexing', 'antiprenexing'],
+                       choices=['prenexing', 'antiprenexing', 'no-var-disambiguation'],
                        help='Controls preprocessing transformations applied on input the formula.')
 
 subparsers = argparser.add_subparsers(help='Runner operation')
@@ -241,6 +241,8 @@ if 'prenexing' in args.preprocessing_switches:
     solver_config.preprocessing.perform_prenexing = True
 if 'antiprenexing' in args.preprocessing_switches:
     solver_config.preprocessing.perform_antiprenexing = True
+if 'no-var-disambiguation' in args.preprocessing_switches:
+    solver_config.preprocessing.disambiguate_variables = False
 
 if solver_config.preprocessing.perform_antiprenexing and solver_config.preprocessing.perform_prenexing:
     print('Configuration error: Cannot apply prenexing and antiprenexing simultaneously.', file=sys.stderr)

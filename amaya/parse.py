@@ -526,7 +526,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             formula_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
 
             # @Note: Preprocessing will modify the given list
-            formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate)
+            formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate, constant_function_symbols=function_symbols)
 
             bool_symbols = {
                 var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL
