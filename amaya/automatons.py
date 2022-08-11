@@ -472,7 +472,10 @@ class NFA(object):
         # - so we use iter() and reconstruct the information.
         _transitions = defaultdict(list)
         for origin_state, symbol, destination_state in self.transition_fn.iter():
-            symbol = tuple(b for i, b in enumerate(symbol) if (i+1) in self.used_variables)
+            if solver_config.vis_display_only_free_vars:
+                symbol = tuple(b for i, b in enumerate(symbol) if (i+1) in self.used_variables)
+            else:
+                symbol = tuple(symbol)
             _transitions[(origin_state, destination_state)].append(symbol)
 
         transitions = []
