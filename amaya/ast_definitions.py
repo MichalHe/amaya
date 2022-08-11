@@ -1,5 +1,12 @@
+from __future__ import annotations
 from dataclasses import dataclass
-from typing import Union, List, Callable, Dict
+from enum import IntEnum
+from typing import (
+    Callable,
+    Dict,
+    List,
+    Union,
+)
 
 from amaya.ast_relations import Relation
 
@@ -17,3 +24,24 @@ class NodeEncounteredHandlerStatus:
 
 
 NodeEncounteredHandler = Callable[[AST_NaryNode, bool, Dict], NodeEncounteredHandlerStatus]
+
+class VariableType(IntEnum):
+    INT = 1
+    BOOL = 2
+    UNSET = 3
+
+    @staticmethod
+    def from_smt_type_string(type_str: str) -> VariableType:
+        m = {
+            'Bool': VariableType.BOOL,
+            'Int': VariableType.INT,
+        }
+        return m[type_str]
+
+
+@dataclass
+class FunctionSymbol:
+    name: str
+    arity: int
+    args: List[Tuple[str, VariableType]]
+    return_type: VariableType

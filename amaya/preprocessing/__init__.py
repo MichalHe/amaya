@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 from itertools import chain
 from typing import (
     Dict,
     Generator,
+    Iterable,
     List,
     Optional,
     Set,
@@ -13,6 +15,7 @@ from amaya.ast_definitions import (
     AST_Leaf,
     AST_NaryNode,
     AST_Node,
+    FunctionSymbol,
     NodeEncounteredHandler,
     NodeEncounteredHandlerStatus,
 )
@@ -368,6 +371,67 @@ def replace_forall_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
     ctx['forall_replaced_cnt'] += 1
 
     return NodeEncounteredHandlerStatus(True, False)
+
+
+@dataclass
+class VarDisambiguationInfo:
+    new_name: str
+    conflict_count: int
+
+
+def _disambiguate_variables_rec(ast: AST_Node,
+                                variable_rename_map: Dict[str, VarDisambiguationInfo]) -> AST_Node:
+    if isinstance(ast, str):
+        var_disambiguation_info = variable_rename_map[ast]
+        return var_disambiguation_info.new_name  
+    elif isinstance(ast, int):
+        return ast
+
+    assert isinstance(ast, list)
+    node_type = ast[0]
+
+    if node_type in ('exists', 'forall'):
+        new_variables = tuple(var_name for var_name, dummy_var_type in ast[1])
+        
+        # Update variable_rename_map so that the variables can be renamed further down the AST
+        disambiguated_quantifier_binding_list = []
+        for i, var_name in enumerate(new_variables):
+            var_type: str = ast[1][i][1]
+            conflicting_disambiguation_entries: Dict[str, VarDisambiguationInfo] = {}
+            if var_name in variable_rename_map:
+                old_disambiguation_info = variable_rename_map[var_name]
+                conflicting_disambiguation_entries[var_name] = old_disambiguation_info
+                new_var_name = f'{var_name}#{old_disambiguation_info.conflict_count + 1}'
+                new_disambiguation_info = VarDisambiguationInfo(new_name=new_var_name, conflict_count=old_disambiguation_info.conflict_count + 1)
+                variable_rename_map[var_name] = new_disambiguation_info
+                disambiguated_quantifier_binding_list.append([new_var_name, var_type])
+            else:
+                new_disambiguation_info = VarDisambiguationInfo(new_name=f'{var_name}', conflict_count=0)
+                variable_rename_map[var_name] = new_disambiguation_info
+                disambiguated_quantifier_binding_list.append([var_name, var_type])
+
+        disambiguated_subast = _disambiguate_variables_rec(ast[2], variable_rename_map)
+        
+        # Restore the names to which should the conflicting variables in the surrounding scope be renamed, however,
+        # keep the new conflict count, in order to be able to generate unique variable names when new conflict is seen.
+        for var_name, old_disambiguation_info in conflicting_disambiguation_entries.items():
+            new_conflict_count = variable_rename_map[var_name].conflict_count
+            variable_rename_map[var_name] = VarDisambiguationInfo(new_name=old_disambiguation_info.new_name, conflict_count=new_conflict_count)
+        return [node_type, disambiguated_quantifier_binding_list, disambiguated_subast]
+
+    elif node_type in ('and', 'or', 'not', '<=', '<', '>', '>=', '=', '+', '-', 'mod', 'div', 'g'):
+        disambiguated_subasts = (_disambiguate_variables_rec(subtree, variable_rename_map) for subtree in ast[1:])
+        return [node_type, *disambiguated_subasts]
+    
+    raise NotImplementedError(f'[Variable name disambiguation] Unhandled {node_type=} while traversing ast.')
+        
+
+def disambiguate_variables(ast: AST_Node, constant_function_symbols: Iterable[FunctionSymbol]) -> AST_Node: 
+    """Modifies the AST so that all variables have unique names."""
+    variable_rename_map = {
+        fn_symbol.name: VarDisambiguationInfo(new_name=fn_symbol.name, conflict_count=0) for fn_symbol in constant_function_symbols
+    }
+    return _disambiguate_variables_rec(ast, variable_rename_map)
 
 
 def preprocess_ast(ast: AST_Node, solver_config: SolverConfig = solver_config) -> AST_Node:

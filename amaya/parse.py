@@ -15,6 +15,13 @@ from typing import (
     Sequence,
 )
 
+from amaya.ast_definitions import (
+    AST_NaryNode,
+    AST_Node,
+    FunctionSymbol,
+    NodeEncounteredHandlerStatus,
+    VariableType,
+)
 from amaya.ast_relations import (
     ModuloTerm,
     Relation,
@@ -40,11 +47,6 @@ from amaya.preprocessing import (
     antiprenexing,
     prenexing
 )
-from amaya.ast_definitions import (
-    AST_NaryNode,
-    AST_Node,
-    NodeEncounteredHandlerStatus,
-)
 from amaya import utils
 
 PRETTY_PRINT_INDENT = ' ' * 2
@@ -69,20 +71,6 @@ class ParsingOperation(Enum):
     MINIMIZE = 'minimization'
 
 
-class VariableType(IntEnum):
-    INT = 1
-    BOOL = 2
-    UNSET = 3
-
-    @staticmethod
-    def from_smt_type_string(type_str: str) -> VariableType:
-        m = {
-            'Bool': VariableType.BOOL,
-            'Int': VariableType.INT,
-        }
-        return m[type_str]
-
-
 @dataclass
 class EvaluationStat():
     operation: ParsingOperation
@@ -90,14 +78,6 @@ class EvaluationStat():
     input2_size: Optional[int]
     output_size: Optional[int]
     runtime_ns: int
-
-
-@dataclass
-class FunctionSymbol:
-    name: str
-    arity: int
-    args: List[Tuple[str, VariableType]]
-    return_type: VariableType
 
 
 IntrospectHandle = Callable[[NFA, ParsingOperation], None]
