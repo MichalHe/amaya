@@ -25,27 +25,8 @@ alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
 
 @pytest.fixture()
 def nfa_for_inequality(automaton_cls: AutomatonConstructor) -> NFA:
-    ineq = Relation(
-        variable_names=['x', 'y'],
-        variable_coeficients=[2, -1],
-        absolute_part=2,
-        modulo_term_coeficients=[],
-        modulo_terms=[],
-        operation='<='
-    )
-
+    ineq = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[2, -1], absolute_part=2, operation='<=')
     return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, automaton_cls)
-
-
-def translate_transitions(transitions, translate):  # translate is function
-    translated = []
-    for transition in transitions:
-        source, symbol, dest = transition
-        source_translated = tuple(sorted(map(translate, source)))
-        dest_translated = tuple(sorted(map(translate, dest)))
-
-        translated.append((source_translated, symbol, dest_translated))
-    return translated
 
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
