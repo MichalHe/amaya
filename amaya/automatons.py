@@ -591,10 +591,10 @@ class NFA(object):
                 state_to_its_partition_map[state] = partition
 
         initial_state = next(iter(self.initial_states))  # There is only 1 initial state
-        partition_with_initial_state = state_to_its_partition_map[initial_state]
-        partitions_to_explore = {partition_with_initial_state}
+        partition_containing_initial_state = state_to_its_partition_map[initial_state]
+        partitions_to_explore = {partition_containing_initial_state}
 
-        partition_to_its_label_map: Dict[Tuple[int, ...], int] = {partition_with_initial_state: 0}
+        partition_to_state_number_map: Dict[Tuple[int, ...], int] = {partition_containing_initial_state: 0}
 
         # Partition with the initial state has number 0
         minimized_dfa.states.add(0)
@@ -606,10 +606,10 @@ class NFA(object):
         while partitions_to_explore:
             partition = next(iter(partitions_to_explore))
             partitions_to_explore.remove(partition)
-            partition_label = partition_to_its_label_map[partition]
+            partition_state_number = partition_to_state_number_map[partition]
 
-            minimized_dfa.states.add(partition_label)
-            explored_partition_labels.add(partition_label)
+            minimized_dfa.states.add(partition_state_number)
+            explored_partition_labels.add(partition_state_number)
 
             # All the states in the partition are considered equivalent, therefore it is sufficient to use only one
             # to discovered transitions to other partitions
@@ -619,22 +619,25 @@ class NFA(object):
                 dest_partition = state_to_its_partition_map[dest_state]
 
                 # The destination partition might not be explored yet, so it might not have a state number assigned
-                if dest_partition in partition_to_its_label_map:
-                    dest_partition_label = partition_to_its_label_map[dest_partition]
+                if dest_partition in partition_to_state_number_map:
+                    dest_partition_state_number = partition_to_state_number_map[dest_partition]
                 else:
-                    dest_partition_label = next_avaiable_partition_number
-                    partition_to_its_label_map[dest_partition] = next_avaiable_partition_number
+                    dest_partition_state_number = next_avaiable_partition_number
+                    partition_to_state_number_map[dest_partition] = next_avaiable_partition_number
                     next_avaiable_partition_number += 1;
 
-                minimized_dfa.update_transition_fn(partition_label, symbol, dest_partition_label)
+                minimized_dfa.update_transition_fn(partition_state_number, symbol, dest_partition_state_number)
 
-                if dest_partition_label not in explored_partition_labels:
+                if dest_partition_state_number not in explored_partition_labels:
                     partitions_to_explore.add(dest_partition)
 
             # Again, states in a partitions are equivalent, therefore there cannot be an accepting and a non-accepting
             # state in the same partition (all are either accepting or non-accepting)
             if some_partiton_state in self.final_states:
-                minimized_dfa.add_final_state(partition_label)
+                minimized_dfa.add_final_state(partition_state_number)
+
+        # @Optimize: Make the propagation of state labels for debugging/visualization purposes optional
+        minimized_dfa.state_labels = {state_number: set(partition) for partition, state_number in partition_to_state_number_map.items()}
 
         return minimized_dfa
 
