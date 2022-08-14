@@ -200,28 +200,28 @@ class NFA(object):
         work_list: List[Tuple[int, ...]] = [tuple(sorted(self.initial_states))]
 
         determinized_automaton: DFA = DFA(alphabet=self.alphabet, automaton_type=AutomatonType.DFA)
-        label_to_state_number: Dict[Tuple[int, ...], int] = {work_list[0]: 0}
+        macrostate_to_id_map: Dict[Tuple[int, ...], int] = {work_list[0]: 0}
         determinized_automaton.add_initial_state(0)  # As there is only one initial state we know its label
 
         projected_alphabet_symbols = list(self.alphabet.gen_projection_symbols_onto_variables(self.used_variables))
 
         while work_list:
-            current_metastate_label: Tuple[int, ...] = work_list.pop(-1)
-            current_metastate = label_to_state_number[current_metastate_label]
+            current_macrostate: Tuple[int, ...] = work_list.pop(-1)
+            current_macrostate_id = macrostate_to_id_map[current_macrostate]
 
-            logger.debug('Determinization for %s, remaining in work queue: %s', current_metastate, len(work_list))
+            logger.debug('Determinization for %s, remaining in work queue: %s', current_macrostate_id, len(work_list))
 
-            determinized_automaton.add_state(current_metastate)
+            determinized_automaton.add_state(current_macrostate_id)
 
-            if not self.final_states.isdisjoint(current_metastate_label):
-                determinized_automaton.add_final_state(current_metastate)
+            if not self.final_states.isdisjoint(current_macrostate):
+                determinized_automaton.add_final_state(current_macrostate_id)
 
             for symbol in projected_alphabet_symbols:
                 reachable_states: List[int] = []
 
                 cylindrified_symbol = self.alphabet.cylindrify_symbol_of_projected_alphabet(self.used_variables,
                                                                                             symbol)
-                for state in current_metastate_label:
+                for state in current_macrostate:
                     # Get all states reacheble from current state via symbol
                     out_states = self.get_transition_target(state, cylindrified_symbol)
                     reachable_states.extend(out_states)
@@ -229,23 +229,23 @@ class NFA(object):
                 if not reachable_states:
                     continue
 
-                next_metastate_label: Tuple[int, ...] = tuple(sorted(set(reachable_states)))
+                next_macrostate_label: Tuple[int, ...] = tuple(sorted(set(reachable_states)))
 
-                if next_metastate_label in label_to_state_number:
-                    next_metastate_num = label_to_state_number[next_metastate_label]
+                if next_macrostate_label in macrostate_to_id_map:
+                    next_macrostate_num = macrostate_to_id_map[next_macrostate_label]
                 else:
-                    next_metastate_num = len(label_to_state_number)
-                    label_to_state_number[next_metastate_label] = next_metastate_num
+                    next_macrostate_num = len(macrostate_to_id_map)
+                    macrostate_to_id_map[next_macrostate_label] = next_macrostate_num
 
-                if not determinized_automaton.has_state_with_value(next_metastate_num):
-                    if next_metastate_label not in work_list:
-                        work_list.append(next_metastate_label)
+                if not determinized_automaton.has_state_with_value(next_macrostate_num):
+                    if next_macrostate_label not in work_list:
+                        work_list.append(next_macrostate_label)
 
-                determinized_automaton.update_transition_fn(current_metastate, cylindrified_symbol, next_metastate_num)
+                determinized_automaton.update_transition_fn(current_macrostate_id, cylindrified_symbol, next_macrostate_num)
 
         determinized_automaton.used_variables = sorted(self.used_variables)
 
-        for label, state in label_to_state_number.items():
+        for label, state in macrostate_to_id_map.items():
             rich_label = tuple(self.state_labels.get(component, component) for component in label)
             determinized_automaton.state_labels[state] = rich_label
 
