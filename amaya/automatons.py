@@ -5,7 +5,7 @@ from dataclasses import (
     field
 )
 import functools
-from enum import IntFlag
+from enum import IntFlag, IntEnum
 from typing import (
     Any,
     Callable,
@@ -14,6 +14,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Union,
 )
 
 from amaya import logger
@@ -32,7 +33,13 @@ from amaya.transitions import (
 from amaya.utils import (
     carthesian_product,
 )
-from amaya.visualization import AutomatonVisRepresentation
+from amaya.visualization import (
+    AutomatonVisRepresentation,
+    StateLabelIntersectionNode,
+    StateLabelTreeNode,
+    StateLabelUnaryNode,
+    StateLabelUnionNode,
+)
 
 
 class AutomatonType(IntFlag):
@@ -43,14 +50,14 @@ class AutomatonType(IntFlag):
 
 
 @dataclass
-class NFA(object):
+class NFA:
     alphabet:       LSBF_Alphabet
     automaton_type: AutomatonType = AutomatonType.NFA
     transition_fn:  SparseSimpleTransitionFunction = field(default_factory=SparseSimpleTransitionFunction)
     initial_states: Set[int] = field(default_factory=set)
     final_states:   Set[int] = field(default_factory=set)
     states:         Set[int] = field(default_factory=set)
-    state_labels:   Dict[int, Any] = field(default_factory=dict)
+    state_labels:   Optional[StateLabelTreeNode] = None
     extra_info:     Dict[Any, Any] = field(default_factory=dict)
 
     # Debug handle to listen to any state renaming happening during
@@ -153,32 +160,62 @@ class NFA(object):
             states_processed_cnt += 1
 
         resulting_nfa.used_variables = used_variable_ids
-        for label, state in labels_to_state_number.items():
-            self_state, other_state = label
-            self_state_label = self.state_labels.get(self_state, self_state)
-            other_state_label = other.state_labels.get(other_state, other_state)
-            resulting_nfa.state_labels[state] = (self_state_label, other_state_label)
 
         if remove_nonfinishing_states:
             resulting_nfa.remove_nonfinishing_states()
 
+        state_id_to_label = {state_id: label for label, state_id in labels_to_state_number.items()}
+        state_id_to_flattened_label = {}
+        flattened_children = [self.state_labels, other.state_labels]
+        for state_id, product_state in state_id_to_label.items():
+            if state_id not in resulting_nfa.states:
+                continue  # The state was removed as being nonfinishing
+
+            self_component, other_component = product_state
+            self_component_label = self.state_labels.labels.get(self_component, self_component) if self.state_labels else self_component
+            other_component_label = other.state_labels.labels.get(other_component, other_component) if other.state_labels else other_component
+
+            # Flatten the product states in a case when there are multiple intersections happening
+            if isinstance(self.state_labels, StateLabelIntersectionNode) and isinstance(other.state_labels, StateLabelIntersectionNode):
+                flattened_label = (*self_component_label, *other_component_label)
+                flattened_children = [*self.state_labels.children, *other.state_labels.children]
+            elif isinstance(self.state_labels, StateLabelIntersectionNode):
+                flattened_label = (*self_component_label, other_component_label)
+                flattened_children = [*self.state_labels.children, other.state_labels]
+            elif isinstance(other.state_labels, StateLabelIntersectionNode):
+                flattened_label = (self_component_label, *other_component_label)
+                flattened_children = [self.state_labels, *other.state_labels.children]
+            else:
+                flattened_label = (self_component_label, other_component_label)
+
+            state_id_to_flattened_label[state_id] = flattened_label
+
+        resulting_nfa.state_labels = StateLabelIntersectionNode(labels=state_id_to_flattened_label, children=flattened_children)
+
         assert resulting_nfa.used_variables
-        logger.info('Intersection done. States processed: %d. Result has %d states.',
-                    states_processed_cnt,
-                    len(resulting_nfa.states))
+        logger.info('Intersection done. States processed: %d. Result has %d states (initial=%d, final=%d).',
+                    states_processed_cnt, len(resulting_nfa.states), len(resulting_nfa.initial_states), len(resulting_nfa.final_states))
         return resulting_nfa
 
     def union(self, other: NFA) -> NFA:
         """Construct an automaton accepting the union languages of this automaton and the other."""
         assert self.alphabet == other.alphabet
 
-        latest_state_value, self_renamed = self.rename_states()
-        _, other_renamed = other.rename_states(start_from=latest_state_value)
+        logger.info('Performing NFA union: operand1 has %d states, operand2 has %d states.', len(self.states), len(other.states))
+
+        old_self_state_to_new_state_map, self_renamed = self.rename_states()
+        old_other_state_to_new_state_map, other_renamed = other.rename_states(start_from=len(old_self_state_to_new_state_map))
 
         states = self_renamed.states.union(other_renamed.states)
         transitions = SparseSimpleTransitionFunction.union_of(self_renamed.transition_fn, other_renamed.transition_fn)
         initial_states = self_renamed.initial_states.union(other_renamed.initial_states)
         final_states = self_renamed.final_states.union(other_renamed.final_states)
+
+        # Create the flattened state labels
+        labels = {new_state: old_state for old_state, new_state in old_self_state_to_new_state_map.items()}
+        labels.update((new_state, old_state) for old_state, new_state in old_other_state_to_new_state_map.items())
+        state_labels = StateLabelUnionNode(labels=labels, children=(self.state_labels, other.state_labels),
+                                           states_per_child_partitions=(tuple(sorted(self_renamed.states)), tuple(sorted(other_renamed.states))))
 
         union_nfa = NFA(
             alphabet=self.alphabet,
@@ -186,7 +223,8 @@ class NFA(object):
             initial_states=initial_states,
             final_states=final_states,
             states=states,
-            transition_fn=transitions
+            transition_fn=transitions,
+            state_labels=state_labels
         )
         union_nfa.used_variables = sorted(set(self.used_variables + other.used_variables))
 
@@ -245,9 +283,8 @@ class NFA(object):
 
         determinized_automaton.used_variables = sorted(self.used_variables)
 
-        for label, state in macrostate_to_id_map.items():
-            rich_label = tuple(self.state_labels.get(component, component) for component in label)
-            determinized_automaton.state_labels[state] = rich_label
+        macrostate_id_to_macrostate = {macrostate_id: macrostate for macrostate, macrostate_id in macrostate_to_id_map.items()}
+        determinized_automaton.state_labels = StateLabelUnaryNode(child=self.state_labels, labels=macrostate_id_to_macrostate)
 
         determinized_automaton.add_trap_state()
         return determinized_automaton
@@ -298,29 +335,31 @@ class NFA(object):
 
             new_nfa.transition_fn = self.transition_fn
             new_nfa.transition_fn.project_bit_away(bit_pos)
-
+            
             if not skip_pad_closure:
                 new_nfa.perform_pad_closure()
 
             # Assumes that the variables are kept sorted - does not perform sorting again
             new_used_vars = [var_id for var_id in self.used_variables if var_id != variable_id]
             new_nfa.used_variables = new_used_vars
-            new_nfa.state_labels = self.state_labels
+            labels = {state: state for state in self.states}
+            new_nfa.state_labels = StateLabelUnaryNode(labels=labels, child=self.state_labels) if self.state_labels else None
             return new_nfa
 
     def perform_pad_closure(self):
         """Performs inplace padding closure. See file automaton_algorithms.py:padding_closure"""
         logger.info('Performing padding closure.')
         if solver_config.solution_domain == SolutionDomain.INTEGERS:
-            automaton_algorithms.pad_closure2(self)
+            added_final_state = automaton_algorithms.pad_closure2(self)
         else:
-            automaton_algorithms.pad_closure2_naturals(self)
+            added_final_state = automaton_algorithms.pad_closure2_naturals(self)
         logger.info('Pad closure done.')
+        return added_final_state
 
     def get_symbols_leading_from_state_to_state(self, from_state: int, to_state: int) -> Set[LSBF_AlphabetSymbol]:
         return self.transition_fn.get_symbols_between_states(from_state, to_state)
 
-    def rename_states(self, start_from: int = 0) -> Tuple[int, NFA]:
+    def rename_states(self, start_from: int = 0) -> Tuple[Dict[int, int], NFA]:
         """
         Rename the state of this automaton to integers starting from `start_from` assigning states a new unique number.
 
@@ -336,17 +375,26 @@ class NFA(object):
 
             state_to_new_name[state] = next_state_name
             next_state_name += 1
+        
+        state_labels = None
+        if self.state_labels:
+            new_labels = {state_to_new_name[state]: label for state, label in self.state_labels.labels.items()}
+            if isinstance(self.state_labels, StateLabelUnaryNode):
+                state_labels = StateLabelUnaryNode(child=self.state_labels.child, labels=new_labels)
+            else:
+                state_labels = type(self.state_labels)(children=self.state_labels.children, labels=new_labels)
 
         nfa = NFA(alphabet=self.alphabet,
                   automaton_type=self.automaton_type,
                   states=set(state_to_new_name[state] for state in self.states),
                   initial_states=set(state_to_new_name[state] for state in self.initial_states),
-                  final_states=set(state_to_new_name[state] for state in self.final_states))
+                  final_states=set(state_to_new_name[state] for state in self.final_states),
+                  state_labels=state_labels)
 
         nfa.transition_fn = self.transition_fn.copy()
         nfa.transition_fn.rename_states(state_to_new_name)
 
-        return (next_state_name, nfa)
+        return (state_to_new_name, nfa)
 
     def complement(self) -> NFA:
         """
@@ -408,7 +456,7 @@ class NFA(object):
         return None
 
     def remove_nonfinishing_states(self):
-        '''BFS on rotated transitions'''
+        """BFS on rotated transitions"""
         reachable_states = self.transition_fn.remove_nonfinishing_states(self.states, self.final_states)
         self.states = reachable_states
 
@@ -484,7 +532,6 @@ class NFA(object):
 
         var_ids = self.used_variables if solver_config.vis_display_only_free_vars else self.alphabet.variable_numbers
         var_names: Tuple[str] = tuple(self.alphabet.variable_names[var_id] for var_id in var_ids)
-
         return AutomatonVisRepresentation(
             states=set(self.states),
             final_states=set(self.final_states),
@@ -636,8 +683,8 @@ class NFA(object):
             if some_partiton_state in self.final_states:
                 minimized_dfa.add_final_state(partition_state_number)
 
-        # @Optimize: Make the propagation of state labels for debugging/visualization purposes optional
-        minimized_dfa.state_labels = {state_number: set(partition) for partition, state_number in partition_to_state_number_map.items()}
+        partition_id_to_partition = {partition_id: partition for partition, partition_id in partition_to_state_number_map.items()}
+        minimized_dfa.state_labels = StateLabelUnaryNode(child=self.state_labels, labels=partition_id_to_partition)
 
         return minimized_dfa
 

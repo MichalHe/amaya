@@ -235,3 +235,21 @@ class LSBF_Alphabet():
                    f'Binding present {var_id}->"{self.variable_names[var_id]}",'
                    f' tried binding: {var_id}->"{var_name}.')
             assert self.variable_names[var_id] == var_name, msg
+
+
+def uncompress_transition_symbol(symbol: LSBF_AlphabetSymbol) -> Generator[Tuple[int, ...], None, None]:
+    if not symbol:
+        return
+
+    dont_care_indices = tuple(i for i, bit in enumerate(symbol) if bit == '*')
+    if not dont_care_indices:
+        yield symbol
+        return
+
+    symbol_template = list(symbol)
+    for k in range(2**len(dont_care_indices)):
+        dont_care_bit_values = number_to_bit_tuple(k, tuple_size=len(dont_care_indices))
+        for i, dont_care_bit_value in enumerate(dont_care_bit_values):
+            dont_care_bit_index = dont_care_indices[i]
+            symbol_template[dont_care_bit_index] = dont_care_bit_value
+        yield tuple(symbol_template)

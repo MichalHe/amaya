@@ -1,3 +1,4 @@
+from __future__ import annotations
 from collections import (
     defaultdict
 )
@@ -21,6 +22,7 @@ from typing import (
 
 from amaya.alphabet import (
     LSBF_AlphabetSymbol,
+    uncompress_transition_symbol,
 )
 from amaya.ast_definitions import AST_Node
 from amaya.relations_structures import Relation
@@ -115,6 +117,64 @@ Transition = Tuple[IntOrStr, TransitionSymbols, IntOrStr]
 
 
 @dataclass
+class StateLabelUnaryNode:
+    child: Optional[StateLabelTreeNode] = None
+    labels: Dict[int, Iterable[int]] = field(default_factory=dict)
+
+
+@dataclass
+class StateLabelIntersectionNode:
+    children: Tuple[Optional[StateLabelTreeNode], ...]
+    labels: Dict[int, Iterable[int]] = field(default_factory=dict)
+
+
+@dataclass
+class StateLabelUnionNode:
+    children: Tuple[Optional[StateLabelTreeNode], ...]
+    states_per_child_partitions: Tuple[Tuple[int, ...]]
+    labels: Dict[int, Iterable[int]] = field(default_factory=dict)
+
+
+StateLabelTreeNode = Union[StateLabelUnaryNode, StateLabelIntersectionNode, StateLabelUnionNode]
+
+
+def construct_state_label(state: int, state_labels: Optional[StateLabelTreeNode]) -> str:
+    if not state_labels:
+        return str(state)
+
+    if isinstance(state_labels, StateLabelUnaryNode):
+        # The unary node might not map the state to anything, e.g., when a state is added
+        # during a padding closure
+        if state not in state_labels.labels:
+            return str(state)
+
+        component_label = state_labels.labels[state]
+        if isinstance(component_label, int):
+            return construct_state_label(component_label, state_labels.child)
+        else:
+            component_labels = (construct_state_label(component, state_labels.child) for component in component_label)
+            return '{{{0}}}'.format(','.join(component_labels))
+
+    elif isinstance(state_labels, StateLabelIntersectionNode):
+        component_labels = []
+        for i, component in enumerate(state_labels.labels[state]):
+            component_label = construct_state_label(component, state_labels.children[i])
+            component_labels.append(component_label)
+        return '({0})'.format(','.join(component_labels))
+    else:
+        assert isinstance(state_labels, StateLabelUnionNode)
+        component_subtree_index: Optional[int] = None
+        # Find from which of the united automaton does the state come from
+        for i, partition in enumerate(state_labels.states_per_child_partitions):
+            if state in partition:
+                component_subtree_index = i
+                break
+        assert component_subtree_index is not None
+        label = construct_state_label(state_labels.labels[state], state_labels.children[component_subtree_index])
+        return label
+
+
+@dataclass
 class AutomatonVisRepresentation:
     """A class describing the visual representation of the automaton."""
     initial_states: Set[IntOrStr]
@@ -123,7 +183,8 @@ class AutomatonVisRepresentation:
     transitions:    List[Transition]
     variable_names: Tuple[str, ...]
     variable_ids:   Tuple[int, ...]
-    state_labels:   Dict[int, Any] = field(default_factory=dict)
+    state_labels:   StateLabelTreeNode
+
 
     def _compute_state_colors_by_sccs(self) -> Dict[int, Tuple[str, str]]:
         """
@@ -148,7 +209,6 @@ class AutomatonVisRepresentation:
                 state_colors[state] = colors[i]
         return state_colors
 
-
     def into_graphviz(self, highlight_sccs: bool = False) -> Digraph:
         """Transforms the stored automaton represenation into graphviz (dot)."""
         graph = Digraph('automaton',
@@ -156,7 +216,6 @@ class AutomatonVisRepresentation:
                         graph_attr={
                             'rankdir': 'LR',
                             'ranksep': '1'})
-
         # Compute the SCCs and assign colors accordingly
         state_colors: Dict[int, Tuple[str, str]] = self._compute_state_colors_by_sccs() if highlight_sccs else {}
 
@@ -169,26 +228,22 @@ class AutomatonVisRepresentation:
                         'style': 'filled'
                 }
             return {}
-
+        
+        flat_state_labels = {state: construct_state_label(state, self.state_labels) for state in self.states} 
 
         for state in self.states:
-            state_label = str(self.state_labels.get(state, state))
+            state_label = flat_state_labels[state]
             shape = 'doublecircle' if state in self.final_states else 'circle'
-            graph.node(state_label, state_label, shape=shape, **gen_color_kwargs(state))
+            graph.node(str(state), state_label, shape=shape, **gen_color_kwargs(state))
 
-        for state in self.initial_states:
-            initial_point_name = f'{state}@Start'
-            initial_state_label = str(self.state_labels.get(state, state))
+        for initial_state in self.initial_states:
+            initial_point_name = f'{initial_state}@Start'
             graph.node(initial_point_name, shape='point')
-            graph.edge(initial_point_name, initial_state_label)
+            graph.edge(initial_point_name, str(initial_state))
 
         for origin_state, transition_symbols, dest_state in self.transitions:
-            origin_label = str(self.state_labels.get(origin_state, origin_state))
-            dest_label = str(self.state_labels.get(dest_state, dest_state))
             edge_label = compute_html_label_for_symbols(self.variable_names, list(transition_symbols))
-            graph.edge(origin_label,
-                       dest_label,
-                       label=edge_label)
+            graph.edge(str(origin_state), str(dest_state), label=edge_label)
         return graph
 
     def into_vtf(self, uncompress_symbols=False) -> str:
@@ -228,7 +283,7 @@ class AutomatonVisRepresentation:
         for source, transition_symbols, destination in self.transitions:
             for compressed_symbol in transition_symbols:
                 if uncompress_symbols:
-                    for symbol in AutomatonVisRepresentation._uncompress_symbol(compressed_symbol):
+                    for symbol in uncompress_transition_symbol(compressed_symbol):
                         vtf += '{0} {1} {2}\n'.format(source, ''.join(map(str, symbol)), destination)
                 else:
                     vtf += '{0} {1} {2}\n'.format(
@@ -238,25 +293,6 @@ class AutomatonVisRepresentation:
 
 
         return vtf
-
-    @staticmethod
-    def _uncompress_symbol(symbol: LSBF_AlphabetSymbol) -> Generator[Tuple[int, ...], None, None]:
-        """Uncompress the given symbol yielding the symbolically represented symbols."""
-        if not symbol:
-            return
-
-        dont_care_indices = tuple(i for i, bit in enumerate(symbol) if bit == '*')
-        if not dont_care_indices:
-            yield symbol
-            return
-
-        symbol_template = list(symbol)
-        for k in range(2**len(dont_care_indices)):
-            dont_care_bit_values = number_to_bit_tuple(k, tuple_size=len(dont_care_indices))
-            for i, dont_care_bit_value in enumerate(dont_care_bit_values):
-                dont_care_bit_index = dont_care_indices[i]
-                symbol_template[dont_care_bit_index] = dont_care_bit_value
-            yield tuple(symbol_template)
 
     def compress_symbols(self):
         """Peforms transition sets compression using plain BDDs."""

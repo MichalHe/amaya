@@ -19,6 +19,7 @@ from typing import (
     Union,
 )
 
+
 T = TypeVar('T')
 S = TypeVar('S')
 

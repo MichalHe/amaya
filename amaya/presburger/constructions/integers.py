@@ -26,6 +26,7 @@ from amaya.presburger.definitions import(
 )
 from amaya.relations_structures import Relation
 from amaya.utils import vector_dot
+from amaya.visualization import StateLabelUnaryNode
 
 
 @dataclass(frozen=True)
@@ -307,6 +308,6 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
     )
 
     nfa.used_variables = [var_id_pair[1] for var_id_pair in relation_variables_with_ids]
-    nfa.state_labels = dict((state, label) for label, state in alias_store.data.items())
+    nfa.state_labels = StateLabelUnaryNode(labels=dict((state, label) for label, state in alias_store.data.items()), child=None)
     nfa.extra_info['aliases'] = alias_store
     return nfa
