@@ -47,6 +47,7 @@ from amaya.preprocessing import (
     antiprenexing,
     prenexing
 )
+from amaya.tokenize import tokenize
 from amaya.semantics_tracking import (
     AH_Atom,
     AH_AtomType,
@@ -399,30 +400,6 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
         raise ValueError(f'Unhandled branch when exploring the SMT tree. Tree: {tree}')
 
 
-def lex(source: str) -> List[str]:
-    source = strip_comments(source)
-    source = source.replace('(', ' ( ').replace(')', ' ) ').replace('|', ' | ')
-    _tokens = source.split()
-
-    inside_large_text = False
-    large_text = ''
-    tokens = []
-    for token in _tokens:
-        if token == '|':
-            if inside_large_text:
-                inside_large_text = False
-                tokens.append(large_text)
-                large_text = ''
-            else:
-                inside_large_text = True
-        else:
-            if inside_large_text:
-                large_text += token
-            else:
-                tokens.append(token)
-    return tokens
-
-
 def build_syntax_tree(tokens: List[str]):
     stack: List[Any] = []
     depth = -1
@@ -472,9 +449,9 @@ def perform_whole_evaluation_on_source_text(source_text: str,
               of assert tree, and Dict is the smt-info collected when parsing.
     """
 
-    tokens = lex(source_text)
+    tokens = tokenize(source_text)
     ast = build_syntax_tree(tokens)
-
+    
     eval_result: Optional[NFA] = None
     smt_info: Dict[str, Any] = {}
     function_symbol_to_info_map: Dict[str, FunctionSymbol] = {}
@@ -490,12 +467,12 @@ def perform_whole_evaluation_on_source_text(source_text: str,
         statement_root = top_level_statement[0]
         if statement_root == 'set-info':
             if not len(top_level_statement) == 3:
-                raise ValueError('Invalid syntax for the smt-info S-expression. Expresssion: {top_level_statement}')
+                raise ValueError(f'Invalid syntax for the smt-info S-expression. Expresssion: {top_level_statement}')
             smt_info[top_level_statement[1]] = top_level_statement[2]
 
         elif statement_root == 'assert':
             if not len(top_level_statement) == 2:
-                raise ValueError('Invalid syntax for the assert S-expression. Expresssion: {top_level_statement}')
+                raise ValueError(f'Invalid syntax for the assert S-expression. Expresssion: {top_level_statement}')
             formulae_to_assert.append(top_level_statement[1])
 
         elif statement_root == 'declare-fun':
