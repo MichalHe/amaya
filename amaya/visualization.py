@@ -26,6 +26,8 @@ from amaya.alphabet import (
 )
 from amaya.ast_definitions import AST_Node
 from amaya.relations_structures import Relation
+import amaya.semantics_tracking as state_semantics_lib
+from amaya.semantics_tracking import AH_Node
 from amaya.utils import (
     COLOR_PALETTE,
     find_sccs_kosaruju,
@@ -116,74 +118,57 @@ TransitionSymbols = Tuple[Tuple[IntOrStr, ...]]
 Transition = Tuple[IntOrStr, TransitionSymbols, IntOrStr]
 
 
-@dataclass
-class StateLabelUnaryNode:
-    child: Optional[StateLabelTreeNode] = None
-    labels: Dict[int, Iterable[int]] = field(default_factory=dict)
-
-
-@dataclass
-class StateLabelIntersectionNode:
-    children: Tuple[Optional[StateLabelTreeNode], ...]
-    labels: Dict[int, Iterable[int]] = field(default_factory=dict)
-
-
-@dataclass
-class StateLabelUnionNode:
-    children: Tuple[Optional[StateLabelTreeNode], ...]
-    states_per_child_partitions: Tuple[Tuple[int, ...]]
-    labels: Dict[int, Iterable[int]] = field(default_factory=dict)
-
-
-StateLabelTreeNode = Union[StateLabelUnaryNode, StateLabelIntersectionNode, StateLabelUnionNode]
-
-
-def construct_state_label(state: int, state_labels: Optional[StateLabelTreeNode]) -> str:
-    if not state_labels:
+def construct_state_label(state: int, state_semantics: AH_Node) -> str:
+    if isinstance(state_semantics, state_semantics_lib.AH_Atom):
         return str(state)
 
-    if isinstance(state_labels, StateLabelUnaryNode):
-        # The unary node might not map the state to anything, e.g., when a state is added
-        # during a padding closure
-        if state not in state_labels.labels:
+    if isinstance(state_semantics, state_semantics_lib.AH_Projection):
+        # A state might not relate to any of the states in the semantics tree underneath as it might be added during pad closure
+        if state in state_semantics.states_added_in_pad_closure:
+            return str(state)
+        return construct_state_label(state, state_semantics.child)
+
+    elif isinstance(state_semantics, state_semantics_lib.AH_Union):
+        origin_index, original_name = state_semantics.state_labels[state]
+        return construct_state_label(original_name, state_semantics.children[origin_index])
+
+    elif isinstance(state_semantics, state_semantics_lib.AH_Intersection):
+        product_tuple_labeling_state = state_semantics.state_labels[state]
+        component_labels = []
+        for origin_index, origin_state in enumerate(product_tuple_labeling_state):
+            label = construct_state_label(origin_state, state_semantics.children[origin_index])
+            component_labels.append(label)
+        return '({0})'.format(','.join(component_labels))
+
+    elif isinstance(state_semantics, state_semantics_lib.AH_Negation):
+        return construct_state_label(state, state_semantics.child)
+
+    elif isinstance(state_semantics, state_semantics_lib.AH_Determinization):
+        macrostate = state_semantics.state_labels.get(state)
+        if not macrostate:
+            # The current state is a TRAP state added to make the resulting DFA complete
             return str(state)
 
-        component_label = state_labels.labels[state]
-        if isinstance(component_label, int):
-            return construct_state_label(component_label, state_labels.child)
-        else:
-            component_labels = (construct_state_label(component, state_labels.child) for component in component_label)
-            return '{{{0}}}'.format(','.join(component_labels))
+        macrostate_component_labels = []
+        for component in macrostate:
+            component_label = construct_state_label(component, state_semantics.child)
+            macrostate_component_labels.append(component_label)
 
-    elif isinstance(state_labels, StateLabelIntersectionNode):
-        component_labels = []
-        for i, component in enumerate(state_labels.labels[state]):
-            component_label = construct_state_label(component, state_labels.children[i])
-            component_labels.append(component_label)
-        return '({0})'.format(','.join(component_labels))
-    else:
-        assert isinstance(state_labels, StateLabelUnionNode)
-        component_subtree_index: Optional[int] = None
-        # Find from which of the united automaton does the state come from
-        for i, partition in enumerate(state_labels.states_per_child_partitions):
-            if state in partition:
-                component_subtree_index = i
-                break
-        assert component_subtree_index is not None
-        label = construct_state_label(state_labels.labels[state], state_labels.children[component_subtree_index])
-        return label
+        return '{{{0}}}'.format(','.join(macrostate_component_labels))
+    
+    assert not state_semantics, state_semantics
 
 
 @dataclass
 class AutomatonVisRepresentation:
     """A class describing the visual representation of the automaton."""
-    initial_states: Set[IntOrStr]
-    final_states:   Set[IntOrStr]
-    states:         Set[IntOrStr]
-    transitions:    List[Transition]
-    variable_names: Tuple[str, ...]
-    variable_ids:   Tuple[int, ...]
-    state_labels:   StateLabelTreeNode
+    initial_states:  Set[IntOrStr]
+    final_states:    Set[IntOrStr]
+    states:          Set[IntOrStr]
+    transitions:     List[Transition]
+    variable_names:  Tuple[str, ...]
+    variable_ids:    Tuple[int, ...]
+    state_semantics: AH_Node
 
 
     def _compute_state_colors_by_sccs(self) -> Dict[int, Tuple[str, str]]:
@@ -229,7 +214,7 @@ class AutomatonVisRepresentation:
                 }
             return {}
         
-        flat_state_labels = {state: construct_state_label(state, self.state_labels) for state in self.states} 
+        flat_state_labels = {state: construct_state_label(state, self.state_semantics) for state in self.states} 
 
         for state in self.states:
             state_label = flat_state_labels[state]

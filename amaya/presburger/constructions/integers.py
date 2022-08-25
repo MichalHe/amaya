@@ -26,7 +26,6 @@ from amaya.presburger.definitions import(
 )
 from amaya.relations_structures import Relation
 from amaya.utils import vector_dot
-from amaya.visualization import StateLabelUnaryNode
 
 
 @dataclass(frozen=True)
@@ -64,8 +63,7 @@ class EqLinearStateComponent(LinearStateComponent):
                                       variable_coeficients=self.variable_coeficients)
 
 
-# This is used in the formula->NFA procedure. The created NFA has int automaton
-# states
+# This is used in the formula->NFA procedure. The created NFA has int automaton states
 InterimAutomatonState = Tuple[Union[LinearStateComponent, ModuloTermStateComponent], ...]
 TransitionPredicate = Callable[[InterimAutomatonState, Tuple[int, ...], InterimAutomatonState, Relation], bool]
 
@@ -73,7 +71,6 @@ TransitionPredicate = Callable[[InterimAutomatonState, Tuple[int, ...], InterimA
 def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateComponent,
                                                    is_transition_final: TransitionPredicate,
                                                    relation_variable_with_ids: List[Tuple[str, int]],
-                                                   alphabet: LSBF_Alphabet,
                                                    nfa: NFA) -> NFA:
     '''
     Abstract algorithm to build automaton from the given atomic presburger formula.
@@ -85,7 +82,6 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
                           how to generate successors.
     :param is_transition_final: Predicate to determine which generated transition should also lead to the final state.
     :param relation_variable_with_ids: Variables of the overall alphabet that are used in the relation.
-    :param alphabet: The overall alphabet of the current solver run.
     :param nfa: The empty nfa to give structure to.
     :returns: The passed nfa with structure encoding solution space of the relation.
     '''
@@ -98,7 +94,7 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
     work_set: Set[LinearStateComponent] = set(work_list)  # Seed up checking the presence in the work_list
 
     relation_variable_ids = list(map(lambda pair: pair[1], relation_variable_with_ids))
-    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(relation_variable_ids))
+    projected_alphabet = tuple(nfa.alphabet.gen_projection_symbols_onto_variables(relation_variable_ids))
 
     while work_list:
         current_state = work_list.pop()
@@ -118,8 +114,8 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
                 work_list.append(destination_state)
                 work_set.add(destination_state)
 
-            cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(relation_variable_ids,
-                                                                                   alphabet_symbol)
+            cylindrified_symbol = nfa.alphabet.cylindrify_symbol_of_projected_alphabet(relation_variable_ids,
+                                                                                       alphabet_symbol)
             nfa.update_transition_fn(current_state.value,
                                      cylindrified_symbol,
                                      destination_state.value)
@@ -140,13 +136,9 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
     return nfa
 
 
-def build_nfa_from_linear_inequality(ineq: Relation,
-                                     ineq_variables_ordered: List[Tuple[str, int]],
-                                     alphabet: LSBF_Alphabet,
-                                     automaton_constr: AutomatonConstructor) -> NFA[NFA_AutomatonStateType]:
-    """
-    Construct an NFA accepting the solutions of given inequation encoded using 2's complement.
-    """
+def build_nfa_from_linear_inequality(nfa: NFA,
+                                     ineq: Relation,
+                                     ineq_variables_ordered: List[Tuple[str, int]]) -> NFA:
 
     initial_state = IneqLinearStateComponent(value=ineq.absolute_part,
                                              variable_coeficients=tuple(ineq.variable_coeficients))
@@ -159,32 +151,17 @@ def build_nfa_from_linear_inequality(ineq: Relation,
             return True
         return False
 
-    nfa = automaton_constr(alphabet=alphabet, automaton_type=AutomatonType.NFA)
-
     nfa.add_initial_state(initial_state.value)
 
     nfa = build_presburger_linear_nfa_from_initial_state(initial_state,
                                                          is_transition_final,
                                                          ineq_variables_ordered,
-                                                         alphabet,
                                                          nfa)
 
     return nfa
 
 
-def build_nfa_from_linear_equality(eq: Relation,
-                                   eq_variables_ordered: List[int],
-                                   alphabet: LSBF_Alphabet,
-                                   automaton_constr: AutomatonConstructor) -> NFA:
-    """
-    Construct an NFA accepting the solutions of given equation encoded using 2's complement.
-    """
-
-    nfa = automaton_constr(
-        alphabet=alphabet,
-        automaton_type=AutomatonType.NFA
-    )
-
+def build_nfa_from_linear_equality(nfa: NFA, eq: Relation, eq_variables_ordered: List[Tuple[str, int]]) -> NFA:
     initial_state = EqLinearStateComponent(value=eq.absolute_part,
                                            variable_coeficients=tuple(eq.variable_coeficients))
 
@@ -201,46 +178,29 @@ def build_nfa_from_linear_equality(eq: Relation,
     nfa = build_presburger_linear_nfa_from_initial_state(initial_state,
                                                          is_transition_final,
                                                          eq_variables_ordered,
-                                                         alphabet,
                                                          nfa)
     return nfa
 
 
-def build_nfa_from_linear_sharp_inequality(ineq: Relation, emit_handle=None):
-    assert ineq.operation == '<'
+def build_presburger_modulo_nfa(nfa: NFA,
+                                relation: Relation,
+                                relation_variables_with_ids: List[Tuple[str, int]]) -> NFA:
+    """
+    Builds an NFA encoding the solutions to given congurence relation.
 
-    # Since we are dealing with a discrete domain:
-    ineq.absolute_part -= 1
-    ineq.operation = '<='
-
-    nfa_ineq = build_nfa_from_linear_inequality(ineq)
-
-    return nfa_ineq
-
-
-def build_presburger_modulo_nfa(relation: Relation,  # NOQA
-                                relation_variables_with_ids: List[Tuple[str, int]],
-                                alphabet: LSBF_Alphabet,
-                                automaton_constr: AutomatonConstructor) -> NFA:
-    '''
-    Builds the NFA that encodes the given relation of the form is_congruent_with(vector_dot(a.x, K))
-
+    :param nfa: An empty NFA that will have its structure formed to encode the modulo relation.
     :param relation: Relation of the form described abouve that should be encoded with the automaton.
     :param relation_variables_with_ids: The sorted (by ID) list of variable names with their IDs.
                                         Required so we know which tracks of the overall alphabet are used.
-    :param alphabet: The overall alphabet.
-    :param nfa: An empty NFA that will have its structure formed to encode the modulo relation.
-    '''
+    """
 
-    logger.info('Building modulo-NFA for provided relation: {0}'.format(relation))
+    logger.info('Building modulo-NFA for provided relation: %s', relation)
 
-    assert can_build_modulo_automaton(relation) 
-
-    nfa = automaton_constr(alphabet=alphabet, automaton_type=AutomatonType.NFA)
+    assert can_build_modulo_automaton(relation)
 
     variable_name_to_id: Dict[str, int] = dict(relation_variables_with_ids)
     variable_ids = sorted(variable_name_to_id.values())
-    projected_alphabet = list(alphabet.gen_projection_symbols_onto_variables(variable_ids))
+    projected_alphabet = tuple(nfa.alphabet.gen_projection_symbols_onto_variables(variable_ids))
 
     variable_name_to_track_index: Dict[str, int] = {}
     for i, variable_id_pair in enumerate(relation_variables_with_ids):
@@ -274,7 +234,7 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
         nfa.add_state(current_state_alias)
 
         for symbol in projected_alphabet:
-            cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(variable_ids, symbol)
+            cylindrified_symbol = nfa.alphabet.cylindrify_symbol_of_projected_alphabet(variable_ids, symbol)
             destination_state = current_state.generate_next(symbol)
 
             if destination_state is None:
@@ -301,11 +261,8 @@ def build_presburger_modulo_nfa(relation: Relation,  # NOQA
         for source, symbol in transitions_to_final_state:
             nfa.update_transition_fn(source, symbol, final_state)
 
-    logger.info(
-        'Done. Built NFA with {0} states ({1} {2} final).'.format(
-            len(nfa.states), len(nfa.final_states), 'is' if len(nfa.final_states) == 1 else 'are'
-        )
-    )
+    logger.info('Done. Built NFA with %d states (%d %s final).',
+                len(nfa.states), len(nfa.final_states), 'is' if len(nfa.final_states) == 1 else 'are')
 
     nfa.used_variables = [var_id_pair[1] for var_id_pair in relation_variables_with_ids]
     nfa.state_labels = StateLabelUnaryNode(labels=dict((state, label) for label, state in alias_store.data.items()), child=None)

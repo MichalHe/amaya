@@ -47,6 +47,10 @@ from amaya.preprocessing import (
     antiprenexing,
     prenexing
 )
+from amaya.semantics_tracking import (
+    AH_Atom,
+    AH_AtomType,
+)
 from amaya import utils
 
 PRETTY_PRINT_INDENT = ' ' * 2
@@ -596,8 +600,12 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         return automaton_constr.trivial_accepting(ctx.alphabet)
 
     # We should never encounter the '<' inequality as we are always converting it to the <=
-    assert relation.operation in ['<=', '=']
+    assert relation.operation in ('<=', '=')
     operation, automaton_building_function = building_handlers[solver_config.solution_domain][relation.operation]
+
+    # Create an automaton datastructure that will be filled by some construction function
+    atom_type = AH_AtomType.PRESBURGER_LE if relation.operation == '<=' else AH_AtomType.PRESBURGER_EQ
+    nfa = automaton_constr(automaton_type=AutomatonType.NFA, state_semantics=AH_Atom(atom_type=atom_type), alphabet=ctx.get_alphabet())
 
     # Congruence relations of the form a.x ~ k must be handled differently - it is necessary to reorder
     # the modulo term inside, not the nonmodular variables
@@ -623,8 +631,8 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         # so that we can do vizualization properly
         ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
 
-        nfa = relations_to_dfa.build_presburger_modulo_dfa(relation, variable_id_pairs,
-                                                           ctx.get_alphabet(), automaton_constr)
+        nfa = relations_to_nfa.build_presburger_modulo_nfa(nfa, relation, variable_id_pairs)
+
         ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.BUILD_NFA_FROM_CONGRUENCE)
         return nfa
 
@@ -645,14 +653,12 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         # the variable names so that we can do vizualization properly
         ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
 
-        reordered_relation = Relation(variable_names=var_names, variable_coeficients=var_coefs,
-                                      modulo_terms=[], modulo_term_coeficients=[],
-                                      div_terms=[], div_term_coeficients=[],
-                                      absolute_part=relation.absolute_part,
-                                      operation=relation.operation)
+        reordered_relation = Relation.new_lin_relation(variable_names=var_names, variable_coeficients=var_coefs,
+                                                       absolute_part=relation.absolute_part,
+                                                       operation=relation.operation)
 
         assert automaton_building_function
-        nfa = automaton_building_function(reordered_relation, variable_id_pairs, ctx.get_alphabet(), automaton_constr)
+        nfa = automaton_building_function(nfa, reordered_relation, variable_id_pairs)
         ctx.emit_evaluation_introspection_info(nfa, operation)
 
         emit_evaluation_progress_info(
