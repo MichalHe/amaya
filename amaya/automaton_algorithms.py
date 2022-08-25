@@ -1,3 +1,4 @@
+from collections import defaultdict
 from functools import reduce
 from typing import (
     Callable,
@@ -10,9 +11,12 @@ from typing import (
 from amaya.automatons import (
     AutomatonType,
     DFA,
+    LSBF_Alphabet,
     NFA
 )
 from amaya.presburger.definitions import AliasStore
+from amaya.transitions import symbols_intersect
+from amaya.alphabet import uncompress_transition_symbol
 
 
 def pad_closure(nfa: NFA):
@@ -21,7 +25,7 @@ def pad_closure(nfa: NFA):
 
     Why is in a standalone function and not withing a NFA?:
         Because it utilizes the internal structure of transition function too much,
-        therefore it makes it inconvenient when switching transition function implementations.  
+        therefore it makes it inconvenient when switching transition function implementations.
     """
     finishing_set: Set = set()
     for final_state in nfa.final_states:
@@ -63,12 +67,12 @@ def pad_closure(nfa: NFA):
 
 
 
-def pad_closure2(nfa: NFA):
+def pad_closure2(nfa: NFA) -> Optional[int]:
     """
     Ensure that the automaton satisfies the saturation property.
 
     Saturation property:
-        Given a word `w_1 \\dots w_n p` with the last symbol `p`, every word 
+        Given a word `w_1 \\dots w_n p` with the last symbol `p`, every word
         created by repeating the padding symbol `p` should be accepted.
     """
 
@@ -92,7 +96,7 @@ def pad_closure2(nfa: NFA):
                 if pre_state not in states:
                     states.add(pre_state)
                     work_list.append(pre_state)
-        
+
         for state in states:
             has_transition_to_final = False
             # Check whether there exists a transition to the final state via the symbol
@@ -108,9 +112,10 @@ def pad_closure2(nfa: NFA):
                     nfa.add_final_state(new_final_state)
 
                 nfa.update_transition_fn(state, symbol, new_final_state)
+    return new_final_state
 
 
-def pad_closure2_naturals(nfa):
+def pad_closure2_naturals(nfa) -> Optional[int]:
     """
     Ensures the saturation property holds when solving over naturals.
     """
@@ -148,6 +153,7 @@ def pad_closure2_naturals(nfa):
                     nfa.add_final_state(new_final_state)
 
                 nfa.update_transition_fn(pre_state, symbol, new_final_state)
+    return new_final_state
 
 
 from amaya.transitions import SparseBDDTransitionFunction
@@ -156,7 +162,7 @@ from typing import Dict
 
 def determinize_bdd(initial_states: List, final_states: List,
                     tfn: SparseBDDTransitionFunction) -> Dict:
-    '''Given a NFA description with transition function based on BDDs, 
+    '''Given a NFA description with transition function based on BDDs,
     produces DFA using the set construction.
     '''
     initial_state = tuple(initial_states)
@@ -198,15 +204,13 @@ def determinize_bdd(initial_states: List, final_states: List,
     }
 
 
-Metastate = Tuple[int, ...]
+Macrostate = Tuple[int, ...]
 
-def abstract_determinize(nfa: NFA, fn: Callable[[Metastate], Metastate]) -> DFA:
-    """ 
-    Determinize given NFA with metastate modification/compression function.
-    """
+def abstract_determinize(nfa: NFA, compress_macrostate: Callable[[NFA, Macrostate], Macrostate]) -> DFA:
+    """Determinize given NFA using a macrostate compression function."""
     alias_store = AliasStore()
 
-    initial_state = fn(tuple(sorted(nfa.initial_states)))
+    initial_state = compress_macrostate(nfa, tuple(sorted(nfa.initial_states)))
     initial_state_alias = alias_store.get_alias_for_state(initial_state)
 
     dfa = DFA(alphabet=nfa.alphabet, automaton_type=AutomatonType.DFA, initial_states={initial_state_alias})
@@ -214,20 +218,20 @@ def abstract_determinize(nfa: NFA, fn: Callable[[Metastate], Metastate]) -> DFA:
     work_set = {initial_state}
 
     while work_set:
-        metastate = work_set.pop()
-        metastate_alias = alias_store.get_alias_for_state(metastate)
+        macrostate = work_set.pop()
+        macrostate_id = alias_store.get_alias_for_state(macrostate)
 
-        dfa.add_state(metastate_alias)
-        if not set(metastate).isdisjoint(nfa.final_states):
-            dfa.add_final_state(metastate_alias)
-        
+        dfa.add_state(macrostate_id)
+        if not set(macrostate).isdisjoint(nfa.final_states):
+            dfa.add_final_state(macrostate_id)
+
         for symbol in nfa.alphabet.gen_symbols_for_relevant_variables(nfa.used_variables):
-            post = fn(tuple(sorted(reduce(set.union,
-                                          (set(nfa.get_transition_target(sc, symbol)) for sc in metastate)))))
-            post_alias = alias_store.get_alias_for_state(post)
+            macrostate_member_posts = (set(nfa.get_transition_target(sc, symbol)) for sc in metastate)
+            post_macrostate = compress_macrostate(nfa, tuple(sorted(reduce(set.union, macrostate_member_posts))))
+            post_macrostate_id = alias_store.get_alias_for_state(post_macrostate)
 
-            dfa.update_transition_fn(metastate_alias, symbol, post_alias)
+            dfa.update_transition_fn(macrostate_id, symbol, post_macrostate_id)
 
-            if not (post_alias in dfa.states or post in work_set):
-                work_set.add(post)
+            if not (post_macrostate_id in dfa.states or post_macrostate in work_set):
+                work_set.add(post_macrostate)
     return dfa
