@@ -15,8 +15,14 @@ from amaya.automatons import (
     NFA
 )
 from amaya.presburger.definitions import AliasStore
+from amaya import logger
 from amaya.transitions import symbols_intersect
 from amaya.alphabet import uncompress_transition_symbol
+from amaya.semantics_tracking import (
+    AH_AtomType,
+    AH_Determinization,
+    AH_Intersection,
+)
 
 
 def pad_closure(nfa: NFA):
@@ -206,14 +212,15 @@ def determinize_bdd(initial_states: List, final_states: List,
 
 Macrostate = Tuple[int, ...]
 
-def abstract_determinize(nfa: NFA, compress_macrostate: Callable[[NFA, Macrostate], Macrostate]) -> DFA:
+def abstract_determinize(nfa: NFA, compress_macrostate: Callable[[NFA, Macrostate], Macrostate], track_semantics: bool = False) -> DFA:
     """Determinize given NFA using a macrostate compression function."""
     alias_store = AliasStore()
 
     initial_state = compress_macrostate(nfa, tuple(sorted(nfa.initial_states)))
     initial_state_alias = alias_store.get_alias_for_state(initial_state)
 
-    dfa = DFA(alphabet=nfa.alphabet, automaton_type=AutomatonType.DFA, initial_states={initial_state_alias})
+    dfa = DFA(alphabet=nfa.alphabet, automaton_type=AutomatonType.DFA, initial_states={initial_state_alias},
+              state_semantics=AH_Determinization(child=nfa.state_semantics), used_variables=nfa.used_variables)
 
     work_set = {initial_state}
 
@@ -226,7 +233,7 @@ def abstract_determinize(nfa: NFA, compress_macrostate: Callable[[NFA, Macrostat
             dfa.add_final_state(macrostate_id)
 
         for symbol in nfa.alphabet.gen_symbols_for_relevant_variables(nfa.used_variables):
-            macrostate_member_posts = (set(nfa.get_transition_target(sc, symbol)) for sc in metastate)
+            macrostate_member_posts = (set(nfa.get_transition_target(sc, symbol)) for sc in macrostate)
             post_macrostate = compress_macrostate(nfa, tuple(sorted(reduce(set.union, macrostate_member_posts))))
             post_macrostate_id = alias_store.get_alias_for_state(post_macrostate)
 
@@ -234,4 +241,61 @@ def abstract_determinize(nfa: NFA, compress_macrostate: Callable[[NFA, Macrostat
 
             if not (post_macrostate_id in dfa.states or post_macrostate in work_set):
                 work_set.add(post_macrostate)
+
+    if track_semantics:
+        state_labels = {macrostate_id: macrostate_label for macrostate_label, macrostate_i in alias_store.data.items()}
+        dfa.state_semantics.state_labels = state_labels
+        
     return dfa
+
+
+def create_compression_function_for_intersection_of_atoms(nfa: NFA, state_semantics: AH_Intersection) -> Callable[[Macrostate], Macrostate]:
+    mod_atom_indices = tuple(
+        atom_index for atom_index, atom in enumerate(state_semantics.children) if atom.atom_type == AH_AtomType.PRESBURGER_CONGRUENCE
+    )
+    # @Optimize: This is not the most efficient way to do it, however, it is not called offen
+    lin_atom_indices = tuple(i for i in range(len(state_semantics.children)) if i not in mod_atom_indices)
+    final_state_semantics = tuple(child.final_state for child in state_semantics.children)
+
+    def is_state_covered_by_state(state: Tuple[int, ...], covering_state: Tuple[int, ...]) -> bool:
+        if state == covering_state:
+            # Every state simulates itself. Return False, so we won't remove every state based on this self simulation.
+            return False
+        return all(state[i] <= covering_state[i] for i in lin_atom_indices)
+
+    def compression_function(nfa: NFA, macrostate: Macrostate) -> Macrostate:
+        # Split the members of the macrostate into buckets based on the values of modulo atoms
+        mod_buckets: Dict[Tuple[int, ...], Tuple[int, Set[Tuple[int, ...]]]] = defaultdict(set)
+        compressed_macrostate: List[int] = []
+
+        for member in macrostate:
+            member_semantics = state_semantics.state_labels.get(member)
+            if not member_semantics:
+                # We are dealing with effective semantics, thus there might be some unary nodes above in the semantics
+                # tree adding states without semantics, e.g., padding closure after projection adds a state.
+                compressed_macrostate.append(member)
+                continue
+
+            if member in nfa.final_states:
+                # A final state is not simulated by anything when dealing with an intersection of atoms. This is not
+                # necessary as we could still rely on state semantics, since the values in the semantics tuple belonging
+                # to modulo components would be unique to the final state.
+                compressed_macrostate.append(member)
+                continue
+
+            mod_atom_values = tuple(member_semantics[i] for i in mod_atom_indices)
+            mod_buckets[mod_atom_values].add((member, member_semantics))
+        
+        for mod_bucket, bucket_values in mod_buckets.items():
+            bucket_values_not_covered = set(bucket_values)
+            for bucket_value in bucket_values:
+                bucket_value_state_id, bucket_value_semantics = bucket_value
+                if any((is_state_covered_by_state(bucket_value_semantics, other_bucket_value[1]) for other_bucket_value in bucket_values)):
+                    bucket_values_not_covered.remove(bucket_value)
+            
+            compressed_macrostate.extend(bucket_value_not_covered[0] for bucket_value_not_covered in bucket_values_not_covered)
+        
+        result = tuple(sorted(compressed_macrostate))
+        logger.info('[Macrostate compression] Compressed %s into %s', macrostate, result)
+        return result
+    return compression_function
