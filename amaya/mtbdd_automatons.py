@@ -242,7 +242,7 @@ class MTBDD_NFA(NFA):
 
     def perform_pad_closure(self):
         new_final_state = max(self.states) + 1
-        saturation_prop_repaired = self.transition_fn.do_pad_closure(self.initial_states, 
+        saturation_prop_repaired = self.transition_fn.do_pad_closure(self.initial_states,
                                                                      self.final_states,
                                                                      new_final_state)
         if saturation_prop_repaired:
@@ -263,7 +263,9 @@ class MTBDD_NFA(NFA):
 
         work_queue = [tuple(self.initial_states)]
         work_set = set(work_queue)
-        dfa = MTBDD_NFA(self.alphabet, AutomatonType.DFA)
+        dfa = MTBDD_NFA(self.alphabet, automaton_type=AutomatonType.DFA, state_semantics=None)
+
+        # import pdb; pdb.set_trace()
 
         states = set()
         initial_states = set(work_queue)
@@ -274,60 +276,69 @@ class MTBDD_NFA(NFA):
 
         while work_queue:
             logger.debug(f'Determinization: The number of states remaining in the work queue: {len(work_queue)}')
-            c_metastate = work_queue.pop(-1)
-            work_set.remove(c_metastate)
+            c_macrostate = work_queue.pop(-1)
+            work_set.remove(c_macrostate)
 
-            # @Optimize: This is true only for the initial states
-            #            Other states are reachable from other and are remapped
-            #            when the transition is added.
-            states.add(c_metastate)
-            if set(c_metastate).intersection(self.final_states):
-                final_states.add(c_metastate)
+            # @Optimize: This is true only for the initial state. Other states are reachable from other and are remapped when the transition is added.
+            states.add(c_macrostate)
+            if set(c_macrostate).intersection(self.final_states):
+                final_states.add(c_macrostate)
 
-            c_metastate_union_mtbdd = self.transition_fn.get_union_mtbdd_for_states(c_metastate, self.transition_fn.automaton_id)
+            c_macrostate_union_mtbdd = self.transition_fn.get_union_mtbdd_for_states(c_macrostate, self.transition_fn.automaton_id)
 
             # The mtbdd has already ref count increased, do not increase it
 
-            if c_metastate_union_mtbdd is None:
+            if c_macrostate_union_mtbdd is None:
                 continue
-            mtbdds[c_metastate] = c_metastate_union_mtbdd
+            mtbdds[c_macrostate] = c_macrostate_union_mtbdd
 
-            reachable_metastates = MTBDDTransitionFn.call_get_mtbdd_leaves(c_metastate_union_mtbdd)
-            for r_metastate in reachable_metastates:
-                r_metastate = tuple(r_metastate)
+            reachable_macrostates = MTBDDTransitionFn.call_get_mtbdd_leaves(c_macrostate_union_mtbdd)
+            for r_macrostate in reachable_macrostates:
+                r_macrostate = tuple(r_macrostate)
 
-                if r_metastate not in states and r_metastate not in work_set:
-                    work_queue.append(r_metastate)
-                    work_set.add(r_metastate)
+                if r_macrostate not in states and r_macrostate not in work_set:
+                    work_queue.append(r_macrostate)
+                    work_set.add(r_macrostate)
+
+        # Check an edge case when there were no transitions in the automaton - only the initial state is present in the DFA.
+        if not mtbdds:
+            assert len(states) == 1
+            # There is only one macrostates, so there is no need to do some advanced mapping of the macrostates to ints.
+            dfa.states.add(0)
+            dfa.initial_states.add(0)
+            if final_states:
+                dfa.final_states.add(0)
+            dfa.transition_fn.mtbdds[0] = mtbdd_false
+            dfa.used_variables = list(self.used_variables)
+            return dfa
 
         # We have explored the entire structure - time to mangle the generated
-        # metastates into integers, so that the automaton has the correct form.
+        # macrostates into integers, so that the automaton has the correct form.
         automaton_id = dfa.transition_fn.automaton_id
-        metastates, _mtbdds = zip(*mtbdds.items())
-        patched_mtbdds, metastate2int_map = MTBDDTransitionFn.rename_metastates_after_determinization(_mtbdds, automaton_id)
+        macrostates, _mtbdds = zip(*mtbdds.items())
+        patched_mtbdds, macrostate2int_map = MTBDDTransitionFn.rename_macrostates_after_determinization(_mtbdds, automaton_id)
 
         # The patched mtbdds have already ref count incremented, no need to
         # increment the ref counter. The old mtbdds will be decremented when
-        # MTBDDTransitionFn will be GC'd by python garbage collection.
+        # MTBDDTransitionFn will be GC'd by Python garbage collection.
 
-        max_state = max(metastate2int_map.values())
+        max_state = max(macrostate2int_map.values())
         for state in states:
-            # Initial states might never get discovered - we need to remap them
-            # manually, because they will not be present in any of the mtbdd
-            # leaves
-            if state in metastate2int_map:
-                dfa.add_state(metastate2int_map[state])
+            # Initial states might never get discovered - we need to remap them manually,
+            # because they will not be present in any of the mtbdd leaves
+            if state in macrostate2int_map:
+                dfa.add_state(macrostate2int_map[state])
             else:
                 max_state += 1
-                metastate2int_map[state] = max_state
+                macrostate2int_map[state] = max_state
                 dfa.add_state(max_state)
         for f_state in final_states:
-            dfa.add_final_state(metastate2int_map[f_state])
+            dfa.add_final_state(macrostate2int_map[f_state])
         for i_state in initial_states:
-            dfa.add_initial_state(metastate2int_map[i_state])
+            dfa.add_initial_state(macrostate2int_map[i_state])
 
-        for metastate, patched_mtbdd in zip(metastates, patched_mtbdds):
-            state = metastate2int_map[metastate]
+        for macrostate, patched_mtbdd in zip(macrostates, patched_mtbdds):
+            state = macrostate2int_map[macrostate]
             dfa.transition_fn.mtbdds[state] = patched_mtbdd
 
         dfa.add_trap_state()
@@ -353,8 +364,7 @@ class MTBDD_NFA(NFA):
         self.final_states = new_final_states
 
         self.applied_operations_info += ['complement']
-        # Do not need to set used_variables here as the determinized automaton
-        # already has them set
+        # Do not need to set used_variables here as the determinized automaton already has them set
         return self
 
     def add_trap_state(self):
@@ -473,7 +483,7 @@ class MTBDD_NFA(NFA):
 
         while states_with_word_to_explore:
             state, word = states_with_word_to_explore.pop(-1)
-            
+
             states_to_explore.remove(state)
             if word or solver_config.solution_domain == SolutionDomain.NATURALS:
                 visited_states.add(state)
@@ -485,7 +495,7 @@ class MTBDD_NFA(NFA):
                 # since it would not be waiting if it was accepting
                 if dest_state in visited_states or dest_state in states_to_explore:
                     continue
-                
+
                 dest_word = word + (transition_symbol,)
 
                 if dest_state in self.final_states:
@@ -567,10 +577,11 @@ class MTBDD_NFA(NFA):
         self.states = states_reaching_accepting_state
 
         if not states_reaching_accepting_state:
-            # In case the language of the automaton is empty keep at least 1 nonaccepting state so that functions 
+            # In case the language of the automaton is empty keep at least 1 nonaccepting state so that functions
             # generating unique states by taking max(self.states) will not crash
             self.states.add(0)
 
     def minimize_hopcroft(self) -> MTBDD_NFA:
         """Minimize the underlying automaton using hopcroft's minimization algorithm."""
-        return MTBDDTransitionFn.minimize_hopcroft(self)
+        dfa = self.determinize()
+        return MTBDDTransitionFn.minimize_hopcroft(dfa)

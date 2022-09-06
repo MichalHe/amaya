@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes as ct
 from typing import (
-    Any, 
+    Any,
     Dict,
     Iterable,
     List,
@@ -148,7 +148,7 @@ mtbdd_wrapper.amaya_update_intersection_state.argtypes = (
 
 mtbdd_wrapper.amaya_set_debugging.argtypes = (ct.c_bool, )
 
-mtbdd_wrapper.amaya_rename_metastates_to_int.argtypes = (
+mtbdd_wrapper.amaya_rename_macrostates_to_int.argtypes = (
     ct.POINTER(ct.c_ulong),   # The mtbdd roots that were located during determinization
     ct.c_uint32,              # The number of mtbdd roots
     c_side_state_type,        # The number from which the numbering will start
@@ -157,7 +157,7 @@ mtbdd_wrapper.amaya_rename_metastates_to_int.argtypes = (
     ct.POINTER(ct.POINTER(ct.c_uint64)),        # OUT: Metastates sizes
     ct.POINTER(ct.c_uint64)                     # OUT: Metastates count
 )
-mtbdd_wrapper.amaya_rename_metastates_to_int.restype = ct.POINTER(ct.c_ulong)
+mtbdd_wrapper.amaya_rename_macrostates_to_int.restype = ct.POINTER(ct.c_ulong)
 
 mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.argtypes = (
     ct.c_ulong,                 # The MTBDD
@@ -456,7 +456,6 @@ class MTBDDTransitionFn():
         return leaves
 
     def get_union_mtbdd_for_states(self, states: List[int], resulting_automaton_id: int) -> MTBDD:
-        '''Does what name suggests.'''
         resulting_mtbdd = mtbdd_false
         for state in states:
             if state not in self.mtbdds:
@@ -467,13 +466,15 @@ class MTBDDTransitionFn():
                 resulting_mtbdd,
                 resulting_automaton_id)
 
-            # In the early stages of this algorithm, a mtbdd_false with some
-            # non-false mtbdd is united, returning the original mtbdd.
-            # This tried to decrement ref to mtbdd_false (which is not done)
-            # and then increments refs to the state transition mtbdd (so that
-            # resulting count is 2). Then its decremented back to 1.
-            MTBDDTransitionFn.dec_mtbdd_ref(resulting_mtbdd)
+            # The union algorithm works iteratively, adding a single MTBDD to the union mtbdd computed so far.
+            # The old intermediate MTBDD has to has its reference counter decrememented, so it gets GC'd,
+            # as it is only temporary and the new one has to be incremented to ensure it lives long enough
+            # for the next iteration. The call do dec_mtbdd_ref will not decrement ref count of mtbdd_false
+            # which is passed in in the first iteration. If we are computing a union of only one mtbdd, the result
+            # would be the same mtbdd with ref count = 2, which is OK, since the mtbdd is referenced by the old
+            # automaton and the new union one.
             MTBDDTransitionFn.inc_mtbdd_ref_unsafe(new_resulting_mtbdd)
+            MTBDDTransitionFn.dec_mtbdd_ref(resulting_mtbdd)
             resulting_mtbdd = new_resulting_mtbdd
 
         if resulting_mtbdd == mtbdd_false:
@@ -673,9 +674,9 @@ class MTBDDTransitionFn():
         The transitions are yielded in their compressed form, meaning that the don't care bits have the value `*`.
 
         :param state: State from which should the yielded transitions originate.
-        :param variables: Alphabet variables onto which the transition symbols will be projected. 
+        :param variables: Alphabet variables onto which the transition symbols will be projected.
                           If None supplied, the symbols contain bits for all alphabet variables.
-        :returns: Generates the transition tuples (state, symbol, dest_state) where state is the same as the supplied 
+        :returns: Generates the transition tuples (state, symbol, dest_state) where state is the same as the supplied
                   parameter.
         """
         if variables is None:
@@ -899,9 +900,9 @@ class MTBDDTransitionFn():
         mtbdd_wrapper.amaya_end_intersection()
 
     @staticmethod
-    def rename_metastates_after_determinization(mtbdds: Iterable[MTBDD],
-                                                resulting_automaton_id: int,
-                                                start_numbering_from: int = 0) -> Tuple[List[ct.c_ulong], Dict[Tuple[int, ...], int]]:
+    def rename_macrostates_after_determinization(mtbdds: Iterable[MTBDD],
+                                                 resulting_automaton_id: int,
+                                                 start_numbering_from: int = 0) -> Tuple[List[ct.c_ulong], Dict[Tuple[int, ...], int]]:
         '''This operation is performed without creating any new mtbdds, in situ.'''
         in_mtbdds = (ct.c_ulong * len(mtbdds))()
         for i, mtbdd in enumerate(mtbdds):
@@ -914,7 +915,7 @@ class MTBDDTransitionFn():
         out_metastates_sizes = ct.POINTER(ct.c_uint64)()
         out_metastates_cnt = ct.c_uint64()
 
-        out_patched_mtbdds = mtbdd_wrapper.amaya_rename_metastates_to_int(
+        out_patched_mtbdds = mtbdd_wrapper.amaya_rename_macrostates_to_int(
             ct.cast(in_mtbdds, ct.POINTER(ct.c_ulong)),
             in_mtbdd_cnt,
             in_start_numbering_from,
@@ -1150,13 +1151,14 @@ class MTBDDTransitionFn():
 
     @staticmethod
     def minimize_hopcroft(dfa: MTBDD_NFA) -> MTBDD_NFA:
-        """Call to the MTBDD backend to minimize the given DFA"""  
+        """Call to the MTBDD backend to minimize the given DFA"""
         from amaya.mtbdd_automatons import MTBDD_NFA  # We have to import it here to avoid circular imports
-        
+        logger.info('[MTBDD Hopcroft minimization] Entering minimization routine - serializing data.')
+
         _states = tuple(dfa.states)
         _mtbdds = tuple(dfa.transition_fn.mtbdds.get(s, mtbdd_false) for s in _states)
         mtbdds = (ct.c_ulong * len(dfa.states))(*_mtbdds)
-        
+
         serialized_dfa = Serialized_NFA(
             states=(c_side_state_type * len(dfa.states))(*_states),
             state_count=len(dfa.states),
@@ -1177,7 +1179,8 @@ class MTBDDTransitionFn():
                 minimized_serialized_dfa.final_states[i] for i in range(minimized_serialized_dfa.final_state_count)
             },
             used_variables=dfa.used_variables,
-            alphabet=dfa.alphabet
+            alphabet=dfa.alphabet,
+            state_semantics=None  # @TODO
         )
 
         for i in range(minimized_serialized_dfa.state_count):
@@ -1185,4 +1188,5 @@ class MTBDDTransitionFn():
             mtbdd = minimized_serialized_dfa.mtbdds[i]
             minimized_dfa.transition_fn.mtbdds[state] = mtbdd
 
+        logger.info('[MTBDD Hopcroft minimization] Exiting minimization routine')
         return minimized_dfa
