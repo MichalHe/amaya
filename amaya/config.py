@@ -36,7 +36,6 @@ class SolverConfig(object):
     # Performance tracking options
     backend_type: BackendType = BackendType.NATIVE
     track_operation_runtime: bool = False
-    # Debug options
     track_state_semantics: bool = False
 
     vis_display_only_free_vars: bool = False

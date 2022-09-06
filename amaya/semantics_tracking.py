@@ -8,6 +8,8 @@ from typing import (
     Union,
 )
 
+from amaya.relations_structures import Relation
+
 
 class AH_AtomType(enum.IntEnum):
     PRESBURGER_EQ  = 1
@@ -20,6 +22,8 @@ class AH_AtomType(enum.IntEnum):
 @dataclass
 class AH_Atom:
     atom_type: AH_AtomType
+    atom: Optional[Relation]
+    final_state: int
 
 
 @dataclass
@@ -83,7 +87,7 @@ def construct_flattened_intersection_semantics(intersection_products: Dict[int, 
 
             flattened_state_labels[intersection_state_id] = flattened_state_tuple
         resulting_intersection_semantics.state_labels = flattened_state_labels
-        
+
         return resulting_intersection_semantics
-    
+
     return AH_Intersection(children=(left_operand, right_operand), state_labels=intersection_products)

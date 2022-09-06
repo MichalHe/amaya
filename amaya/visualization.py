@@ -128,7 +128,15 @@ def construct_state_label(state: int, state_semantics: AH_Node) -> str:
             return str(state)
         return construct_state_label(state, state_semantics.child)
 
-    elif isinstance(state_semantics, state_semantics_lib.AH_Union):
+    elif isinstance(state_semantics, state_semantics_lib.AH_Negation):
+        return construct_state_label(state, state_semantics.child)
+
+    # We have already covered all semantics nodes that do not touch state semantics. The remaining semantics-changing
+    # nodes might not have state_labels, as tracking the semantics (state_labels) can be turned off.
+    if not state_semantics.state_labels:
+        return str(state)
+
+    if isinstance(state_semantics, state_semantics_lib.AH_Union):
         origin_index, original_name = state_semantics.state_labels[state]
         return construct_state_label(original_name, state_semantics.children[origin_index])
 
@@ -140,10 +148,7 @@ def construct_state_label(state: int, state_semantics: AH_Node) -> str:
             component_labels.append(label)
         return '({0})'.format(','.join(component_labels))
 
-    elif isinstance(state_semantics, state_semantics_lib.AH_Negation):
-        return construct_state_label(state, state_semantics.child)
-
-    elif isinstance(state_semantics, state_semantics_lib.AH_Determinization):
+    elif isinstance(state_semantics, state_semantics_lib.AH_Determinization) or isinstance(state_semantics, state_semantics_lib.AH_Minimization):
         macrostate = state_semantics.state_labels.get(state)
         if not macrostate:
             # The current state is a TRAP state added to make the resulting DFA complete
@@ -155,7 +160,7 @@ def construct_state_label(state: int, state_semantics: AH_Node) -> str:
             macrostate_component_labels.append(component_label)
 
         return '{{{0}}}'.format(','.join(macrostate_component_labels))
-    
+
     assert not state_semantics, state_semantics
 
 
@@ -213,8 +218,8 @@ class AutomatonVisRepresentation:
                         'style': 'filled'
                 }
             return {}
-        
-        flat_state_labels = {state: construct_state_label(state, self.state_semantics) for state in self.states} 
+
+        flat_state_labels = {state: construct_state_label(state, self.state_semantics) for state in self.states}
 
         for state in self.states:
             state_label = flat_state_labels[state]
@@ -353,7 +358,7 @@ def _child_node(contents: str, tab_prefix: str) -> str:
 def _convert_ast_into_latex_tree(ast: AST_Node, depth: int = 0) -> str:
     """
     Convert given ast into a latex TikZ tree.
-    
+
     Requires that the ast is FOL formula - it cannot contain let expressions.
     """
     tab_prefix = '\t' * depth
@@ -372,10 +377,10 @@ def _convert_ast_into_latex_tree(ast: AST_Node, depth: int = 0) -> str:
 
     if not latex_node_label:
         raise ValueError(f'Cannot convert formula to latex tree - unknown node type: {node_type}')
-    
+
     # Construct the part of the latex tree for this node
     if node_type in {'forall', 'exists'}:
-        # Add variables being bound to quantifier tree nodes 
+        # Add variables being bound to quantifier tree nodes
         bound_vars = (var for var, dummy_var_type in ast[1])
         latex_node_label = '{0}({1})'.format(latex_node_label, ', '.join(bound_vars))
 

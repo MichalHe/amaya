@@ -26,6 +26,10 @@ from amaya.presburger.definitions import(
 )
 from amaya.relations_structures import Relation
 from amaya.utils import vector_dot
+from amaya.semantics_tracking import (
+    AH_Atom,
+    AH_AtomType
+)
 
 
 @dataclass(frozen=True)
@@ -136,7 +140,8 @@ def build_presburger_linear_nfa_from_initial_state(initial_state: LinearStateCom
     return nfa
 
 
-def build_nfa_from_linear_inequality(nfa: NFA,
+def build_nfa_from_linear_inequality(nfa_type: Type[NFA],
+                                     alphabet: LSBF_Alphabet,
                                      ineq: Relation,
                                      ineq_variables_ordered: List[Tuple[str, int]]) -> NFA:
 
@@ -151,19 +156,30 @@ def build_nfa_from_linear_inequality(nfa: NFA,
             return True
         return False
 
+    nfa = nfa_type(automaton_type=AutomatonType.NFA,
+                   alphabet=alphabet,
+                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_LE, atom=ineq, final_state=-1))
+
     nfa.add_initial_state(initial_state.value)
 
     nfa = build_presburger_linear_nfa_from_initial_state(initial_state,
                                                          is_transition_final,
                                                          ineq_variables_ordered,
                                                          nfa)
-
+    nfa.state_semantics.final_state = next(iter(nfa.final_states))
     return nfa
 
 
-def build_nfa_from_linear_equality(nfa: NFA, eq: Relation, eq_variables_ordered: List[Tuple[str, int]]) -> NFA:
+def build_nfa_from_linear_equality(nfa_type: Type[NFA],
+                                   alphabet: LSBF_Alphabet,
+                                   eq: Relation,
+                                   eq_variables_ordered: List[Tuple[str, int]]) -> NFA:
     initial_state = EqLinearStateComponent(value=eq.absolute_part,
                                            variable_coeficients=tuple(eq.variable_coeficients))
+
+    nfa = nfa_type(automaton_type=AutomatonType.NFA,
+                   alphabet=alphabet,
+                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_EQ, atom=eq, final_state=-1))
 
     nfa.add_initial_state(initial_state.value)
 
@@ -179,10 +195,12 @@ def build_nfa_from_linear_equality(nfa: NFA, eq: Relation, eq_variables_ordered:
                                                          is_transition_final,
                                                          eq_variables_ordered,
                                                          nfa)
+    nfa.state_semantics.final_state = next(iter(nfa.final_states))
     return nfa
 
 
-def build_presburger_modulo_nfa(nfa: NFA,
+def build_presburger_modulo_nfa(nfa_type: Type[NFA],
+                                alphabet: LSBF_Alphabet,
                                 relation: Relation,
                                 relation_variables_with_ids: List[Tuple[str, int]]) -> NFA:
     """
@@ -195,6 +213,10 @@ def build_presburger_modulo_nfa(nfa: NFA,
     """
 
     logger.info('Building modulo-NFA for provided relation: %s', relation)
+
+    nfa = nfa_type(automaton_type=AutomatonType.NFA,
+                   alphabet=alphabet,
+                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_CONGRUENCE, atom=relation, final_state=-1))
 
     assert can_build_modulo_automaton(relation)
 
@@ -265,6 +287,7 @@ def build_presburger_modulo_nfa(nfa: NFA,
                 len(nfa.states), len(nfa.final_states), 'is' if len(nfa.final_states) == 1 else 'are')
 
     nfa.used_variables = [var_id_pair[1] for var_id_pair in relation_variables_with_ids]
-    nfa.state_labels = StateLabelUnaryNode(labels=dict((state, label) for label, state in alias_store.data.items()), child=None)
+    # nfa.state_labels = StateLabelUnaryNode(labels=dict((state, label) for label, state in alias_store.data.items()), child=None)
     nfa.extra_info['aliases'] = alias_store
+    nfa.state_semantics.final_state = next(iter(nfa.final_states))
     return nfa

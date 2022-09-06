@@ -173,11 +173,11 @@ class NFA:
         if remove_nonfinishing_states:
             resulting_nfa.remove_nonfinishing_states()
 
-        state_id_to_label = {state_id: label for label, state_id in labels_to_state_number.items()}
-        
-        resulting_nfa.state_semantics = state_semantics_lib.construct_flattened_intersection_semantics(state_id_to_label,
-                                                                                                       self.state_semantics,
-                                                                                                       other.state_semantics)
+        if solver_config.track_state_semantics:
+            state_id_to_label = {state_id: label for label, state_id in labels_to_state_number.items()}
+            resulting_nfa.state_semantics = state_semantics_lib.construct_flattened_intersection_semantics(state_id_to_label,
+                                                                                                           self.state_semantics,
+                                                                                                           other.state_semantics)
         assert resulting_nfa.used_variables
         logger.info('Intersection done. States processed: %d. Result has %d states (initial=%d, final=%d).',
                     states_processed_cnt, len(resulting_nfa.states), len(resulting_nfa.initial_states), len(resulting_nfa.final_states))
@@ -188,7 +188,7 @@ class NFA:
         assert self.alphabet == other.alphabet
 
         logger.info('Performing NFA union: operand1 has %d states, operand2 has %d states.', len(self.states), len(other.states))
-        
+
         # Rename states to avoid aliasing as the automata can have equally named states
         # NOTE: Renaming does not modify state semantics - it break state labeling maps, however it does not matter as the renaming
         #       information will be folded in into the AH_Union node of the resulting automaton
@@ -201,8 +201,10 @@ class NFA:
         final_states = self_renamed.final_states.union(other_renamed.final_states)
 
         # Create state semantics for the union automaton based on the inputs
-        labels = {new_state: (0, original_state) for original_state, new_state in old_self_state_to_new_state_map.items()}
-        labels.update((new_state, (1, original_state)) for original_state, new_state in old_other_state_to_new_state_map.items())
+        labels = {}
+        if solver_config.track_state_semantics:
+            labels = {new_state: (0, original_state) for original_state, new_state in old_self_state_to_new_state_map.items()}
+            labels.update((new_state, (1, original_state)) for original_state, new_state in old_other_state_to_new_state_map.items())
         state_semantics = AH_Union(state_labels=labels, children=(self.state_semantics, other.state_semantics))
 
         union_nfa = NFA(
@@ -271,8 +273,9 @@ class NFA:
 
         determinized_automaton.used_variables = sorted(self.used_variables)
 
-        macrostate_id_to_macrostate = {macrostate_id: macrostate for macrostate, macrostate_id in macrostate_to_id_map.items()}
-        determinized_automaton.state_semantics.state_labels = macrostate_id_to_macrostate
+        if solver_config.track_state_semantics:
+            macrostate_id_to_macrostate = {macrostate_id: macrostate for macrostate, macrostate_id in macrostate_to_id_map.items()}
+            determinized_automaton.state_semantics.state_labels = macrostate_id_to_macrostate
 
         determinized_automaton.add_trap_state()
         return determinized_automaton
@@ -324,7 +327,7 @@ class NFA:
 
             new_nfa.transition_fn = self.transition_fn
             new_nfa.transition_fn.project_bit_away(bit_pos)
-            
+
             states_added_in_pad_closure = set()
             if not skip_pad_closure:
                 maybe_state_added_in_pad_closure = new_nfa.perform_pad_closure()
@@ -367,7 +370,7 @@ class NFA:
 
             state_to_new_name[state] = next_state_name
             next_state_name += 1
-        
+
         nfa = NFA(alphabet=self.alphabet,
                   automaton_type=self.automaton_type,
                   states=set(state_to_new_name[state] for state in self.states),
@@ -627,7 +630,8 @@ class NFA:
 
         minimized_dfa = NFA(automaton_type=AutomatonType.DFA,
                             alphabet=self.alphabet,
-                            used_variables=self.used_variables)
+                            used_variables=self.used_variables,
+                            state_semantics=AH_Minimization(child=self.state_semantics))
 
         state_to_its_partition_map: Dict[int, Tuple[int, ...]] = {}
         for partition in partitions:
@@ -680,8 +684,9 @@ class NFA:
             if some_partiton_state in self.final_states:
                 minimized_dfa.add_final_state(partition_state_number)
 
-        partition_id_to_partition = {partition_id: partition for partition, partition_id in partition_to_state_number_map.items()}
-        minimized_dfa.state_semantics = AH_Minimization(child=self.state_semantics, state_labels=partition_id_to_partition)
+        if solver_config.track_state_semantics:
+            partition_id_to_partition = {partition_id: partition for partition, partition_id in partition_to_state_number_map.items()}
+            minimized_dfa.state_semantics.state_labels = partition_id_to_partition
 
         return minimized_dfa
 
