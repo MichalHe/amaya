@@ -41,7 +41,7 @@ def can_build_modulo_automaton(relation: Relation) -> Union[bool, str]:
         ('The relation contains wrong number of modulo terms', len(relation.modulo_term_coefficients) == 1),
         ('The relation contains other than modulo terms', not relation.variable_names),
         ('The relation contains other than modulo terms', not relation.variable_coefficients),
-        ('The relation does not check for equality of reminders', relation.operation == '='),
+        ('The relation does not check for equality of reminders', relation.predicate_symbol == '='),
     )
 
     for reason, condition in correct_form_conditions_with_reasons:

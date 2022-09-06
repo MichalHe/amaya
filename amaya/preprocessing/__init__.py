@@ -77,10 +77,10 @@ def generate_atomic_constraints_for_replaced_mod_terms(
     constraints: List[Relation] = []
     for replacement_info in replacement_infos:
         reminder_lower_bound = Relation.new_lin_relation(variable_names=[replacement_info.variable],
-                                                         variable_coefficients=[-1], absolute_part=0, operation='<=')
+                                                         variable_coefficients=[-1], absolute_part=0, predicate_symbol='<=')
 
         reminder_upper_bound = Relation.new_lin_relation(variable_names=[replacement_info.variable],
-                                                         variable_coefficients=[1], operation='<=',
+                                                         variable_coefficients=[1], predicate_symbol='<=',
                                                          absolute_part=replacement_info.term.modulo - 1)
 
         # Modify the original modulo term by subtracting the replacement variable, and use it to form the congruence
@@ -112,11 +112,11 @@ def generate_atomic_constraints_for_replaced_div_terms(
 
         reminder_lower_bound = Relation.new_lin_relation(variable_names=list(_vars),
                                                          variable_coefficients=[-coef for coef in _var_coefs],
-                                                         absolute_part=0, operation='<=')
+                                                         absolute_part=0, predicate_symbol='<=')
         reminder_upper_bound = Relation.new_lin_relation(variable_names=list(_vars),
                                                          variable_coefficients=list(_var_coefs),
                                                          absolute_part=replacement_info.term.divisor - 1,
-                                                         operation='<=')
+                                                         predicate_symbol='<=')
 
         constraints.extend((reminder_lower_bound, reminder_upper_bound))
 

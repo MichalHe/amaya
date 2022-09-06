@@ -62,19 +62,19 @@ def extract_bounds_set_on_mod_terms(relation: Relation, ast_node_with_bounds_inf
         mod_term_coef = relation.modulo_term_coefficients[0]
         if mod_term_coef == 0:
             return True  # Propagate, that the relation had the form this function looks for
-        if relation.operation == '=': 
+        if relation.predicate_symbol == '=': 
             mod_term_bounds = Mod_Term_Bounds(lower_bound=max(0, relation.absolute_part),
                                               upper_bound=min(mod_term.modulo - 1, relation.absolute_part))
         else: 
             relation_rhs_constant = relation.absolute_part
 
             # Change the relation predicate symbol to be only < or <=
-            if relation.operation in ('>', '<='):
+            if relation.predicate_symbol in ('>', '<='):
                 mod_term_coef *= -1
                 relation_rhs_constant *= -1
 
             # Change the relation predicate symbol to be only <=
-            if relation.operation in ('<', '>'): 
+            if relation.predicate_symbol in ('<', '>'): 
                 relation_rhs_constant -= 1
 
             if mod_term_coef > 0:
@@ -95,14 +95,14 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
             # The relation has the form (x mod K) <> C, thus we don't have to continue as there are no variables
             return relation_with_bounds_info
 
-        if relation.operation in ('<=', '<', '='):
+        if relation.predicate_symbol in ('<=', '<', '='):
             for var_coef, var_name in zip(relation.variable_coefficients, relation.variable_names):
                 if var_coef > 0:
                     relation_with_bounds_info.bounds[var_name].has_upper_bound = True
                 elif var_coef < 0:
                     relation_with_bounds_info.bounds[var_name].has_lower_bound = True
 
-        if relation.operation in ('>', '>=', '='):
+        if relation.predicate_symbol in ('>', '>=', '='):
             for var_coef, var_name in zip(relation.variable_coefficients, relation.variable_names):
                 if var_coef > 0:
                     relation_with_bounds_info.bounds[var_name].has_lower_bound = True
@@ -174,12 +174,12 @@ def will_relation_be_always_satisfied_due_to_unbound_var(relation: Relation,
         var_coef = relation.variable_coefficients[i]
         var_bounds = quantified_vars_with_bounds[var_name]
 
-        if relation.operation in ('<', '<='):
+        if relation.predicate_symbol in ('<', '<='):
             can_var_term_be_arbitrarly_small = (
                 (var_coef > 0 and not var_bounds.has_lower_bound) or (var_coef < 0 and not var_bounds.has_upper_bound)
             )
             return can_var_term_be_arbitrarly_small
-        if relation.operation in ('>', '>='):
+        if relation.predicate_symbol in ('>', '>='):
             can_var_term_be_arbitrarly_large = (
                 (var_coef > 0 and not var_bounds.has_upper_bound) or (var_coef < 0 and not var_bounds.has_lower_bound)
             )
@@ -196,7 +196,8 @@ def simplify_modulo_terms_with_unbound_vars_in_relation(relation: Relation,
                                    modulo_term_coefficients=[],
                                    div_terms=relation.div_terms,
                                    div_term_coefficients=relation.div_term_coefficients,
-                                   absolute_part=relation.absolute_part, operation=relation.operation)
+                                   absolute_part=relation.absolute_part,
+                                   predicate_symbol=relation.predicate_symbol)
 
     for modulo_term_coef, modulo_term in zip(relation.modulo_term_coefficients, relation.modulo_terms):
         simplified_modulo_value: Optional[int] = None

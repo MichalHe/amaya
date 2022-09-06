@@ -903,7 +903,6 @@ class MTBDDTransitionFn():
     def rename_macrostates_after_determinization(mtbdds: Iterable[MTBDD],
                                                  resulting_automaton_id: int,
                                                  start_numbering_from: int = 0) -> Tuple[List[ct.c_ulong], Dict[Tuple[int, ...], int]]:
-        '''This operation is performed without creating any new mtbdds, in situ.'''
         in_mtbdds = (ct.c_ulong * len(mtbdds))()
         for i, mtbdd in enumerate(mtbdds):
             in_mtbdds[i] = mtbdd
@@ -953,7 +952,7 @@ class MTBDDTransitionFn():
 
     @staticmethod
     def complete_mtbdd_with_trapstate(mtbdd: ct.c_long, automaton_id: int, trapstate_id: int) -> Tuple[ct.c_long, bool]:
-        '''Wrapper call.
+        """Wrapper call.
 
         Add a transition to the given trapstate for every alphabet symbol
         for which the given mtbdd does not have any (valid) transition.
@@ -961,7 +960,7 @@ class MTBDDTransitionFn():
         Returns the mtbdd resulting from the completion (might be unchanged if the
         mtbdd already was complete) and the information about whether the operation
         did indeed modify the mtbdd somehow.
-        '''
+        """
         _aid = ct.c_uint32(automaton_id)
         _trapstate = c_side_state_type(trapstate_id)
         _had_effect = ct.c_bool()

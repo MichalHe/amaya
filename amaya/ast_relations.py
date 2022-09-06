@@ -118,11 +118,11 @@ def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr,
     # Deduce resulting relation type after rearangements - the expression might have to be rotated
     # in order to have the constant on the right side
     if rel_type in ('<', '>'):
-        rel_op = '<'
+        predicate_symbol = '<'
     elif rel_type in ('<=', '>='):
-        rel_op = '<='
+        predicate_symbol = '<='
     elif rel_type == '=':
-        rel_op = '='
+        predicate_symbol = '='
 
     relation_variable_names = []
     relation_variable_coefficients = []
@@ -153,7 +153,7 @@ def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr,
         div_terms=div_terms,
         div_term_coefficients=div_term_coefficients,
         absolute_part=relation_abs,
-        operation=rel_op
+        predicate_symbol=predicate_symbol
     )
 
 
@@ -190,9 +190,9 @@ def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Rel
         normalized_expr.variable_coefficients = coefs
         normalized_expr.variable_names = var_names
 
-    if normalized_expr.operation == '<':
+    if normalized_expr.predicate_symbol == '<':
         conversion_message = 'Converting the sharp inequality into a non-sharp one (from={0},'.format(normalized_expr)
-        normalized_expr.operation = '<='
+        normalized_expr.predicate_symbol = '<='
         normalized_expr.absolute_part -= 1
         conversion_message += ' to={0})'.format(normalized_expr)
         logger.debug(conversion_message)

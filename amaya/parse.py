@@ -97,10 +97,7 @@ class VariableInfo:
 
 
 class EvaluationContext:
-    def __init__(self,
-                 emit_introspect=lambda nfa, operation: None,
-                 alphabet: Optional[LSBF_Alphabet] = None):
-
+    def __init__(self, emit_introspect=lambda nfa, operation: None, alphabet: Optional[LSBF_Alphabet] = None):
         self.introspect_handle = emit_introspect
 
         # Evaluation stats
@@ -577,8 +574,8 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         return automaton_constr.trivial_accepting(ctx.alphabet)
 
     # We should never encounter the '<' inequality as we are always converting it to the <=
-    assert relation.operation in ('<=', '=')
-    operation, automaton_building_function = building_handlers[solver_config.solution_domain][relation.operation]
+    assert relation.predicate_symbol in ('<=', '=')
+    operation, automaton_building_function = building_handlers[solver_config.solution_domain][relation.predicate_symbol]
 
     # Congruence relations of the form a.x ~ k must be handled differently - it is necessary to reorder
     # the modulo term inside, not the nonmodular variables
@@ -628,7 +625,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
         reordered_relation = Relation.new_lin_relation(variable_names=var_names, variable_coefficients=var_coefs,
                                                        absolute_part=relation.absolute_part,
-                                                       operation=relation.operation)
+                                                       predicate_symbol=relation.predicate_symbol)
 
         assert automaton_building_function
         nfa = automaton_building_function(automaton_constr, ctx.alphabet, reordered_relation, variable_id_pairs)

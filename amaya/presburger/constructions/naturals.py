@@ -100,11 +100,11 @@ def build_dfa_from_sharp_linear_inequality(ineq: Relation,
     :param alphabet: Alphabet for the created automaton.
     :param automaton_constr: Constructor for the automaton.
     """
-    assert ineq.operation == '<'
+    assert ineq.predicate_symbol == '<'
 
     # Since we are dealing with a discrete domain:
     ineq.absolute_part -= 1
-    ineq.operation = '<='
+    ineq.predicate_symbol = '<='
 
     ineq_dfa = build_dfa_from_linear_inequality(ineq)
 

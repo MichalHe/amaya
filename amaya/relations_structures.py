@@ -226,7 +226,7 @@ class Relation(object):
     div_term_coefficients: List[int]
 
     absolute_part: int
-    operation: str
+    predicate_symbol: str
 
     def are_all_coefficients_zero(self) -> bool:
         '''Returns true if all relation variable coefficients are zero.'''
@@ -256,7 +256,7 @@ class Relation(object):
                 '>=': lambda absolute_part: absolute_part <= 0,
             }
 
-            absolute_part_condition = absolute_part_conditions[self.operation]
+            absolute_part_condition = absolute_part_conditions[self.predicate_symbol]
             return absolute_part_condition(self.absolute_part)
         else:
             return False
@@ -292,13 +292,13 @@ class Relation(object):
 
         relation_lhs_parts = (' '.join(linear_terms), ' '.join(modulo_terms), ' '.join(div_terms))
 
-        operation = self.operation
+        predicate_symbol = self.predicate_symbol
         if use_latex_notation:
-            operation = {'<=': '\\le', '>=': '\\ge'}.get(operation, operation)
+            predicate_symbol = {'<=': '\\le', '>=': '\\ge'}.get(predicate_symbol, predicate_symbol)
 
         return '{0} {1} {2}'.format(
             ' '.join(lhs_part for lhs_part in relation_lhs_parts if lhs_part),
-            operation,
+            predicate_symbol,
             self.absolute_part
         )
 
@@ -334,8 +334,8 @@ class Relation(object):
         return (positive_sign_count > sign_count / 2)
 
     def ensure_canoical_form_if_equation(self):
-        """Ensures that the majority of variables/moduloterms in the relation have positive sign if the operation is =."""
-        if self.operation != '=':
+        """Ensures that the majority of variables/moduloterms in the relation have the positive sign if the predicate_symbol is =."""
+        if self.predicate_symbol != '=':
             return
         if not self.is_in_canoical_form():
             self.variable_coefficients = [-1 * coef for coef in self.variable_coefficients]
@@ -345,7 +345,7 @@ class Relation(object):
 
     def is_conguence_equality(self) -> bool:
         """Returns true if the relation is equation of form (a.x mod c0) = c1."""
-        return len(self.modulo_terms) == 1 and self.operation == '=' and not self.variable_names and not self.div_terms
+        return len(self.modulo_terms) == 1 and self.predicate_symbol == '=' and not self.variable_names and not self.div_terms
 
     def direct_construction_exists(self) -> bool:
         """Returns true if there exists a direct construction for the stored relation."""
@@ -368,7 +368,8 @@ class Relation(object):
                                      variable_coefficients=list(self.variable_coefficients),
                                      modulo_terms=[], modulo_term_coefficients=[],
                                      div_term_coefficients=[], div_terms=[],
-                                     absolute_part=self.absolute_part, operation=self.operation)
+                                     absolute_part=self.absolute_part,
+                                     predicate_symbol=self.predicate_symbol)
         # Replace div terms
         for i, div_term_data in enumerate(zip(div_vars, self.div_term_coefficients, self.div_terms)):
             div_var, term_coef, term = div_term_data
@@ -473,15 +474,16 @@ class Relation(object):
 
     @staticmethod
     def new_lin_relation(variable_names: List[str] = [], variable_coefficients: List[int] = [],
-                         absolute_part: int = 0, operation: str = '=') -> Relation:
+                         absolute_part: int = 0, predicate_symbol: str = '=') -> Relation:
         return Relation(variable_names=variable_names, variable_coefficients=variable_coefficients,
-                        absolute_part=absolute_part, operation=operation,
+                        absolute_part=absolute_part, predicate_symbol=predicate_symbol,
                         div_term_coefficients=[], div_terms=[], modulo_terms=[], modulo_term_coefficients=[])
 
     @staticmethod
     def new_congruence_relation(modulo_terms: List[ModuloTerm] = [], modulo_term_coefficients: List[int] = [],
                                 absolute_part: int = 0) -> Relation:
-        return Relation(variable_names=[], variable_coefficients=[], absolute_part=absolute_part, operation='=',
+        return Relation(variable_names=[], variable_coefficients=[],
+                        absolute_part=absolute_part, predicate_symbol='=',
                         div_term_coefficients=[], div_terms=[], modulo_terms=modulo_terms,
                         modulo_term_coefficients=modulo_term_coefficients)
 
@@ -494,4 +496,4 @@ class Relation(object):
                         modulo_term_coefficients=list(relation.modulo_term_coefficients),
                         div_terms=list(relation.div_terms),
                         div_term_coefficients=list(relation.div_term_coefficients),
-                        absolute_part=relation.absolute_part, operation=relation.operation)
+                        absolute_part=relation.absolute_part, predicate_symbol=relation.predicate_symbol)
