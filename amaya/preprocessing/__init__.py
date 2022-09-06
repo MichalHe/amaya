@@ -77,18 +77,18 @@ def generate_atomic_constraints_for_replaced_mod_terms(
     constraints: List[Relation] = []
     for replacement_info in replacement_infos:
         reminder_lower_bound = Relation.new_lin_relation(variable_names=[replacement_info.variable],
-                                                         variable_coeficients=[-1], absolute_part=0, operation='<=')
+                                                         variable_coefficients=[-1], absolute_part=0, operation='<=')
 
         reminder_upper_bound = Relation.new_lin_relation(variable_names=[replacement_info.variable],
-                                                         variable_coeficients=[1], operation='<=',
+                                                         variable_coefficients=[1], operation='<=',
                                                          absolute_part=replacement_info.term.modulo - 1)
 
         # Modify the original modulo term by subtracting the replacement variable, and use it to form the congruence
         modulo_term = ModuloTerm(variables=replacement_info.term.variables + (replacement_info.variable,),
-                                 variable_coeficients=replacement_info.term.variable_coeficients + (-1,),
+                                 variable_coefficients=replacement_info.term.variable_coefficients + (-1,),
                                  constant=replacement_info.term.constant, modulo=replacement_info.term.modulo)
         modulo_term = modulo_term.into_sorted()
-        congruence = Relation.new_congruence_relation(modulo_terms=[modulo_term],  modulo_term_coeficients=[1])
+        congruence = Relation.new_congruence_relation(modulo_terms=[modulo_term],  modulo_term_coefficients=[1])
 
         constraints.extend((reminder_lower_bound, reminder_upper_bound, congruence))
 
@@ -105,16 +105,16 @@ def generate_atomic_constraints_for_replaced_div_terms(
     constraints: List[Relation] = []
     for replacement_info in replacement_infos:
         _vars = replacement_info.term.variables + (replacement_info.variable,)
-        _var_coefs = replacement_info.term.variable_coeficients + (-replacement_info.term.divisor,)
+        _var_coefs = replacement_info.term.variable_coefficients + (-replacement_info.term.divisor,)
 
         # Sort the variables and their coefficients according to their names
         _vars, _var_coefs = zip(*sorted(zip(_vars, _var_coefs), key=lambda pair: pair[0]))
 
         reminder_lower_bound = Relation.new_lin_relation(variable_names=list(_vars),
-                                                         variable_coeficients=[-coef for coef in _var_coefs],
+                                                         variable_coefficients=[-coef for coef in _var_coefs],
                                                          absolute_part=0, operation='<=')
         reminder_upper_bound = Relation.new_lin_relation(variable_names=list(_vars),
-                                                         variable_coeficients=list(_var_coefs),
+                                                         variable_coefficients=list(_var_coefs),
                                                          absolute_part=replacement_info.term.divisor - 1,
                                                          operation='<=')
 

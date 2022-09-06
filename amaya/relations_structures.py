@@ -21,12 +21,12 @@ class PresburgerExpr:
     modulo_terms: Dict[ModuloTerm, int] = field(default_factory=dict)
     div_terms: Dict[DivTerm, int] = field(default_factory=dict)
 
-    def _invert_signs_immutable(self, coeficient_mapping: Dict[Any, int]) -> Dict[Any, int]:
-        """Invert/negate signs in given coeficient_mapping."""
-        new_coef_mapping: Dict[Any, int] = {term: -coef for term, coef in coeficient_mapping.items()}
+    def _invert_signs_immutable(self, coefficient_mapping: Dict[Any, int]) -> Dict[Any, int]:
+        """Invert/negate signs in given coefficient_mapping."""
+        new_coef_mapping: Dict[Any, int] = {term: -coef for term, coef in coefficient_mapping.items()}
         return new_coef_mapping
 
-    def _subtract_coeficients_immutable(self,
+    def _subtract_coefficients_immutable(self,
                                         coef_mapping_left: Dict[Any, int],
                                         coef_mapping_right: Dict[Any, int]) -> Dict[Any, int]:
         subtraction_result = dict(coef_mapping_left)
@@ -37,7 +37,7 @@ class PresburgerExpr:
                 subtraction_result[item] = -coef_mapping_right[item]
         return subtraction_result
 
-    def _add_coeficients_immutable(self,
+    def _add_coefficients_immutable(self,
                                    coef_mapping_left: Dict[Any, int],
                                    coef_mapping_right: Dict[Any, int]) -> Dict[Any, int]:
         subtraction_result = dict(coef_mapping_left)
@@ -62,9 +62,9 @@ class PresburgerExpr:
 
     def __sub__(self, other_expr: PresburgerExpr) -> PresburgerExpr:
         abs_val = self.absolute_part - other_expr.absolute_part
-        variables = self._subtract_coeficients_immutable(self.variables, other_expr.variables)
-        modulo_terms = self._subtract_coeficients_immutable(self.modulo_terms, other_expr.modulo_terms)
-        div_terms = self._subtract_coeficients_immutable(self.div_terms, other_expr.div_terms)
+        variables = self._subtract_coefficients_immutable(self.variables, other_expr.variables)
+        modulo_terms = self._subtract_coefficients_immutable(self.modulo_terms, other_expr.modulo_terms)
+        div_terms = self._subtract_coefficients_immutable(self.div_terms, other_expr.div_terms)
 
         return PresburgerExpr(
             absolute_part=abs_val,
@@ -75,9 +75,9 @@ class PresburgerExpr:
 
     def __add__(self, other_expr: PresburgerExpr) -> PresburgerExpr:
         abs_val = self.absolute_part + other_expr.absolute_part
-        variables = self._add_coeficients_immutable(self.variables, other_expr.variables)
-        modulo_terms = self._add_coeficients_immutable(self.modulo_terms, other_expr.modulo_terms)
-        div_terms = self._add_coeficients_immutable(self.div_terms, other_expr.div_terms)
+        variables = self._add_coefficients_immutable(self.variables, other_expr.variables)
+        modulo_terms = self._add_coefficients_immutable(self.modulo_terms, other_expr.modulo_terms)
+        div_terms = self._add_coefficients_immutable(self.div_terms, other_expr.div_terms)
 
         return PresburgerExpr(
             absolute_part=abs_val,
@@ -131,12 +131,12 @@ class PresburgerExpr:
 class ModuloTerm:
     """Represents modulo term of form: `a.x + b.y ... + C ~=~ 0` (where ~=~ is the symbol for congruent)."""
     variables: Tuple[str, ...]
-    variable_coeficients: Tuple[int, ...]
+    variable_coefficients: Tuple[int, ...]
     constant: int
     modulo: int
 
     def __str__(self) -> str:
-        variable_with_coefs = zip(self.variable_coeficients, self.variables)
+        variable_with_coefs = zip(self.variable_coefficients, self.variables)
         _variables = ['{0}.{1}'.format(*var_with_coef) for var_with_coef in variable_with_coefs]
 
         return '({0} mod {1})'.format(' '.join(_variables), self.modulo)
@@ -153,23 +153,23 @@ class ModuloTerm:
         :param int modulo: Result of evaluating the second AST in [mod AST AST]
         """
         variables = tuple(sorted(expr.variables.keys()))
-        coeficients = tuple(expr.variables[variable] for variable in variables)
+        coefficients = tuple(expr.variables[variable] for variable in variables)
         constant = expr.absolute_part
 
         return ModuloTerm(
             variables=variables,
-            variable_coeficients=coeficients,
+            variable_coefficients=coefficients,
             constant=constant,
             modulo=modulo
         )
 
     def into_sorted(self) -> ModuloTerm:
-        """Sorts the variables and corresponding coeficients alphabetically."""
-        var_coef_pairs = zip(self.variables, self.variable_coeficients)
+        """Sorts the variables and corresponding coefficients alphabetically."""
+        var_coef_pairs = zip(self.variables, self.variable_coefficients)
         sorted_var_coef_pairs = sorted(var_coef_pairs, key=lambda pair: pair[0])
 
         sorted_vars, sorted_coefs = zip(*sorted_var_coef_pairs)
-        return ModuloTerm(variables=sorted_vars, variable_coeficients=sorted_coefs,
+        return ModuloTerm(variables=sorted_vars, variable_coefficients=sorted_coefs,
                           constant=self.constant, modulo=self.modulo)
 
 
@@ -177,24 +177,24 @@ class ModuloTerm:
 class DivTerm(object):
     """Represents single SMT-LIB div term."""
     variables: Tuple[str, ...]
-    variable_coeficients: Tuple[str, ...]
+    variable_coefficients: Tuple[str, ...]
     constant: int
     divisor: int
 
     def __str__(self) -> str:
         sign = '+' if self.constant >= 0 else '-'
-        var_terms = (f'{var_coef}{var}' for var_coef, var in zip(self.variable_coeficients, self.variables))
+        var_terms = (f'{var_coef}{var}' for var_coef, var in zip(self.variable_coefficients, self.variables))
         var_term_str = ' '.join(var_terms)
         return f'({var_term_str} {sign} {self.constant}) div {self.divisor})'
 
     @staticmethod
     def from_expression(expr: PresburgerExpr, divisor: int) -> DivTerm:
         variable_coef_pairs = sorted(expr.variables.items(), key=lambda pair: pair[0])
-        variables, var_coefficients = zip(*variable_coef_pairs)
+        variables, var_coefficients = zip(*variable_coef_pairs) if variable_coef_pairs else ((), ())
         return DivTerm(
             constant=expr.absolute_part,
             variables=variables,
-            variable_coeficients=var_coefficients,
+            variable_coefficients=var_coefficients,
             divisor=divisor
         )
 
@@ -217,21 +217,21 @@ class Relation(object):
     of existential quantifier.
     """
     variable_names: List[str]
-    variable_coeficients: List[int]
+    variable_coefficients: List[int]
 
     modulo_terms: List[ModuloTerm]
-    modulo_term_coeficients: List[int]
+    modulo_term_coefficients: List[int]
 
     div_terms: List[DivTerm]
-    div_term_coeficients: List[int]
+    div_term_coefficients: List[int]
 
     absolute_part: int
     operation: str
 
-    def are_all_coeficients_zero(self) -> bool:
-        '''Returns true if all relation variable coeficients are zero.'''
+    def are_all_coefficients_zero(self) -> bool:
+        '''Returns true if all relation variable coefficients are zero.'''
         are_all_coefs_zero = True
-        for coef in self.variable_coeficients:
+        for coef in self.variable_coefficients:
             if coef != 0:
                 are_all_coefs_zero = False
                 break
@@ -244,7 +244,7 @@ class Relation(object):
         if self.modulo_terms:
             return False
 
-        are_all_coefs_zero = self.are_all_coeficients_zero()
+        are_all_coefs_zero = self.are_all_coefficients_zero()
 
         if are_all_coefs_zero:
             # \\vec{coefs} \cdot \\vec{variables}   (left hand side) is always zero
@@ -281,13 +281,13 @@ class Relation(object):
                 yield '{0}{1}.{2}'.format(('+' if coef >= 0 else ''), coef, var_name)
 
     def into_string(self, use_latex_notation: bool = False) -> str:
-        linear_terms = self._format_term_type_into_string(self.variable_coeficients, self.variable_names,
+        linear_terms = self._format_term_type_into_string(self.variable_coefficients, self.variable_names,
                                                           use_latex_notation=use_latex_notation)
 
-        modulo_terms = self._format_term_type_into_string(self.modulo_term_coeficients, self.modulo_terms,
+        modulo_terms = self._format_term_type_into_string(self.modulo_term_coefficients, self.modulo_terms,
                                                           use_latex_notation=use_latex_notation)
 
-        div_terms = self._format_term_type_into_string(self.div_term_coeficients, self.div_terms,
+        div_terms = self._format_term_type_into_string(self.div_term_coefficients, self.div_terms,
                                                           use_latex_notation=use_latex_notation)
 
         relation_lhs_parts = (' '.join(linear_terms), ' '.join(modulo_terms), ' '.join(div_terms))
@@ -316,17 +316,17 @@ class Relation(object):
         return sorted(used_variables)
 
     def is_in_canoical_form(self) -> bool:
-        sign_count = len(self.variable_coeficients) + len(self.modulo_term_coeficients)
+        sign_count = len(self.variable_coefficients) + len(self.modulo_term_coefficients)
 
         positive_sign_count = 0
-        for coef in self.variable_coeficients:
+        for coef in self.variable_coefficients:
             if coef >= 0:
                 positive_sign_count += 1
-        for coef in self.modulo_term_coeficients:
+        for coef in self.modulo_term_coefficients:
             if coef >= 0:
                 positive_sign_count += 1
 
-        positive_sign_count += sum(coef >= 0 for coef in self.div_term_coeficients)
+        positive_sign_count += sum(coef >= 0 for coef in self.div_term_coefficients)
 
         if positive_sign_count == sign_count / 2:
             return self.absolute_part >= 0
@@ -338,9 +338,9 @@ class Relation(object):
         if self.operation != '=':
             return
         if not self.is_in_canoical_form():
-            self.variable_coeficients = [-1 * coef for coef in self.variable_coeficients]
-            self.modulo_term_coeficients = [-1 * coef for coef in self.modulo_term_coeficients]
-            self.div_term_coeficients = [-1 * coef for coef in self.div_term_coeficients]
+            self.variable_coefficients = [-1 * coef for coef in self.variable_coefficients]
+            self.modulo_term_coefficients = [-1 * coef for coef in self.modulo_term_coefficients]
+            self.div_term_coefficients = [-1 * coef for coef in self.div_term_coefficients]
             self.absolute_part *= -1
 
     def is_conguence_equality(self) -> bool:
@@ -365,30 +365,30 @@ class Relation(object):
         div_replacement_info: List[NonlinearTermReplacementInfo[DivTerm]] = []
 
         replaced_relation = Relation(variable_names=list(self.variable_names),
-                                     variable_coeficients=list(self.variable_coeficients),
-                                     modulo_terms=[], modulo_term_coeficients=[],
-                                     div_term_coeficients=[], div_terms=[],
+                                     variable_coefficients=list(self.variable_coefficients),
+                                     modulo_terms=[], modulo_term_coefficients=[],
+                                     div_term_coefficients=[], div_terms=[],
                                      absolute_part=self.absolute_part, operation=self.operation)
         # Replace div terms
-        for i, div_term_data in enumerate(zip(div_vars, self.div_term_coeficients, self.div_terms)):
+        for i, div_term_data in enumerate(zip(div_vars, self.div_term_coefficients, self.div_terms)):
             div_var, term_coef, term = div_term_data
 
             assert div_var not in self.variable_names, ('Name collision when trying to replace div term '
                                                         'with an existentially bound variable: {div_var}')
 
             replaced_relation.variable_names.append(div_var)
-            replaced_relation.variable_coeficients.append(term_coef)
+            replaced_relation.variable_coefficients.append(term_coef)
             div_replacement_info.append(NonlinearTermReplacementInfo(term=term, variable=div_var))
 
         # Replace modulo terms
-        for i, mod_term_data in enumerate(zip(mod_vars, self.modulo_term_coeficients, self.modulo_terms)):
+        for i, mod_term_data in enumerate(zip(mod_vars, self.modulo_term_coefficients, self.modulo_terms)):
             mod_var, term_coef, term = mod_term_data
 
             assert mod_var not in self.variable_names, ('Name collision when trying to replace modulo term '
                                                         'with an existentially bound variable: {mod_var}')
 
             replaced_relation.variable_names.append(mod_var)
-            replaced_relation.variable_coeficients.append(term_coef)
+            replaced_relation.variable_coefficients.append(term_coef)
             modulo_replacement_info.append(NonlinearTermReplacementInfo(term=term, variable=mod_var))
 
         # Sort the relation variables alphabetically, so we have a canoical form in the future
@@ -397,13 +397,13 @@ class Relation(object):
         return (replaced_relation, modulo_replacement_info, div_replacement_info)
 
     def sort_variables_alphabetically(self):
-        """Sorts the variables and corresponding coeficients alphabetically."""
-        var_coef_pairs = zip(self.variable_names, self.variable_coeficients)
+        """Sorts the variables and corresponding coefficients alphabetically."""
+        var_coef_pairs = zip(self.variable_names, self.variable_coefficients)
         sorted_var_coef_pairs = sorted(var_coef_pairs, key=lambda pair: pair[0])
 
         sorted_vars, sorted_coefs = zip(*sorted_var_coef_pairs) if sorted_var_coef_pairs else (tuple(), tuple())
         self.variable_names = list(sorted_vars)
-        self.variable_coeficients = list(sorted_coefs)
+        self.variable_coefficients = list(sorted_coefs)
 
     def calc_approximate_automaton_size(self) -> int:
         """
@@ -413,11 +413,10 @@ class Relation(object):
         terms or congruence).
         """
         if self.variable_names:
-            return sum(map(abs, self.variable_coeficients))
+            return sum(map(abs, self.variable_coefficients))
         if self.modulo_terms:
             return abs(self.modulo_terms[0].modulo)
         return 0
-
 
     def rename_frozen_terms(self,
                             terms: List[T],
@@ -442,7 +441,6 @@ class Relation(object):
                 renamed_terms.append(term)
         return was_any_variable_renamed, renamed_terms
 
-
     def rename_variables(self, renaming: Dict[str, VariableRenamingInfo]) -> bool:
         """Rename the variables used in this relation. Returns True if any variable was renamed."""
         was_any_variable_renamed = False
@@ -456,7 +454,7 @@ class Relation(object):
         was_any_variable_inside_modulo_renamed, self.modulo_terms = self.rename_frozen_terms(
             self.modulo_terms, renaming,
             lambda renamed_vars, mod_term: ModuloTerm(variables=renamed_vars,
-                                                      variable_coeficients=mod_term.variable_coeficients,
+                                                      variable_coefficients=mod_term.variable_coefficients,
                                                       modulo=mod_term.modulo, constant=mod_term.constant)
         )
         was_any_variable_renamed |= was_any_variable_inside_modulo_renamed
@@ -464,7 +462,7 @@ class Relation(object):
         was_any_variable_inside_div_renamed, self.div_terms = self.rename_frozen_terms(
             self.div_terms, renaming,
             lambda renamed_vars, div_term: DivTerm(variables=renamed_vars,
-                                                   variable_coeficients=div_term.variable_coeficients,
+                                                   variable_coefficients=div_term.variable_coefficients,
                                                    divisor=div_term.divisor, constant=div_term.constant)
         )
         was_any_variable_renamed |= was_any_variable_inside_div_renamed
@@ -473,17 +471,27 @@ class Relation(object):
 
         return was_any_variable_renamed
 
-
     @staticmethod
-    def new_lin_relation(variable_names: List[str] = [], variable_coeficients: List[int] = [],
+    def new_lin_relation(variable_names: List[str] = [], variable_coefficients: List[int] = [],
                          absolute_part: int = 0, operation: str = '=') -> Relation:
-        return Relation(variable_names=variable_names, variable_coeficients=variable_coeficients,
+        return Relation(variable_names=variable_names, variable_coefficients=variable_coefficients,
                         absolute_part=absolute_part, operation=operation,
-                        div_term_coeficients=[], div_terms=[], modulo_terms=[], modulo_term_coeficients=[])
+                        div_term_coefficients=[], div_terms=[], modulo_terms=[], modulo_term_coefficients=[])
 
     @staticmethod
-    def new_congruence_relation(modulo_terms: List[ModuloTerm] = [], modulo_term_coeficients: List[int] = [],
+    def new_congruence_relation(modulo_terms: List[ModuloTerm] = [], modulo_term_coefficients: List[int] = [],
                                 absolute_part: int = 0) -> Relation:
-        return Relation(variable_names=[], variable_coeficients=[], absolute_part=absolute_part, operation='=',
-                        div_term_coeficients=[], div_terms=[], modulo_terms=modulo_terms,
-                        modulo_term_coeficients=modulo_term_coeficients)
+        return Relation(variable_names=[], variable_coefficients=[], absolute_part=absolute_part, operation='=',
+                        div_term_coefficients=[], div_terms=[], modulo_terms=modulo_terms,
+                        modulo_term_coefficients=modulo_term_coefficients)
+
+    @staticmethod
+    def copy_of(relation: Relation) -> Relation:
+        # Both ModuloTerm and DivTerm have frozen=True, meaning they are immutable, so no need to do a deep copy
+        return Relation(variable_names=list(relation.variable_names),
+                        variable_coefficients=list(relation.variable_coefficients),
+                        modulo_terms=list(relation.modulo_terms),
+                        modulo_term_coefficients=list(relation.modulo_term_coefficients),
+                        div_terms=list(relation.div_terms),
+                        div_term_coefficients=list(relation.div_term_coefficients),
+                        absolute_part=relation.absolute_part, operation=relation.operation)

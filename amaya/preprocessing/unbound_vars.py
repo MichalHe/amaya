@@ -59,7 +59,7 @@ def extract_bounds_set_on_mod_terms(relation: Relation, ast_node_with_bounds_inf
     # an upper bound, we will replace the term with correct value and not, e.g., 0.
     if len(relation.modulo_terms) == 1 and not relation.div_terms and not relation.variable_names:
         mod_term = relation.modulo_terms[0]
-        mod_term_coef = relation.modulo_term_coeficients[0]
+        mod_term_coef = relation.modulo_term_coefficients[0]
         if mod_term_coef == 0:
             return True  # Propagate, that the relation had the form this function looks for
         if relation.operation == '=': 
@@ -96,14 +96,14 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
             return relation_with_bounds_info
 
         if relation.operation in ('<=', '<', '='):
-            for var_coef, var_name in zip(relation.variable_coeficients, relation.variable_names):
+            for var_coef, var_name in zip(relation.variable_coefficients, relation.variable_names):
                 if var_coef > 0:
                     relation_with_bounds_info.bounds[var_name].has_upper_bound = True
                 elif var_coef < 0:
                     relation_with_bounds_info.bounds[var_name].has_lower_bound = True
 
         if relation.operation in ('>', '>=', '='):
-            for var_coef, var_name in zip(relation.variable_coeficients, relation.variable_names):
+            for var_coef, var_name in zip(relation.variable_coefficients, relation.variable_names):
                 if var_coef > 0:
                     relation_with_bounds_info.bounds[var_name].has_lower_bound = True
                 elif var_coef < 0:
@@ -171,7 +171,7 @@ def will_relation_be_always_satisfied_due_to_unbound_var(relation: Relation,
     for i, var_name in enumerate(relation.variable_names):
         if var_name not in quantified_vars_with_bounds:
             continue
-        var_coef = relation.variable_coeficients[i]
+        var_coef = relation.variable_coefficients[i]
         var_bounds = quantified_vars_with_bounds[var_name]
 
         if relation.operation in ('<', '<='):
@@ -191,14 +191,14 @@ def simplify_modulo_terms_with_unbound_vars_in_relation(relation: Relation,
                                                         quantified_vars_with_bounds: Dict[str, Bounds_Info]
                                                         ) -> Relation:
     simplified_relation = Relation(variable_names=relation.variable_names,
-                                   variable_coeficients=relation.variable_coeficients,
+                                   variable_coefficients=relation.variable_coefficients,
                                    modulo_terms=[],  # We will fill them with the terms that could not be simplified
-                                   modulo_term_coeficients=[],
+                                   modulo_term_coefficients=[],
                                    div_terms=relation.div_terms,
-                                   div_term_coeficients=relation.div_term_coeficients,
+                                   div_term_coefficients=relation.div_term_coefficients,
                                    absolute_part=relation.absolute_part, operation=relation.operation)
 
-    for modulo_term_coef, modulo_term in zip(relation.modulo_term_coeficients, relation.modulo_terms):
+    for modulo_term_coef, modulo_term in zip(relation.modulo_term_coefficients, relation.modulo_terms):
         simplified_modulo_value: Optional[int] = None
         for var_name in modulo_term.variables:
             if not var_name in quantified_vars_with_bounds:
@@ -214,7 +214,7 @@ def simplify_modulo_terms_with_unbound_vars_in_relation(relation: Relation,
         else:
             # The term could not be simplified, append it as it is
             simplified_relation.modulo_terms.append(modulo_terms)
-            simplified_relation.modulo_term_coeficients.append(modulo_term_coef)
+            simplified_relation.modulo_term_coefficients.append(modulo_term_coef)
 
     return simplified_relation
 

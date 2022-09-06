@@ -35,36 +35,36 @@ from amaya.semantics_tracking import (
 @dataclass(frozen=True)
 class LinearStateComponent(object):
     value: int
-    variable_coeficients: Tuple[int, ...]
+    variable_coefficients: Tuple[int, ...]
 
     def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[LinearStateComponent]:
         raise NotImplementedError('The LinearStateComponent should not be instantiated directly, use its subclasses')
 
 
 class IneqLinearStateComponent(LinearStateComponent):
-    def __init__(self, value: int, variable_coeficients: Tuple[int, ...]):
-        super().__init__(value, variable_coeficients)
+    def __init__(self, value: int, variable_coefficients: Tuple[int, ...]):
+        super().__init__(value, variable_coefficients)
 
     def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[LinearStateComponent]:
-        dot = vector_dot(alphabet_symbol, self.variable_coeficients)
+        dot = vector_dot(alphabet_symbol, self.variable_coefficients)
         destination_state = math.floor(0.5 * (self.value - dot))
         return IneqLinearStateComponent(value=destination_state,
-                                        variable_coeficients=self.variable_coeficients)
+                                        variable_coefficients=self.variable_coefficients)
 
 
 class EqLinearStateComponent(LinearStateComponent):
-    def __init__(self, value: int, variable_coeficients: Tuple[int, ...]):
-        super().__init__(value, variable_coeficients)
+    def __init__(self, value: int, variable_coefficients: Tuple[int, ...]):
+        super().__init__(value, variable_coefficients)
 
     def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[LinearStateComponent]:
-        dot = vector_dot(alphabet_symbol, self.variable_coeficients)
+        dot = vector_dot(alphabet_symbol, self.variable_coefficients)
         diff = self.value - dot
 
         if diff % 2 == 1:
             return None
 
         return EqLinearStateComponent(value=diff // 2,
-                                      variable_coeficients=self.variable_coeficients)
+                                      variable_coefficients=self.variable_coefficients)
 
 
 # This is used in the formula->NFA procedure. The created NFA has int automaton states
@@ -146,12 +146,12 @@ def build_nfa_from_linear_inequality(nfa_type: Type[NFA],
                                      ineq_variables_ordered: List[Tuple[str, int]]) -> NFA:
 
     initial_state = IneqLinearStateComponent(value=ineq.absolute_part,
-                                             variable_coeficients=tuple(ineq.variable_coeficients))
+                                             variable_coefficients=tuple(ineq.variable_coefficients))
 
     def is_transition_final(source: LinearStateComponent,
                             symbol: Tuple[int, ...],
                             target: LinearStateComponent) -> bool:
-        dot = vector_dot(symbol, source.variable_coeficients)
+        dot = vector_dot(symbol, source.variable_coefficients)
         if source.value + dot >= 0:
             return True
         return False
@@ -175,7 +175,7 @@ def build_nfa_from_linear_equality(nfa_type: Type[NFA],
                                    eq: Relation,
                                    eq_variables_ordered: List[Tuple[str, int]]) -> NFA:
     initial_state = EqLinearStateComponent(value=eq.absolute_part,
-                                           variable_coeficients=tuple(eq.variable_coeficients))
+                                           variable_coefficients=tuple(eq.variable_coefficients))
 
     nfa = nfa_type(automaton_type=AutomatonType.NFA,
                    alphabet=alphabet,
@@ -186,7 +186,7 @@ def build_nfa_from_linear_equality(nfa_type: Type[NFA],
     def is_transition_final(source: LinearStateComponent,
                             symbol: Tuple[int, ...],
                             target: LinearStateComponent) -> bool:
-        dot = vector_dot(symbol, source.variable_coeficients)
+        dot = vector_dot(symbol, source.variable_coefficients)
         if source.value + dot == 0:
             return True
         return False
@@ -231,7 +231,7 @@ def build_presburger_modulo_nfa(nfa_type: Type[NFA],
     modulo_term = relation.modulo_terms[0]
     initial_state = ModuloTermStateComponent(value=relation.absolute_part,
                                              modulo=modulo_term.modulo,
-                                             variable_coeficients=tuple(modulo_term.variable_coeficients))
+                                             variable_coefficients=tuple(modulo_term.variable_coefficients))
 
     alias_store = AliasStore()
     work_list: List[ModuloTermStateComponent] = [initial_state]
@@ -267,7 +267,7 @@ def build_presburger_modulo_nfa(nfa_type: Type[NFA],
             nfa.update_transition_fn(current_state_alias, cylindrified_symbol, destination_state_alias)
 
             # Make nondeterministic guess that the current symbol is the last on the input tape.
-            value_with_symbol_interp_as_sign = current_state.value + vector_dot(symbol, modulo_term.variable_coeficients)
+            value_with_symbol_interp_as_sign = current_state.value + vector_dot(symbol, modulo_term.variable_coefficients)
             if (value_with_symbol_interp_as_sign % current_state.modulo) == 0:
                 partial_transition_to_final_state = (current_state_alias, cylindrified_symbol)
                 transitions_to_final_state.append(partial_transition_to_final_state)

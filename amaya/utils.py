@@ -78,26 +78,26 @@ def carthesian_product(op0: Iterable[T], op1: Iterable[S]) -> List[Tuple[T, S]]:
 
 
 def reorder_variables_according_to_ids(variable_id_pairs: List[Tuple[str, int]],
-                                       variables_with_coeficients: Tuple[List[str], List[int]]) -> Tuple[List[str], List[int]]:
+                                       variables_with_coefficients: Tuple[List[str], List[int]]) -> Tuple[List[str], List[int]]:
     """
-    Reorder the variables and their coeficients so that they match the order given by their IDs sorted.
+    Reorder the variables and their coefficients so that they match the order given by their IDs sorted.
 
     Example:
         variable_id_pairs = [('x', 2), ('y', 1)]
-        variable_with_coeficients = (['x', 'y'], [10, 12])
+        variable_with_coefficients = (['x', 'y'], [10, 12])
         returns: (['y', 'x'], [12, 10])
     """
 
     variable_id_pairs_sorted = sorted(variable_id_pairs, key=lambda pair: pair[1])
-    variable_to_coef_map: Dict[str, int] = dict(zip(*variables_with_coeficients))
+    variable_to_coef_map: Dict[str, int] = dict(zip(*variables_with_coefficients))
 
     variables_ordered = []
-    coeficients_ordered = []
+    coefficients_ordered = []
     for var, dummy_id in variable_id_pairs_sorted:
         variables_ordered.append(var)
-        coeficients_ordered.append(variable_to_coef_map.get(var))
+        coefficients_ordered.append(variable_to_coef_map.get(var))
 
-    return (variables_ordered, coeficients_ordered)
+    return (variables_ordered, coefficients_ordered)
 
 
 def _dfs(graph: Dict[T, Iterable[T]],

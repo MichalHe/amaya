@@ -25,12 +25,12 @@ from amaya.utils import vector_dot
 
 def sort_relation_var_vector_to_match_track_order(rel: Relation, var_id_pairs: List[Tuple[str, int]]):
     """
-    Changes the order of variables and correspoding coeficients to match the order of tracks that belong to the them.
+    Changes the order of variables and correspoding coefficients to match the order of tracks that belong to the them.
     """
     var_name_to_track_index: Dict[str, int] = dict(var_id_pairs)
-    sorted_var_coef_pairs = sorted(zip(rel.variable_names, rel.variable_coeficients),
+    sorted_var_coef_pairs = sorted(zip(rel.variable_names, rel.variable_coefficients),
                                    key=lambda var_coef_pair: var_name_to_track_index[var_coef_pair[0]])
-    rel.variable_names, rel.variable_coeficients = zip(*sorted_var_coef_pairs)
+    rel.variable_names, rel.variable_coefficients = zip(*sorted_var_coef_pairs)
 
 
 def build_dfa_from_linear_inequality(ineq: Relation,
@@ -71,7 +71,7 @@ def build_dfa_from_linear_inequality(ineq: Relation,
         for symbol in active_alphabet:
             cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(var_ids, symbol)
 
-            dot = vector_dot(symbol, ineq.variable_coeficients)
+            dot = vector_dot(symbol, ineq.variable_coefficients)
             next_state = math.floor(0.5 * (currently_processed_state - dot))
 
             # Add newly discovered transition
@@ -158,7 +158,7 @@ def build_dfa_from_linear_equality(eq: Relation,
         for alphabet_symbol in active_alphabet:
             cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(var_ids, alphabet_symbol)
 
-            dot = vector_dot(alphabet_symbol, eq.variable_coeficients)
+            dot = vector_dot(alphabet_symbol, eq.variable_coefficients)
             next_value = current_state - dot
 
             if next_value % 2 == 0:
@@ -209,14 +209,14 @@ def build_presburger_modulo_dfa(equality: Relation,
 
     modulo_term = equality.modulo_terms[0]
 
-    vars_with_coefs = zip(modulo_term.variables, modulo_term.variable_coeficients)
+    vars_with_coefs = zip(modulo_term.variables, modulo_term.variable_coefficients)
     variable_coefs_ord_by_track = sorted(vars_with_coefs, key=lambda vc: variable_name_to_track_index[vc[0]])
 
     initial_state = ModuloTermStateComponent(value=equality.absolute_part,
                                              modulo=modulo_term.modulo,
-                                             variable_coeficients=tuple(vc[1] for vc in variable_coefs_ord_by_track))
+                                             variable_coefficients=tuple(vc[1] for vc in variable_coefs_ord_by_track))
 
-    print(f'{initial_state.variable_coeficients=}')
+    print(f'{initial_state.variable_coefficients=}')
 
     alias_store = AliasStore()
     work_list: List[ModuloTermStateComponent] = [initial_state]

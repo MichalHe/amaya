@@ -27,7 +27,7 @@ def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[
     mod_automaton_initial_state = ModuloTermStateComponent(
         value=modulo_relation.absolute_part,
         modulo=modulo_term.modulo,
-        variable_coeficients=tuple(modulo_term.variable_coeficients))
+        variable_coefficients=tuple(modulo_term.variable_coefficients))
 
     initial_state: Tuple[int, ModuloTermStateComponent] = (lin_automaton_initial_state, mod_automaton_initial_state)
     work_list: List[Tuple[int, ModuloTermStateComponent]] = [initial_state]
@@ -46,7 +46,7 @@ def on_the_fly_intersection(lin_automaton: NFA, modulo_relation_variables: List[
                 yield (post_state, symbol)
 
     def mod_accepts_with_symbol(mod_state: ModuloTermStateComponent, symbol: LSBF_Alphabet) -> bool:
-        value_with_symbol_interp_as_sign = mod_state.value + vector_dot(symbol, mod_state.variable_coeficients)
+        value_with_symbol_interp_as_sign = mod_state.value + vector_dot(symbol, mod_state.variable_coefficients)
         return value_with_symbol_interp_as_sign % mod_state.modulo == 0
 
     # Problems with alphabets - we are iterating over some (a, b, c, x) and the modulo automaton can have (x, y, z)

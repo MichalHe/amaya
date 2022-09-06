@@ -125,7 +125,7 @@ def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr,
         rel_op = '='
 
     relation_variable_names = []
-    relation_variable_coeficients = []
+    relation_variable_coefficients = []
 
     relation_abs = -unified_expr.absolute_part  # Move the absolute part the right side
 
@@ -134,24 +134,24 @@ def normalize_atomic_presburger_formula(rel_type: str, lhs_expr: PresburgerExpr,
     for var_name in sorted_vars:
         var_coef = unified_expr.variables[var_name]
         relation_variable_names.append(var_name)
-        relation_variable_coeficients.append(var_coef)
+        relation_variable_coefficients.append(var_coef)
 
-    modulo_terms, modulo_term_coeficients = [], []
-    for modulo_term, modulo_term_coeficient in unified_expr.modulo_terms.items():
+    modulo_terms, modulo_term_coefficients = [], []
+    for modulo_term, modulo_term_coefficient in unified_expr.modulo_terms.items():
         modulo_terms.append(modulo_term)
-        modulo_term_coeficients.append(modulo_term_coeficient)
+        modulo_term_coefficients.append(modulo_term_coefficient)
 
-    div_terms, div_term_coeficients = (
+    div_terms, div_term_coefficients = (
         tuple(map(list, zip(*unified_expr.div_terms.items()))) if unified_expr.div_terms else ([], [])
     )
 
     return Relation(
         variable_names=relation_variable_names,
-        variable_coeficients=relation_variable_coeficients,
+        variable_coefficients=relation_variable_coefficients,
         modulo_terms=modulo_terms,
-        modulo_term_coeficients=modulo_term_coeficients,
+        modulo_term_coefficients=modulo_term_coefficients,
         div_terms=div_terms,
-        div_term_coeficients=div_term_coeficients,
+        div_term_coefficients=div_term_coefficients,
         absolute_part=relation_abs,
         operation=rel_op
     )
@@ -174,20 +174,20 @@ def extract_relation(ast, remove_variables_with_zero_ceofs: bool = False) -> Rel
 
     normalized_expr = normalize_atomic_presburger_formula(op, lhs_expr, rhs_expr)
 
-    # Filter out the variables with zero coeficients.
+    # Filter out the variables with zero coefficients.
     if remove_variables_with_zero_ceofs:
         coefs = []
         var_names = []
         for var_name, coef in zip(normalized_expr.variable_names,
-                                  normalized_expr.variable_coeficients):
+                                  normalized_expr.variable_coefficients):
             if coef != 0:
                 coefs.append(coef)
                 var_names.append(var_name)
             else:
-                info = f'Removing the variable "{var_name}" from the atomic formula - the variable has a coeficient 0.'
+                info = f'Removing the variable "{var_name}" from the atomic formula - the variable has a coefficient 0.'
                 logger.info(info)
                 logger.debug(f'Ast: {ast}')
-        normalized_expr.variable_coeficients = coefs
+        normalized_expr.variable_coefficients = coefs
         normalized_expr.variable_names = var_names
 
     if normalized_expr.operation == '<':

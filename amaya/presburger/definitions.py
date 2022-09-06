@@ -38,9 +38,9 @@ def can_build_modulo_automaton(relation: Relation) -> Union[bool, str]:
     
     correct_form_conditions_with_reasons = (
         ('The relation contains wrong number of modulo terms', len(relation.modulo_terms) == 1),
-        ('The relation contains wrong number of modulo terms', len(relation.modulo_term_coeficients) == 1),
+        ('The relation contains wrong number of modulo terms', len(relation.modulo_term_coefficients) == 1),
         ('The relation contains other than modulo terms', not relation.variable_names),
-        ('The relation contains other than modulo terms', not relation.variable_coeficients),
+        ('The relation contains other than modulo terms', not relation.variable_coefficients),
         ('The relation does not check for equality of reminders', relation.operation == '='),
     )
 
@@ -54,17 +54,17 @@ def can_build_modulo_automaton(relation: Relation) -> Union[bool, str]:
 class ModuloTermStateComponent(object):
     value: int
     modulo: int
-    variable_coeficients: Tuple[int, ...]
+    variable_coefficients: Tuple[int, ...]
 
     def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[ModuloTermStateComponent]:
-        dot = vector_dot(self.variable_coeficients, alphabet_symbol)
+        dot = vector_dot(self.variable_coefficients, alphabet_symbol)
 
         if self.modulo % 2 == 0:
             if dot % 2 == 0:
                 return ModuloTermStateComponent(
                     value=dot//2,
                     modulo=self.modulo//2,
-                    variable_coeficients=self.variable_coeficients
+                    variable_coefficients=self.variable_coefficients
                 )
             else:
                 return None
@@ -75,7 +75,7 @@ class ModuloTermStateComponent(object):
         return ModuloTermStateComponent(
             value=next_value,
             modulo=self.modulo,
-            variable_coeficients=self.variable_coeficients
+            variable_coefficients=self.variable_coefficients
         )
 
     def __str__(self) -> str:

@@ -589,10 +589,10 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
                                    key=lambda pair: pair[1])
         var_names, var_coefs = utils.reorder_variables_according_to_ids(
                 variable_id_pairs,
-                (modulo_term.variables, modulo_term.variable_coeficients))
+                (modulo_term.variables, modulo_term.variable_coefficients))
 
         modulo_term_ordered = ModuloTerm(variables=var_names,
-                                         variable_coeficients=var_coefs,
+                                         variable_coefficients=var_coefs,
                                          constant=modulo_term.constant,
                                          modulo=modulo_term.modulo)
 
@@ -614,19 +614,19 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         assert not relation.div_terms
 
         # The extracted relation contains the list of variables and their
-        # coeficients in an arbitrary order - we need to make sure that the order
+        # coefficients in an arbitrary order - we need to make sure that the order
         # of variables will be by ascending IDs (MTBDD requirement)
         variable_id_pairs = sorted(ctx.get_multiple_variable_ids(relation.variable_names),
                                    key=lambda pair: pair[1])
         var_names, var_coefs = utils.reorder_variables_according_to_ids(
                 variable_id_pairs,
-                (relation.variable_names, relation.variable_coeficients))
+                (relation.variable_names, relation.variable_coefficients))
 
         # The alphabet might have only variable IDs but no names, inject
         # the variable names so that we can do vizualization properly
         ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
 
-        reordered_relation = Relation.new_lin_relation(variable_names=var_names, variable_coeficients=var_coefs,
+        reordered_relation = Relation.new_lin_relation(variable_names=var_names, variable_coefficients=var_coefs,
                                                        absolute_part=relation.absolute_part,
                                                        operation=relation.operation)
 
