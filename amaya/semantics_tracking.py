@@ -17,13 +17,15 @@ class AH_AtomType(enum.IntEnum):
     PRESBURGER_CONGRUENCE  = 3
     BOOL = 4
     TRIVIAL  = 5
+    CUSTOM = 6
 
 
 @dataclass
 class AH_Atom:
     atom_type: AH_AtomType
     atom: Optional[Relation]
-    final_state: int
+    special_state: Optional[int] = None
+    """Holds the final state of the atom's NFA when solving over integers as the state does not tie to the original atom."""
 
 
 @dataclass

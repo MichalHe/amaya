@@ -352,8 +352,10 @@ AST_TO_LATEX_TREE_TABLE = {
 def _math_node(contents: str) -> str:
     return '\\node {$' + contents + '$}\n'
 
+
 def _child_node(contents: str, tab_prefix: str) -> str:
     return tab_prefix + 'child{\n' + contents + tab_prefix + '}\n'
+
 
 def _convert_ast_into_latex_tree(ast: AST_Node, depth: int = 0) -> str:
     """
