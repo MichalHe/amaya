@@ -5,6 +5,10 @@ from amaya.automatons import (
 )
 from amaya.alphabet import LSBF_Alphabet
 from amaya.mtbdd_automatons import MTBDD_NFA
+from amaya.semantics_tracking import (
+    AH_Atom,
+    AH_AtomType,
+)
 from tests.conftest import ResolutionState
 
 import pytest
@@ -12,14 +16,10 @@ import pytest
 
 @pytest.fixture()
 def mtbdd_nfa1() -> MTBDD_NFA:
-    '''Creates a simple synthetic nondeterministic automaton.
-    Nondeterminism - not every state has a transition for every alphabet symbol.
-    Otherwise it is defacto deterministic - it should be possible to project the
-    structure onto the original one.'''
-
     variable_id_pairs = [('x', 1)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
-    nfa = MTBDD_NFA(alphabet=alphabet, automaton_type=AutomatonType.DFA)
+    nfa = MTBDD_NFA(alphabet=alphabet, automaton_type=AutomatonType.DFA,
+                    state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
 
     nfa.add_state(0)
     nfa.add_state(1)
@@ -64,7 +64,7 @@ def test_nfa_complement(mtbdd_nfa1: NFA):  # NOQA
     for origin, symbol, dest in path:
         transition_dest_set = compl_nfa.get_transition_target(origin.get(), symbol)
         assert len(transition_dest_set) == 1
-        dest.bind(transition_dest_set[0])
+        dest.bind(next(iter(transition_dest_set)))
 
     assert state0.get() in compl_nfa.final_states
     assert state1.get() in compl_nfa.final_states
@@ -80,8 +80,6 @@ def test_nfa_complement(mtbdd_nfa1: NFA):  # NOQA
     for origin, symbol, dest in trap_paths:
         transition_dest_set = compl_nfa.get_transition_target(origin.get(), symbol)
         assert len(transition_dest_set) == 1
-        dest.bind(transition_dest_set[0])
+        dest.bind(next(iter(transition_dest_set)))
 
     return
-
-    # assert len(tuple(iter_transition_fn(nfa1.transition_fn.data))) == len(tuple(iter_transition_fn(compl_nfa.transition_fn.data)))  # type: ignore

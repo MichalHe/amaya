@@ -12,26 +12,26 @@ alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
 
 @pytest.fixture
 def ineq() -> Relation:
-    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[2, -1],
-                                     operation='<=', absolute_part=2)
+    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1],
+                                     predicate_symbol='<=', absolute_part=2)
 
 
 @pytest.fixture()
 def ineq1() -> Relation:
     """Returns relation: x - y <= 0."""
-    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, -1],
-                                     absolute_part=0, operation="<=")
+    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, -1],
+                                     absolute_part=0, predicate_symbol="<=")
 
 
 @pytest.fixture()
 def ineq2() -> Relation:
-    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
-                                     absolute_part=1, operation="<=")
+    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                     absolute_part=1, predicate_symbol="<=")
 
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
 def test_ineq0(automaton_cls: NFA, ineq: Relation):
-    nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, automaton_cls)
+    nfa = build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq, [('x', 1), ('y', 2)])
     assert nfa
 
     expected_states = {
@@ -111,7 +111,7 @@ def test_ineq0(automaton_cls: NFA, ineq: Relation):
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
 def test_ineq1(automaton_cls: NFA, ineq1: Relation):
-    nfa = build_nfa_from_linear_inequality(ineq1, [('x', 1), ('y', 2)], alphabet, automaton_cls)
+    nfa = build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq1, [('x', 1), ('y', 2)])
 
     assert len(nfa.states) == 3
     assert len(nfa.initial_states) == 1
@@ -160,7 +160,7 @@ def test_ineq1(automaton_cls: NFA, ineq1: Relation):
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
 def test_ineq2(automaton_cls: NFA, ineq2: Relation):
-    nfa = build_nfa_from_linear_inequality(ineq2, [('x', 1), ('y', 2)], alphabet, automaton_cls)
+    nfa = build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq2, [('x', 1), ('y', 2)])
 
     assert len(nfa.states) == 5
     assert len(nfa.initial_states) == 1

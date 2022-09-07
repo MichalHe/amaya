@@ -8,9 +8,12 @@ from amaya.automatons import (
 from amaya.mtbdd_automatons import (
     MTBDD_NFA, 
 )
-
 from amaya.presburger.definitions import (
     AutomatonConstructor
+)
+from amaya.semantics_tracking import (
+    AH_Atom,
+    AH_AtomType,
 )
 
 def nfa_containing_model(constr: AutomatonConstructor) -> NFA:
@@ -19,7 +22,8 @@ def nfa_containing_model(constr: AutomatonConstructor) -> NFA:
         automaton_type=AutomatonType.NFA,
         states={0, 1, 2, 3, 4},
         final_states={4},
-        initial_states={0}
+        initial_states={0},
+        state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None)
     )
 
     nfa_transitions = [
@@ -47,6 +51,7 @@ def nfa_without_model(constr: AutomatonConstructor) -> NFA:
         states={0, 1, 2, 3, 4},
         initial_states={0},
         final_states={4},
+        state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None)
     )
 
     # There is a final state but it is unreachable

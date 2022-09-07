@@ -25,14 +25,14 @@ alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
 
 @pytest.fixture()
 def nfa_for_inequality(automaton_cls: AutomatonConstructor) -> NFA:
-    ineq = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[2, -1], absolute_part=2, operation='<=')
-    return build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, automaton_cls)
+    ineq = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1], absolute_part=2, predicate_symbol='<=')
+    return build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq, [('x', 1), ('y', 2)])
 
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
 def test_nfa_determinization_on_nfa_for_inequality(automaton_cls, nfa_for_inequality):
     # dfa = simple_nfa.determinize()
-    dfa = abstract_determinize(nfa_for_inequality, lambda x: x)
+    dfa = nfa_for_inequality.determinize()
     assert dfa
     assert len(dfa.states) == 8
     assert len(dfa.final_states) == 4

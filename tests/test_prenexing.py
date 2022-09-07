@@ -70,10 +70,10 @@ def test_prenexing_moving_quantifiers_through_negation(ast, expected_result):
 
 
 def test_prenexing_variable_renaming():
-    relation1 = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 2],
-                                          operation='<', absolute_part=10)
-    relation2 = Relation.new_lin_relation(variable_names=['x', 'z'], variable_coeficients=[2, 1],
-                                          operation='<', absolute_part=9)
+    relation1 = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 2],
+                                          predicate_symbol='<', absolute_part=10)
+    relation2 = Relation.new_lin_relation(variable_names=['x', 'z'], variable_coefficients=[2, 1],
+                                          predicate_symbol='<', absolute_part=9)
     ast = [
         'and',
         ['exists', [['x', 'Int']], relation1],
@@ -82,11 +82,11 @@ def test_prenexing_variable_renaming():
 
     result = convert_formula_to_pnf(ast)
 
-    relation1_renamed = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 2],
-                                                  operation='<', absolute_part=10)
+    relation1_renamed = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 2],
+                                                  predicate_symbol='<', absolute_part=10)
 
-    relation2_renamed = Relation.new_lin_relation(variable_names=['x-1', 'z'], variable_coeficients=[2, 1],
-                                                  operation='<', absolute_part=9)
+    relation2_renamed = Relation.new_lin_relation(variable_names=['x-1', 'z'], variable_coefficients=[2, 1],
+                                                  predicate_symbol='<', absolute_part=9)
 
     expected_result = ['exists', [['x', 'Int']],
                        ['exists', [['x-1', 'Int']], ['and', relation1_renamed, relation2_renamed]]]
@@ -99,11 +99,11 @@ def test_prenexing_variable_renaming():
             'and',
             [
                 'exists', [['x', 'Int']], 
-                Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
-                                          absolute_part=0, operation='<')
+                Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                          absolute_part=0, predicate_symbol='<')
             ],
-            Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 2],
-                                      absolute_part=2, operation='=')
+            Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 2],
+                                      absolute_part=2, predicate_symbol='=')
         ]
     ]
     
@@ -115,10 +115,10 @@ def test_prenexing_variable_renaming():
             'exists', [['x-1', 'Int']],
             [
                 'and', 
-                Relation.new_lin_relation(variable_names=['x-1', 'y'], variable_coeficients=[1, 1],
-                                          absolute_part=0, operation='<'),
-                Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 2],
-                                          absolute_part=2, operation='=')
+                Relation.new_lin_relation(variable_names=['x-1', 'y'], variable_coefficients=[1, 1],
+                                          absolute_part=0, predicate_symbol='<'),
+                Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 2],
+                                          absolute_part=2, predicate_symbol='=')
             ]
         ]
     ]

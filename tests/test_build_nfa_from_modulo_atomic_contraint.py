@@ -19,50 +19,16 @@ import pytest
 RelationSetup = Tuple[List[Tuple[str, int]], LSBF_Alphabet, Relation]
 
 
+
 @pytest.fixture
-def ineq_with_single_mod_term() -> RelationSetup:
-    '''Inequation: (x mod 3) <= 1'''
-    modulo_term = ModuloTerm(variables=['x'],
-                             variable_coeficients=(1,),
-                             constant=0,
-                             modulo=3)
-    relation = Relation(variable_names=[],
-                        variable_coeficients=[],
-                        modulo_terms=[modulo_term],
-                        modulo_term_coeficients=[1],
-                        absolute_part=1,
-                        operation='<=')
+def eq_with_single_mod_term() -> RelationSetup:
+    """Equation (x mod 3) = 1"""
+
+    modulo_term = ModuloTerm(variables=('x', ), variable_coefficients=(1, ),
+                             constant=0, modulo=3)
+    relation = Relation.new_congruence_relation(modulo_terms=[modulo_term], modulo_term_coefficients=[1],
+                                                absolute_part=1)
     variable_id_pairs = [('x', 1)]
-    alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
-    return (variable_id_pairs, alphabet, relation)
-
-
-@pytest.fixture
-def eq_with_single_mod_term(ineq_with_single_mod_term: RelationSetup) -> RelationSetup:
-    '''Equation (x mod 3) = 1'''
-
-    inequation = ineq_with_single_mod_term[2]
-    inequation.operation = '='
-    return ineq_with_single_mod_term
-
-
-def ineq_with_multiple_modulo_contraints() -> RelationSetup:
-    '''Inequality setup for: (x mod 3) + (y mod 6) <= 4.'''
-    x_modulo_term = ModuloTerm(variables=['x'],
-                               variable_coeficients=(1,),
-                               constant=0,
-                               modulo=3)
-    y_modulo_term = ModuloTerm(variables=['y'],
-                               variable_coeficients=(1,),
-                               constant=0,
-                               modulo=6)
-    relation = Relation(variable_names=[],
-                        variable_coeficients=[],
-                        modulo_terms=[x_modulo_term, y_modulo_term],
-                        modulo_term_coeficients=[1, 1],
-                        absolute_part=4,
-                        operation='<=')
-    variable_id_pairs = [('x', 1), ('y', 2)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
     return (variable_id_pairs, alphabet, relation)
 
@@ -137,35 +103,30 @@ def test_equality_with_single_modulo_constaint(domain, eq_with_single_mod_term: 
     variable_id_pairs, alphabet, equation = eq_with_single_mod_term
     is_domain_naturals = domain == 'naturals'
     if is_domain_naturals:
-        nfa = build_presburger_modulo_dfa(equation, variable_id_pairs, alphabet, NFA)
+        nfa = build_presburger_modulo_dfa(DFA, alphabet, equation, variable_id_pairs)
     else:
-        nfa = build_presburger_modulo_nfa(equation, variable_id_pairs, alphabet, DFA)
+        nfa = build_presburger_modulo_nfa(DFA, alphabet, equation, variable_id_pairs)
 
     assert_single_mod_term_automaton_structure(nfa, is_domain_naturals=is_domain_naturals)
 
 
 @pytest.mark.parametrize('domain', ('naturals', 'integers'))
 def test_with_power_of_two_modulo(domain):
-    modulo_term = ModuloTerm(variables=['x'],
-                             variable_coeficients=(1,),
-                             constant=0,
-                             modulo=4)
-    relation = Relation(variable_names=[],
-                        variable_coeficients=[],
-                        modulo_terms=[modulo_term],
-                        modulo_term_coeficients=[1],
-                        absolute_part=0,
-                        operation='=')
+    modulo_term = ModuloTerm(variables=['x'], variable_coefficients=(1,),
+                             constant=0, modulo=4)
+    relation = Relation.new_congruence_relation(modulo_terms=[modulo_term],
+                                                modulo_term_coefficients=[1],
+                                                absolute_part=0)
     variable_id_pairs = [('x', 1)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
     
     is_domain_naturals = domain == 'naturals'
     if is_domain_naturals:
-        nfa = build_presburger_modulo_dfa(relation, variable_id_pairs, alphabet, DFA)
+        nfa = build_presburger_modulo_dfa(NFA, alphabet, relation, variable_id_pairs)
         exp_state_count = 3
         exp_final_state_count = 3
     else:
-        nfa = build_presburger_modulo_nfa(relation, variable_id_pairs, alphabet, NFA)
+        nfa = build_presburger_modulo_nfa(NFA, alphabet, relation, variable_id_pairs)
         exp_state_count = 4
         exp_final_state_count = 1
 

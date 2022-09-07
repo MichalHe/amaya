@@ -10,20 +10,14 @@ import pytest
 
 @pytest.fixture()
 def ineq() -> Relation:
-    return Relation(
-        variable_names=['x', 'y'],
-        variable_coeficients=[1, 1],
-        modulo_terms=[],
-        modulo_term_coeficients=[],
-        absolute_part=2,
-        operation='<='
-    )
+    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1], 
+                                     absolute_part=2, predicate_symbol='<=')
 
 
 def test_dfa_from_sharp_ineq_simple(ineq: Relation):
     var_id_pairs = [(var, i + 1) for i, var in enumerate(ineq.variable_names)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(var_id_pairs)
-    dfa = build_dfa_from_linear_inequality(ineq, var_id_pairs, alphabet, DFA)
+    dfa = build_dfa_from_linear_inequality(DFA, alphabet, ineq, var_id_pairs)
     
     s2 = ResolutionState('2')
     s1 = ResolutionState('1')

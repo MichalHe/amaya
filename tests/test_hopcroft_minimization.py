@@ -10,6 +10,10 @@ from amaya.automatons import (
     NFA
 )
 from amaya.mtbdd_automatons import MTBDD_NFA
+from amaya.semantics_tracking import (
+    AH_Atom,
+    AH_AtomType,
+)
 from tests.conftest import ResolutionState
 
 import pytest
@@ -21,7 +25,8 @@ T = TypeVar('T', NFA, MTBDD_NFA)
 def make_wiki_automaton(automaton_cls: Type[T]) -> T:
     variable_id_pairs = (('x', 1),)
     alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
-    nfa = automaton_cls(alphabet=alphabet, automaton_type=AutomatonType.DFA)
+    nfa = automaton_cls(alphabet=alphabet, automaton_type=AutomatonType.DFA,
+                        state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
     state_labels = {
         0: 'a',
         1: 'b',
@@ -70,7 +75,8 @@ def make_automaton2(automaton_cls: Type[T]) -> T:
                         states={0, 1, 2, 3, 4, 5},
                         final_states={3, 5},
                         initial_states={0},
-                        used_variables=[1])
+                        used_variables=[1],
+                        state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
 
     transitions = (
         (0, (0,), 1),

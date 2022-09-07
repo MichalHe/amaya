@@ -5,15 +5,19 @@ from typing import (
 )
 import pytest
 
-from alphabet import LSBF_Alphabet
-from automatons import (
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import (
     AutomatonType,
     AutomatonSnapshot,
     NFA,
 )
-from mtbdd_automatons import MTBDD_NFA
-from relations_structures import Relation
-from presburger.constructions.integers import build_nfa_from_linear_equality
+from amaya.mtbdd_automatons import MTBDD_NFA
+from amaya.relations_structures import Relation
+from amaya.presburger.constructions.integers import build_nfa_from_linear_equality
+from amaya.semantics_tracking import (
+    AH_Atom,
+    AH_AtomType
+)
 
 
 AutomatonFactory = Callable[[LSBF_Alphabet, AutomatonType], NFA]
@@ -27,7 +31,7 @@ def mk_simple_nfa(factory: AutomatonFactory) -> NFA:
 
     alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1)])
 
-    nfa: NFA = factory(alphabet, AutomatonType.NFA)
+    nfa: NFA = factory(alphabet=alphabet, automaton_type=AutomatonType.NFA, state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
     nfa.states = set(states)
     nfa.add_final_state(final_state)
     nfa.add_initial_state(0)
@@ -49,7 +53,7 @@ def mk_multipath_nfa(factory: AutomatonFactory) -> NFA:
     final_state = 4
     states = [0, 1, 2, 3, final_state]
     alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
-    multipath_nfa = factory(alphabet, AutomatonType.NFA)
+    multipath_nfa = factory(alphabet=alphabet, automaton_type=AutomatonType.NFA, state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
 
     multipath_nfa.states = set(states)
     multipath_nfa.add_initial_state(0)
@@ -77,7 +81,7 @@ def mk_multipath_nfa(factory: AutomatonFactory) -> NFA:
 def mk_advanced_nfa(factory: AutomatonFactory) -> NFA:
     states = [-1, 0, 1, 2, 3, 4, 5, 6]
     alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
-    advanced_nfa = NFA(alphabet=alphabet, automaton_type=AutomatonType.NFA)
+    advanced_nfa = factory(alphabet=alphabet, automaton_type=AutomatonType.NFA, state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
 
     final_state = 6
 
@@ -112,12 +116,8 @@ def mk_advanced_nfa(factory: AutomatonFactory) -> NFA:
 
 @pytest.fixture()
 def real_nfa() -> NFA:
-    equality = Relation(variable_names=['x', 'y'],
-                        variable_coeficients=[2, -1], 
-                        absolute_part=2, 
-                        operation='=', 
-                        modulo_term_coeficients=[], 
-                        modulo_terms=[])
+    equality = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1], 
+                                         absolute_part=2, predicate_symbol='=')
     alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
     return build_nfa_from_linear_equality(equality, [1, 2], alphabet, NFA)
 
@@ -126,7 +126,7 @@ def real_nfa() -> NFA:
 def nfa_no_modif_needed(constr: AutomatonFactory) -> NFA:
     """Constructs the automaton using the given factory that does not need repairing."""
     alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
-    nfa = constr(alphabet=alphabet, automaton_type=AutomatonType.NFA)
+    nfa = constr(alphabet=alphabet, automaton_type=AutomatonType.NFA, state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
     
     nfa.states = {0, 1, 2, 100}
 

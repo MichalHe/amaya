@@ -1,42 +1,27 @@
-import pytest
-from automatons import NFA, AutomatonType, LSBF_Alphabet
-from mtbdd_automatons import MTBDD_NFA
-from relations_structures import Relation
-from presburger_algorithms import build_nfa_from_linear_inequality
 from typing import (
     Any,
     Dict,
 )
 
+from amaya.alphabet import LSBF_Alphabet
+from amaya.automatons import (
+    AutomatonType,
+    NFA,
+)
+from amaya.mtbdd_automatons import MTBDD_NFA
+from amaya.relations_structures import Relation
+from amaya.presburger.constructions.integers import build_nfa_from_linear_inequality
 
-@pytest.fixture
-def ineq() -> Relation:
-    return Relation(
-        variable_names=['x', 'y'],
-        variable_coeficients=[2, -1],
-        absolute_part=3,
-        modulo_terms=[],
-        modulo_term_coeficients=[],
-        operation="<="
-    )
-
-
-alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
+import pytest
 
 
-def test_nfa_state_rename_w_simple_tfn(ineq: Relation):
-    nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, NFA)
-    assert nfa, 'Build nfa from ineq did not return a NFA'
-    _test_state_renaming(nfa)
+@pytest.mark.parametrize('nfa_type', (NFA, MTBDD_NFA))
+def test_state_renaming(nfa_type):
+    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
+    ineq = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1],
+                                     absolute_part=3, predicate_symbol="<=")
+    nfa = build_nfa_from_linear_inequality(nfa_type, alphabet, ineq, [('x', 1), ('y', 2)])
 
-
-def test_nfa_state_rename_w_mtbdd_tfn(ineq: Relation):
-    nfa = build_nfa_from_linear_inequality(ineq, [('x', 1), ('y', 2)], alphabet, MTBDD_NFA)
-    assert nfa, 'Build nfa from ineq did not return a NFA'
-    _test_state_renaming(nfa)
-
-
-def _test_state_renaming(nfa):
     state_names_translat: Dict[Any, int] = dict()
 
     def state_renamed(automaton_id: int, old_state: Any, new_state: int):

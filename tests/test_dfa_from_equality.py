@@ -12,14 +12,8 @@ import pytest
 
 @pytest.fixture()
 def equation() -> Relation:
-    return Relation(
-        variable_names=['x', 'y'],
-        variable_coeficients=[1, 1],
-        modulo_term_coeficients=[],
-        modulo_terms=[],
-        absolute_part=4,
-        operation='='
-    )
+    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                     absolute_part=4, predicate_symbol='=')
 
 
 def test_eq_to_dfa_simple(equation: Relation):
@@ -30,7 +24,7 @@ def test_eq_to_dfa_simple(equation: Relation):
     var_id_pairs = [(var, i+1) for i, var in enumerate(equation.variable_names)]
     alphabet = LSBF_Alphabet.from_variable_id_pairs(var_id_pairs)
     alphabet_symbols = set(alphabet.symbols)
-    dfa = build_dfa_from_linear_equality(equation, var_id_pairs, alphabet, DFA)
+    dfa = build_dfa_from_linear_equality(DFA, alphabet, equation, var_id_pairs)
     
     s4 = ResolutionState('4')
     s2 = ResolutionState('2')

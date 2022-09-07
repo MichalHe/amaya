@@ -13,8 +13,8 @@ from amaya.preprocessing.unbound_vars import (
 import pytest
 
 def test_variable_bounds_analysis_with_simple_ast():
-    relation = Relation.new_lin_relation(variable_names=['x'], variable_coeficients=[1],
-                                         operation='<=', absolute_part=0)
+    relation = Relation.new_lin_relation(variable_names=['x'], variable_coefficients=[1],
+                                         predicate_symbol='<=', absolute_part=0)
     ast = relation
     actual_result = perform_variable_bounds_analysis_on_ast(ast)
 
@@ -25,10 +25,10 @@ def test_variable_bounds_analysis_with_simple_ast():
 
 
 def test_variable_bounds_analysis_with_and():
-    left_relation = Relation.new_lin_relation(variable_names=['x'], variable_coeficients=[1],
-                                              operation='<=', absolute_part=0)
-    right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
-                                              operation='>=', absolute_part=-10)
+    left_relation = Relation.new_lin_relation(variable_names=['x'], variable_coefficients=[1],
+                                              predicate_symbol='<=', absolute_part=0)
+    right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                              predicate_symbol='>=', absolute_part=-10)
 
     ast = ['and', left_relation, right_relation]
     actual_result = perform_variable_bounds_analysis_on_ast(ast)
@@ -60,10 +60,10 @@ def test_variable_bounds_analysis_with_and():
 
 
 def test_variable_bounds_analysis_with_or():
-    left_relation = Relation.new_lin_relation(variable_names=['x'], variable_coeficients=[1],
-                                              operation='<=', absolute_part=0)
-    right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
-                                              operation='>=', absolute_part=-10)
+    left_relation = Relation.new_lin_relation(variable_names=['x'], variable_coefficients=[1],
+                                              predicate_symbol='<=', absolute_part=0)
+    right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                              predicate_symbol='>=', absolute_part=-10)
 
     ast = ['or', left_relation, right_relation]
     actual_result = perform_variable_bounds_analysis_on_ast(ast)
@@ -79,13 +79,13 @@ def test_variable_bounds_analysis_with_or():
 
 
 def test_variable_bounds_analysis_deeper_ast():
-    level1_relation_left = Relation.new_lin_relation(variable_names=['x'], variable_coeficients=[1],
-                                                     operation='<=', absolute_part=0)
-    level1_relation_right = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
-                                                      operation='>=', absolute_part=-10)
+    level1_relation_left = Relation.new_lin_relation(variable_names=['x'], variable_coefficients=[1],
+                                                     predicate_symbol='<=', absolute_part=0)
+    level1_relation_right = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                                      predicate_symbol='>=', absolute_part=-10)
 
-    level0_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
-                                                operation='>=', absolute_part=-20)
+    level0_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                                predicate_symbol='>=', absolute_part=-20)
 
     ast = ['exists', [['x', 'Int']], ['or', ['and', level1_relation_left, level1_relation_right], level0_relation]]
 
@@ -103,14 +103,14 @@ def test_variable_bounds_analysis_deeper_ast():
 
 def test_variable_bounds_analysis_constrained_mod_terms():
     
-    mod_term = ModuloTerm(variables=('x',), variable_coeficients=(1,), constant=0, modulo=13)
+    mod_term = ModuloTerm(variables=('x',), variable_coefficients=(1,), constant=0, modulo=13)
 
-    left_relation = Relation(variable_names=[], variable_coeficients=[],
-                             div_terms=[], div_term_coeficients=[],
-                             modulo_terms=[mod_term], modulo_term_coeficients=[-1],
-                             operation='>', absolute_part=-8)
-    right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
-                                                      operation='>=', absolute_part=-10)
+    left_relation = Relation(variable_names=[], variable_coefficients=[],
+                             div_terms=[], div_term_coefficients=[],
+                             modulo_terms=[mod_term], modulo_term_coefficients=[-1],
+                             predicate_symbol='>', absolute_part=-8)
+    right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                               predicate_symbol='>=', absolute_part=-10)
 
     ast = ['and', left_relation, right_relation]
 
@@ -123,24 +123,24 @@ def test_variable_bounds_analysis_constrained_mod_terms():
 
 
 def test_variable_bounds_analysis_ultimate_automizer_fragment():
-    modulo_term = ModuloTerm(variables=('u',), variable_coeficients=(1,), constant=0, modulo=299993)
+    modulo_term = ModuloTerm(variables=('u',), variable_coefficients=(1,), constant=0, modulo=299993)
     # Variable information: Free variables={'w'}, Bound vars={'u', 'v'}
     ast = ['exists', [['u', 'Int'], ['v', 'Int']],
            ['and',
              # (<= 23 w)
-             Relation.new_lin_relation(variable_names=['w'], variable_coeficients=[-1],
-                                       absolute_part=23, operation='<='),
+             Relation.new_lin_relation(variable_names=['w'], variable_coefficients=[-1],
+                                       absolute_part=23, predicate_symbol='<='),
              # (<= (mod u 299993) (+ v 300007))
-             Relation(variable_names=['v'], variable_coeficients=[-1],
-                      modulo_terms=[modulo_term], modulo_term_coeficients=[1],
-                      div_terms=[], div_term_coeficients=[],
-                      absolute_part=300007, operation='<='),
+             Relation(variable_names=['v'], variable_coefficients=[-1],
+                      modulo_terms=[modulo_term], modulo_term_coefficients=[1],
+                      div_terms=[], div_term_coefficients=[],
+                      absolute_part=300007, predicate_symbol='<='),
              # (<= 0 u)
-             Relation.new_lin_relation(variable_names=['u'], variable_coeficients=[-1],
-                                       absolute_part=0, operation='<='),
+             Relation.new_lin_relation(variable_names=['u'], variable_coefficients=[-1],
+                                       absolute_part=0, predicate_symbol='<='),
 	     # (<= (+ (* 5 w) 517989) u))))
-             Relation.new_lin_relation(variable_names=['w', 'u'], variable_coeficients=[5, -1],
-                                       absolute_part=-517989, operation='<='),
+             Relation.new_lin_relation(variable_names=['w', 'u'], variable_coefficients=[5, -1],
+                                       absolute_part=-517989, predicate_symbol='<='),
            ]
     ]
 

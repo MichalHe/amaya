@@ -19,23 +19,23 @@ alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
 @pytest.fixture()
 def relation1() -> Relation:
     """Returns relation: x - y <= 0."""
-    relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, -1],
-                                         absolute_part=0, operation="<=")
+    relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, -1],
+                                         absolute_part=0, predicate_symbol="<=")
     return relation
 
 
 @pytest.fixture()
 def relation2() -> Relation:
-    relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coeficients=[1, 1],
-                                         absolute_part=1, operation="<=")
+    relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                                         absolute_part=1, predicate_symbol="<=")
     return relation
 
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
 def test_intersection(automaton_cls: NFA, relation1: Relation, relation2: Relation):
     var_id_pairs = [('x', 1), ('y', 2)]
-    nfa1 = build_nfa_from_linear_inequality(relation1, var_id_pairs, alphabet, automaton_cls)
-    nfa2 = build_nfa_from_linear_inequality(relation2, var_id_pairs, alphabet, automaton_cls)
+    nfa1 = build_nfa_from_linear_inequality(automaton_cls, alphabet, relation1, var_id_pairs)
+    nfa2 = build_nfa_from_linear_inequality(automaton_cls, alphabet, relation2, var_id_pairs)
 
     nfa = nfa1.intersection(nfa2)
 
