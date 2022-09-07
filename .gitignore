@@ -3,3 +3,6 @@ venv/*
 .vscode/**
 smt-files/**
 benchmarks/**
+**/results/**
+scripts/**
+amaya/*.so
