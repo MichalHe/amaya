@@ -2,8 +2,9 @@ from __future__ import annotations
 import math
 from typing import (
     List,
+    Optional,
     Tuple,
-    Optional
+    Type,
 )
 
 from amaya.automatons import (
@@ -20,6 +21,10 @@ from amaya.presburger.definitions import (
     ModuloTermStateComponent,
 )
 from amaya.relations_structures import Relation
+from amaya.semantics_tracking import (
+    AH_Atom,
+    AH_AtomType,
+)
 from amaya.utils import vector_dot
 
 
@@ -33,10 +38,10 @@ def sort_relation_var_vector_to_match_track_order(rel: Relation, var_id_pairs: L
     rel.variable_names, rel.variable_coefficients = zip(*sorted_var_coef_pairs)
 
 
-def build_dfa_from_linear_inequality(ineq: Relation,
-                                     ineq_var_id_pairs: List[Tuple[str, int]],
+def build_dfa_from_linear_inequality(nfa_type: Type[NFA],
                                      alphabet: LSBF_Alphabet,
-                                     automaton_constr: AutomatonConstructor) -> DFA:
+                                     ineq: Relation,
+                                     ineq_var_id_pairs: List[Tuple[str, int]]) -> DFA:
     """
     Construct an automaton accepting ineq solutions encoded in 2's complement binary encoding.
 
@@ -48,7 +53,8 @@ def build_dfa_from_linear_inequality(ineq: Relation,
     """
     logger.debug(f'Building DFA encoding the solutions of the inequation: {ineq}')
 
-    dfa: DFA[DFA_AutomatonStateType] = DFA(alphabet=alphabet, automaton_type=AutomatonType.DFA)
+    state_semantics = AH_Atom(atom_type=AH_AtomType.PRESBURGER_LE, atom=ineq)
+    dfa: DFA = nfa_type(alphabet=alphabet, automaton_type=AutomatonType.DFA, state_semantics=state_semantics)
     dfa.add_initial_state(ineq.absolute_part)
 
     work_queue: List[DFA_AutomatonStateType] = [ineq.absolute_part]
@@ -87,30 +93,6 @@ def build_dfa_from_linear_inequality(ineq: Relation,
     return dfa
 
 
-def build_dfa_from_sharp_linear_inequality(ineq: Relation,
-                                           ineq_var_id_pairs: List[Tuple[str, int]],
-                                           alphabet: LSBF_Alphabet,
-                                           automaton_constr: AutomatonConstructor) -> DFA:
-    """
-    Construct an automaton accepting the solutions (over N) of given ineq encoded in binary.
-
-    :param ineq: Inequation that will have its solutions accepted by the created automaton.
-    :param ineq_var_id_pairs: Variables present in the given inequation with their unique IDs. These pairs should be
-                              ordered according to the variable ID (ascending).
-    :param alphabet: Alphabet for the created automaton.
-    :param automaton_constr: Constructor for the automaton.
-    """
-    assert ineq.predicate_symbol == '<'
-
-    # Since we are dealing with a discrete domain:
-    ineq.absolute_part -= 1
-    ineq.predicate_symbol = '<='
-
-    ineq_dfa = build_dfa_from_linear_inequality(ineq)
-
-    return ineq_dfa
-
-
 def add_trap_state_to_automaton(automaton: NFA, trap_state: Optional[int] = None) -> int:
     """
     Add a nonaccepting state with selfloop over all alphabet symbols to the given automaton.
@@ -128,14 +110,17 @@ def add_trap_state_to_automaton(automaton: NFA, trap_state: Optional[int] = None
     return trap_state
 
 
-def build_dfa_from_linear_equality(eq: Relation,
-                                   eq_var_id_pairs: List[Tuple[str, int]],
+def build_dfa_from_linear_equality(nfa_type: Type[NFA],
                                    alphabet: LSBF_Alphabet,
-                                   constr: AutomatonConstructor) -> DFA:
+                                   eq: Relation,
+                                   eq_var_id_pairs: List[Tuple[str, int]]) -> DFA:
     """
-    Construct a DFA with language that is the solution space (over N) of the given equation using binary encoding.
+    Construct a DFA with language that is the solution space (over N) of the given equation encoded using LSBF.
     """
-    dfa: DFA[DFA_AutomatonStateType] = DFA(alphabet=alphabet, automaton_type=AutomatonType.DFA)
+
+    state_semantics = AH_Atom(atom_type=AH_AtomType.PRESBURGER_EQ, atom=eq)
+    dfa: DFA = nfa_type(alphabet=alphabet, automaton_type=AutomatonType.DFA, state_semantics=state_semantics)
+
     dfa.add_initial_state(eq.absolute_part)
 
     work_queue: List[DFA_AutomatonStateType] = [eq.absolute_part]
@@ -182,22 +167,21 @@ def build_dfa_from_linear_equality(eq: Relation,
     return dfa
 
 
-def build_presburger_modulo_dfa(equality: Relation,
-                                eq_var_id_pairs: List[Tuple[str, int]],
+def build_presburger_modulo_dfa(nfa_type: Type[NFA],
                                 alphabet: LSBF_Alphabet,
-                                constr: AutomatonConstructor) -> DFA:
+                                congruence: Relation,
+                                eq_var_id_pairs: List[Tuple[str, int]]) -> DFA:
     """
-    Construct a DFA acception the solutions (natural numbers) of the given equality of the form `(a.x mod C) = K`.
-
-    The equality must contain only 1 modulo term and no other freestanding variable terms.
+    Construct a DFA acception the solutions (natural numbers) of the given congruence of the form `(a.x mod C) = K`.
     """
 
-    logger.info('Building modulo-DFA for provided relation: {0}'.format(equality))
+    logger.info('Building modulo-DFA for provided relation: %s', congruence)
 
-    can_construct_automaton = can_build_modulo_automaton(equality)
+    can_construct_automaton = can_build_modulo_automaton(congruence)
     assert can_construct_automaton is True, f'Cannot construct automaton for {equality}: {can_construct_automaton}'
 
-    dfa = constr(alphabet=alphabet, automaton_type=AutomatonType.DFA)
+    state_semantics = AH_Atom(atom_type=AH_AtomType.PRESBURGER_CONGRUENCE, atom=congruence)
+    dfa: DFA = nfa_type(alphabet=alphabet, automaton_type=AutomatonType.DFA, state_semantics=state_semantics)
 
     variable_name_to_id: Dict[str, int] = dict(eq_var_id_pairs)
     variable_ids = sorted(variable_name_to_id.values())
@@ -207,12 +191,12 @@ def build_presburger_modulo_dfa(equality: Relation,
         (var_id_pair[0], i) for i, var_id_pair in enumerate(eq_var_id_pairs)
     )
 
-    modulo_term = equality.modulo_terms[0]
+    modulo_term = congruence.modulo_terms[0]
 
     vars_with_coefs = zip(modulo_term.variables, modulo_term.variable_coefficients)
     variable_coefs_ord_by_track = sorted(vars_with_coefs, key=lambda vc: variable_name_to_track_index[vc[0]])
 
-    initial_state = ModuloTermStateComponent(value=equality.absolute_part,
+    initial_state = ModuloTermStateComponent(value=congruence.absolute_part,
                                              modulo=modulo_term.modulo,
                                              variable_coefficients=tuple(vc[1] for vc in variable_coefs_ord_by_track))
 
@@ -259,5 +243,4 @@ def build_presburger_modulo_dfa(equality: Relation,
 
     dfa.used_variables = sorted(var_id_pair[1] for var_id_pair in eq_var_id_pairs)
     # Alias store maps the rich information about modulo states to ints, create reverse mapping for debugging purposes
-    dfa.state_labels = dict((state, label) for label, state in alias_store.data.items())
     return dfa

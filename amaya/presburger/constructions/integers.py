@@ -158,7 +158,7 @@ def build_nfa_from_linear_inequality(nfa_type: Type[NFA],
 
     nfa = nfa_type(automaton_type=AutomatonType.NFA,
                    alphabet=alphabet,
-                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_LE, atom=ineq, final_state=-1))
+                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_LE, atom=ineq))
 
     nfa.add_initial_state(initial_state.value)
 
@@ -166,7 +166,7 @@ def build_nfa_from_linear_inequality(nfa_type: Type[NFA],
                                                          is_transition_final,
                                                          ineq_variables_ordered,
                                                          nfa)
-    nfa.state_semantics.final_state = next(iter(nfa.final_states))
+    nfa.state_semantics.special_state = next(iter(nfa.final_states))
     return nfa
 
 
@@ -179,7 +179,7 @@ def build_nfa_from_linear_equality(nfa_type: Type[NFA],
 
     nfa = nfa_type(automaton_type=AutomatonType.NFA,
                    alphabet=alphabet,
-                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_EQ, atom=eq, final_state=-1))
+                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_EQ, atom=eq))
 
     nfa.add_initial_state(initial_state.value)
 
@@ -195,7 +195,7 @@ def build_nfa_from_linear_equality(nfa_type: Type[NFA],
                                                          is_transition_final,
                                                          eq_variables_ordered,
                                                          nfa)
-    nfa.state_semantics.final_state = next(iter(nfa.final_states))
+    nfa.state_semantics.special_state = next(iter(nfa.final_states))
     return nfa
 
 
@@ -216,7 +216,7 @@ def build_presburger_modulo_nfa(nfa_type: Type[NFA],
 
     nfa = nfa_type(automaton_type=AutomatonType.NFA,
                    alphabet=alphabet,
-                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_CONGRUENCE, atom=relation, final_state=-1))
+                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_CONGRUENCE, atom=relation))
 
     assert can_build_modulo_automaton(relation)
 
@@ -289,5 +289,5 @@ def build_presburger_modulo_nfa(nfa_type: Type[NFA],
     nfa.used_variables = [var_id_pair[1] for var_id_pair in relation_variables_with_ids]
     # nfa.state_labels = StateLabelUnaryNode(labels=dict((state, label) for label, state in alias_store.data.items()), child=None)
     nfa.extra_info['aliases'] = alias_store
-    nfa.state_semantics.final_state = next(iter(nfa.final_states))
+    nfa.state_semantics.special_state = next(iter(nfa.final_states))
     return nfa
