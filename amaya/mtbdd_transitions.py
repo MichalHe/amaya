@@ -44,7 +44,6 @@ class Serialized_NFA(ct.Structure):
 
 
 mtbdd_wrapper.amaya_mtbdd_build_single_terminal.argtypes = (
-    ct.c_uint32,             # Automaton ID
     ct.POINTER(ct.c_uint8),  # Transitions symbols [symbol0_bit0, ... symbol0_bitN, symbol1_bit0 ...]
     ct.c_uint32,             # Symbol count
     ct.c_uint32,             # Variable count
@@ -86,7 +85,6 @@ mtbdd_wrapper.amaya_mtbdd_get_leaves.restype = ct.POINTER(c_side_state_type)  # 
 mtbdd_wrapper.amaya_unite_mtbdds.argtypes = (
     ct.c_ulong,  # MTBDD a
     ct.c_ulong,  # MTBDD b
-    ct.c_uint32  # Resulting Automaton ID
 )
 mtbdd_wrapper.amaya_unite_mtbdds.restype = ct.c_ulong
 
@@ -126,7 +124,6 @@ mtbdd_wrapper.amaya_mtbdd_get_transitions.restype = ct.POINTER(ct.c_uint8)
 mtbdd_wrapper.amaya_mtbdd_intersection.argtypes = (
     ct.c_ulong,     # MTBDD 1
     ct.c_ulong,     # MTBDD 2
-    ct.c_uint32,    # automaton id
 
     ct.POINTER(ct.POINTER(c_side_state_type)),   # New discoveries made during intersection
     ct.POINTER(ct.c_uint32),                     # New discoveries size.
@@ -143,7 +140,6 @@ mtbdd_wrapper.amaya_end_intersection.argtypes = ()
 mtbdd_wrapper.amaya_update_intersection_state.argtypes = (
     ct.POINTER(c_side_state_type),     # Metastates [m0_0, m0_1, m1_0, m1_1 ...]
     ct.POINTER(c_side_state_type),     # Metastate names
-    ct.c_uint32,                       # automaton id
 )
 
 mtbdd_wrapper.amaya_set_debugging.argtypes = (ct.c_bool, )
@@ -152,7 +148,6 @@ mtbdd_wrapper.amaya_rename_macrostates_to_int.argtypes = (
     ct.POINTER(ct.c_ulong),   # The mtbdd roots that were located during determinization
     ct.c_uint32,              # The number of mtbdd roots
     c_side_state_type,        # The number from which the numbering will start
-    ct.c_uint32,              # The ID of the resulting automaton
     ct.POINTER(ct.POINTER(c_side_state_type)),  # OUT: Metastates serialized
     ct.POINTER(ct.POINTER(ct.c_uint64)),        # OUT: Metastates sizes
     ct.POINTER(ct.c_uint64)                     # OUT: Metastates count
@@ -161,7 +156,6 @@ mtbdd_wrapper.amaya_rename_macrostates_to_int.restype = ct.POINTER(ct.c_ulong)
 
 mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.argtypes = (
     ct.c_ulong,                 # The MTBDD
-    ct.c_uint32,                # Automaton ID
     c_side_state_type,          # The trapstate ID
     ct.POINTER(ct.c_bool)       # OUT - Information about whether the operator did add a transition to a trapstate somewhere
 )
@@ -242,12 +236,11 @@ Symbol = Tuple[Union[str, int], ...]
 
 
 class MTBDDTransitionFn():
-    def __init__(self, alphabet_variables: List[int], automaton_id: int):
+    def __init__(self, alphabet_variables: List[int]):
         self.mtbdds: Dict[Any, MTBDD] = {}
         self.post_cache = dict()
         self.is_post_cache_valid = False
         self.alphabet_variables = alphabet_variables
-        self.automaton_id = automaton_id
 
         self.debug_cnt = 0
 
@@ -272,7 +265,6 @@ class MTBDDTransitionFn():
 
         # Construct cube from destination state
         mtbdd_new = mtbdd_wrapper.amaya_mtbdd_build_single_terminal(
-            ct.c_uint32(self.automaton_id),
             ct.cast(cube, ct.POINTER(ct.c_uint8)),      # Transition symbols, 2d array
             ct.c_uint32(1),                             # Transitions symbols count
             cube_size,                                  # Variables count
@@ -281,7 +273,7 @@ class MTBDDTransitionFn():
         )
 
         mtbdd_wrapper.amaya_mtbdd_ref(mtbdd_new)
-        resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(mtbdd_new, current_mtbdd, self.automaton_id)
+        resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(mtbdd_new, current_mtbdd)
 
         # Perform referece counting updates
         # Keep only the newly created mtbdd, drop the sigle-terminal one and
@@ -456,16 +448,13 @@ class MTBDDTransitionFn():
 
         return leaves
 
-    def get_union_mtbdd_for_states(self, states: List[int], resulting_automaton_id: int) -> MTBDD:
+    def get_union_mtbdd_for_states(self, states: List[int]) -> MTBDD:
         resulting_mtbdd = mtbdd_false
         for state in states:
             if state not in self.mtbdds:
                 continue
             mtbdd = self.mtbdds[state]
-            new_resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(
-                mtbdd,
-                resulting_mtbdd,
-                resulting_automaton_id)
+            new_resulting_mtbdd = mtbdd_wrapper.amaya_unite_mtbdds(mtbdd, resulting_mtbdd)
 
             # The union algorithm works iteratively, adding a single MTBDD to the union mtbdd computed so far.
             # The old intermediate MTBDD has to has its reference counter decrememented, so it gets GC'd,
@@ -795,7 +784,6 @@ class MTBDDTransitionFn():
     @staticmethod
     def compute_mtbdd_intersect(mtbdd1: MTBDD,
                                 mtbdd2: MTBDD,
-                                result_id: int,
                                 generated_metastates: Optional[Dict[int, Tuple[int, int]]] = None) -> MTBDD:
         '''Computes the intersection MTBDD for given MTBDDs'''
 
@@ -805,7 +793,6 @@ class MTBDDTransitionFn():
         intersect_mtbdd = mtbdd_wrapper.amaya_mtbdd_intersection(
             mtbdd1,
             mtbdd2,
-            ct.c_uint32(result_id),
             ct.byref(discovered_states_arr),
             ct.byref(discovered_states_cnt)
         )
@@ -823,9 +810,7 @@ class MTBDDTransitionFn():
         return intersect_mtbdd
 
     @staticmethod
-    def union_of(mtfn0: MTBDDTransitionFn,
-                 mtfn1: MTBDDTransitionFn,
-                 new_automaton_id: int) -> MTBDDTransitionFn:
+    def union_of(mtfn0: MTBDDTransitionFn, mtfn1: MTBDDTransitionFn) -> MTBDDTransitionFn:
         '''Creates a new MTBDD transition function that contains transitions
         from both transition functions.
 
@@ -843,7 +828,7 @@ class MTBDDTransitionFn():
                 f'The union should be calculated on states that have been renamed first. {s1} in {resulting_mtbdds}'
             resulting_mtbdds[s1] = m1
 
-        union_tfn = MTBDDTransitionFn(mtfn0.alphabet_variables, new_automaton_id)
+        union_tfn = MTBDDTransitionFn(mtfn0.alphabet_variables)
         union_tfn.mtbdds = resulting_mtbdds
 
         # Perform the refs increment
@@ -902,13 +887,11 @@ class MTBDDTransitionFn():
 
     @staticmethod
     def rename_macrostates_after_determinization(mtbdds: Iterable[MTBDD],
-                                                 resulting_automaton_id: int,
                                                  start_numbering_from: int = 0) -> Tuple[List[ct.c_ulong], Dict[Tuple[int, ...], int]]:
         in_mtbdds = (ct.c_ulong * len(mtbdds))()
         for i, mtbdd in enumerate(mtbdds):
             in_mtbdds[i] = mtbdd
         in_mtbdd_cnt = ct.c_uint32(len(mtbdds))
-        in_res_automaton_id = ct.c_uint32(resulting_automaton_id)
         in_start_numbering_from = c_side_state_type(start_numbering_from)
 
         out_metastates_serialized = ct.POINTER(c_side_state_type)()
@@ -919,7 +902,6 @@ class MTBDDTransitionFn():
             ct.cast(in_mtbdds, ct.POINTER(ct.c_ulong)),
             in_mtbdd_cnt,
             in_start_numbering_from,
-            in_res_automaton_id,
             ct.byref(out_metastates_serialized),
             ct.byref(out_metastates_sizes),
             ct.byref(out_metastates_cnt),
@@ -952,7 +934,7 @@ class MTBDDTransitionFn():
         return (patched_mtbdds, mapping)
 
     @staticmethod
-    def complete_mtbdd_with_trapstate(mtbdd: ct.c_long, automaton_id: int, trapstate_id: int) -> Tuple[ct.c_long, bool]:
+    def complete_mtbdd_with_trapstate(mtbdd: ct.c_long, trapstate_id: int) -> Tuple[ct.c_long, bool]:
         """Wrapper call.
 
         Add a transition to the given trapstate for every alphabet symbol
@@ -962,11 +944,10 @@ class MTBDDTransitionFn():
         mtbdd already was complete) and the information about whether the operation
         did indeed modify the mtbdd somehow.
         """
-        _aid = ct.c_uint32(automaton_id)
         _trapstate = c_side_state_type(trapstate_id)
         _had_effect = ct.c_bool()
 
-        mtbdd = mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate(mtbdd, _aid, _trapstate, ct.byref(_had_effect))
+        mtbdd = mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate(mtbdd, _trapstate, ct.byref(_had_effect))
         return (mtbdd, _had_effect)
 
     @staticmethod
@@ -1072,7 +1053,7 @@ class MTBDDTransitionFn():
         # Cummulative information about whether a trapstate was somewhere added
         was_trapstate_added = False
         for origin, mtbdd in self.mtbdds.items():
-            completed_mtbdd, had_effect = self.complete_mtbdd_with_trapstate(mtbdd, self.automaton_id, trapstate)
+            completed_mtbdd, had_effect = self.complete_mtbdd_with_trapstate(mtbdd, trapstate)
             mtbdd_wrapper.amaya_mtbdd_ref(completed_mtbdd)
             was_trapstate_added = was_trapstate_added or had_effect
             completed_mtbdds[origin] = completed_mtbdd

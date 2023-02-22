@@ -34,7 +34,6 @@ from amaya.visualization import AutomatonVisRepresentation
 
 @dataclass
 class MTBDD_NFA(NFA):
-    automaton_id_counter = 0  # ^^^ Used to mark mtbdd leaves in order to avoid sharing them between multiple mtbdds
     fast_prunining_enabled = False
 
     alphabet:       LSBF_Alphabet
@@ -52,8 +51,7 @@ class MTBDD_NFA(NFA):
     trapstate: Optional[int] = None
 
     def __post_init__(self):
-        self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_numbers, MTBDD_NFA.automaton_id_counter)
-        MTBDD_NFA.automaton_id_counter += 1
+        self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_numbers)
 
     def add_state(self, state: int):
         self.states.add(state)
@@ -113,9 +111,7 @@ class MTBDD_NFA(NFA):
 
         other.renumber_states(start_from=first_unreached_state)
 
-        self.transition_fn = MTBDDTransitionFn.union_of(self.transition_fn,
-                                                        other.transition_fn,
-                                                        MTBDD_NFA.get_next_automaton_id())
+        self.transition_fn = MTBDDTransitionFn.union_of(self.transition_fn, other.transition_fn)
 
         self.states = self.states.union(other.states)
         self.final_states.update(other.final_states)
@@ -176,10 +172,6 @@ class MTBDD_NFA(NFA):
         logger.info(f'Setting initial states to: {metastate_map.keys()} {metastate_map}')
         int_nfa.initial_states = set(metastate_map.keys())
 
-        # The new automaton should have unique ID
-        assert int_nfa.transition_fn.automaton_id not in \
-            [self.transition_fn.automaton_id, other.transition_fn.automaton_id]
-
         work_set = set(work_queue)
         processed_states_cnt = 0
         while work_queue:
@@ -210,7 +202,6 @@ class MTBDD_NFA(NFA):
             cur_int_mtbdd = self.transition_fn.compute_mtbdd_intersect(
                 l_mtbdd,
                 r_mtbdd,
-                int_nfa.transition_fn.automaton_id,
                 generated_metastates=generated_metastates  # Get generated metastates
             )
 
@@ -284,7 +275,7 @@ class MTBDD_NFA(NFA):
             if set(c_macrostate).intersection(self.final_states):
                 final_states.add(c_macrostate)
 
-            c_macrostate_union_mtbdd = self.transition_fn.get_union_mtbdd_for_states(c_macrostate, self.transition_fn.automaton_id)
+            c_macrostate_union_mtbdd = self.transition_fn.get_union_mtbdd_for_states(c_macrostate)
 
             # The mtbdd has already ref count increased, do not increase it
 
@@ -314,9 +305,8 @@ class MTBDD_NFA(NFA):
 
         # We have explored the entire structure - time to mangle the generated
         # macrostates into integers, so that the automaton has the correct form.
-        automaton_id = dfa.transition_fn.automaton_id
         macrostates, _mtbdds = zip(*mtbdds.items())
-        patched_mtbdds, macrostate2int_map = MTBDDTransitionFn.rename_macrostates_after_determinization(_mtbdds, automaton_id)
+        patched_mtbdds, macrostate2int_map = MTBDDTransitionFn.rename_macrostates_after_determinization(_mtbdds)
 
         # The patched mtbdds have already ref count incremented, no need to
         # increment the ref counter. The old mtbdds will be decremented when
@@ -398,12 +388,6 @@ class MTBDD_NFA(NFA):
                                                  all_symbols,
                                                  self.trapstate
                                                  )
-
-    @staticmethod
-    def get_next_automaton_id() -> int:
-        c = MTBDD_NFA.automaton_id_counter
-        MTBDD_NFA.automaton_id_counter += 1
-        return c
 
     def do_projection(self, var: int, skip_pad_closure: bool = False):
         logger.info(f'Performing MTBDD NFA projection on variable: {var}. Currently employed variables: {self.used_variables}')
