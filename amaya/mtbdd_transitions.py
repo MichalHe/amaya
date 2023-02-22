@@ -294,16 +294,17 @@ class MTBDDTransitionFn():
 
     @staticmethod
     def write_mtbdd_dot_to_file(m, filename):
-        '''Writes the dot representation of given MTBDD m to the file.'''
+        """Write the dot representation of given MTBDD m to the file."""
         output_f = open(filename, 'w')
         fd = output_f.fileno()
 
-        mtbdd_wrapper.amaya_print_dot(
-            m,  # The mtbdd to be printed out
-            fd  # File descriptor
-        )
+        MTBDDTransitionFn.write_mtbdd_dot_to_fd(m, fd)
 
         output_f.close()  # The C side does not close the file descriptor
+
+    @staticmethod
+    def write_mtbdd_dot_to_fd(mtbdd: MTBDD, fd: int):
+        mtbdd_wrapper.amaya_print_dot(mtbdd, fd)
 
     @staticmethod
     def convert_symbol_to_mtbdd_cube(symbol: Symbol):
