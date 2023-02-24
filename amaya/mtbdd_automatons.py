@@ -515,6 +515,7 @@ class MTBDD_NFA(NFA):
             initial_states=set(self.initial_states),
             final_states=set(self.final_states),
             states=set(self.states),
+            state_semantics=None,
             transitions=vis_transitions,
             variable_names=self.alphabet.variable_numbers,
             variable_ids=self.used_variables,

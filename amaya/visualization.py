@@ -133,7 +133,7 @@ def construct_state_label(state: int, state_semantics: AH_Node) -> str:
 
     # We have already covered all semantics nodes that do not touch state semantics. The remaining semantics-changing
     # nodes might not have state_labels, as tracking the semantics (state_labels) can be turned off.
-    if not state_semantics.state_labels:
+    if not state_semantics or not state_semantics.state_labels:
         return str(state)
 
     if isinstance(state_semantics, state_semantics_lib.AH_Union):

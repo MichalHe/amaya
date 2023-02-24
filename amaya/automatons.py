@@ -461,7 +461,7 @@ class NFA:
     @staticmethod
     def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA:
         nfa = NFA(alphabet=alphabet, automaton_type=(AutomatonType.DFA | AutomatonType.TRIVIAL),
-                  state_semantics=AH_Atom(atom_type=AH_AtomType.TRIVIAL))
+                  state_semantics=AH_Atom(atom_type=AH_AtomType.TRIVIAL, atom=None))
 
         state = 0
         nfa.add_state(state)
