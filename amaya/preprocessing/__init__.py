@@ -434,21 +434,23 @@ def replace_forall_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
 
 
 @dataclass
-class VarDisambiguationInfo:
-    new_name: str
-    conflict_count: int
+class Var_Scope_Info:
+    scope_id: int
+    """The number (ID) of the variable scope the currently examined variable belongs to."""
+
+    def put_scope_id_into_name(self, var_name: str) -> str:
+        return f'{var_name}#{self.scope_id}'
 
 
-def _disambiguate_variables_rec(ast: AST_Node, variable_rename_map: Dict[str, VarDisambiguationInfo]) -> AST_Node:
+def _disambiguate_vars(ast: AST_Node, var_scope_info: Dict[str, Var_Scope_Info], var_scope_cnts: Dict[str, int]) -> AST_Node:
     if isinstance(ast, str):
-        if ast in variable_rename_map:
-            return variable_rename_map[ast].new_name
+        if ast in var_scope_info:
+            return var_scope_info[ast].put_scope_id_into_name(ast)
         return ast
     elif isinstance(ast, int):
         return ast
     elif isinstance(ast, Relation):
-        # This branch is kept for robustness of this functionality, it might not be hit - depends on the amount of
-        # preprocessing work already done.
+        # This branch might not be hit if the relations were not yet condensed into relations.
         relation: Relation = ast
         relation.variable_names = list(variable_rename_map[var_name] for var_name in relation.variable_names)
         for mod_term in relation.modulo_terms:
@@ -461,36 +463,25 @@ def _disambiguate_variables_rec(ast: AST_Node, variable_rename_map: Dict[str, Va
     node_type = ast[0]
 
     if node_type in ('exists', 'forall'):
-        new_variables = tuple(var_name for var_name, dummy_var_type in ast[1])
+        new_scope_info: Dict[str, Var_Scope_Info] = dict(var_scope_info)
+        quantified_vars = tuple(var_name for var_name, dummy_var_type in ast[1])
 
-        # Update variable_rename_map so that the variables can be renamed further down the AST
-        disambiguated_quantifier_binding_list = []
-        for i, var_name in enumerate(new_variables):
+        disambiguated_quantified_vars = []
+        for i, var_name in enumerate(quantified_vars):
+            this_scope_id = var_scope_cnts.get(var_name, 0)
+            var_scope_cnts[var_name] = this_scope_id + 1
+            scope_info = Var_Scope_Info(scope_id=this_scope_id)
+            new_scope_info[var_name] = scope_info
+
             var_type: str = ast[1][i][1]
-            conflicting_disambiguation_entries: Dict[str, VarDisambiguationInfo] = {}
-            if var_name in variable_rename_map:
-                old_disambiguation_info = variable_rename_map[var_name]
-                conflicting_disambiguation_entries[var_name] = old_disambiguation_info
-                new_var_name = f'{var_name}#{old_disambiguation_info.conflict_count + 1}'
-                new_disambiguation_info = VarDisambiguationInfo(new_name=new_var_name, conflict_count=old_disambiguation_info.conflict_count + 1)
-                variable_rename_map[var_name] = new_disambiguation_info
-                disambiguated_quantifier_binding_list.append([new_var_name, var_type])
-            else:
-                new_disambiguation_info = VarDisambiguationInfo(new_name=f'{var_name}', conflict_count=0)
-                variable_rename_map[var_name] = new_disambiguation_info
-                disambiguated_quantifier_binding_list.append([var_name, var_type])
+            disambiguated_quantified_vars.append([scope_info.put_scope_id_into_name(var_name), var_type])
 
-        disambiguated_subast = _disambiguate_variables_rec(ast[2], variable_rename_map)
+        disambiguated_subast = _disambiguate_vars(ast[2], new_scope_info, var_scope_cnts)
 
-        # Restore the names to which should the conflicting variables in the surrounding scope be renamed, however,
-        # keep the new conflict count, in order to be able to generate unique variable names when new conflict is seen.
-        for var_name, old_disambiguation_info in conflicting_disambiguation_entries.items():
-            new_conflict_count = variable_rename_map[var_name].conflict_count
-            variable_rename_map[var_name] = VarDisambiguationInfo(new_name=old_disambiguation_info.new_name, conflict_count=new_conflict_count)
-        return [node_type, disambiguated_quantifier_binding_list, disambiguated_subast]
+        return [node_type, disambiguated_quantified_vars, disambiguated_subast]
 
     elif node_type in ('and', 'or', 'not', '<=', '<', '>', '>=', '=', '+', '-', 'mod', 'div', '*'):
-        disambiguated_subasts = (_disambiguate_variables_rec(subtree, variable_rename_map) for subtree in ast[1:])
+        disambiguated_subasts = (_disambiguate_vars(subtree, var_scope_info, var_scope_cnts) for subtree in ast[1:])
         return [node_type, *disambiguated_subasts]
 
     raise NotImplementedError(f'[Variable name disambiguation] Unhandled {node_type=} while traversing ast.')
@@ -498,10 +489,13 @@ def _disambiguate_variables_rec(ast: AST_Node, variable_rename_map: Dict[str, Va
 
 def disambiguate_variables(ast: AST_Node, constant_function_symbols: Iterable[FunctionSymbol]) -> AST_Node:
     """Modifies the AST so that all variables have unique names."""
-    variable_rename_map = {
-        fn_symbol.name: VarDisambiguationInfo(new_name=fn_symbol.name, conflict_count=0) for fn_symbol in constant_function_symbols
-    }
-    return _disambiguate_variables_rec(ast, variable_rename_map)
+    global_scope_info: Dict[str, Var_Scope_Info] = {}
+    var_scope_cnt: Dict[str, int] = {}
+    for constatnt_symbol in constant_function_symbols:
+        global_scope_info[constatnt_symbol.name] = Var_Scope_Info(scope_id=0)
+        var_scope_cnt[constatnt_symbol.name] = 1
+
+    return _disambiguate_vars(ast, global_scope_info, var_scope_cnt)
 
 
 def preprocess_ast(ast: AST_Node,

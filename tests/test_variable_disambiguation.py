@@ -15,10 +15,10 @@ def test_variable_disambiguation_nested_exists():
     ]
 
     expected_result = [
-        'exists', [['X', 'Int']],
+        'exists', [['X#0', 'Int']],
         [
-            'exists', [['X#1', 'Int'], ['Y', 'Int']],
-            ['<=', ['-', 'X#1', 'Y'], 299]
+            'exists', [['X#1', 'Int'], ['Y#0', 'Int']],
+            ['<=', ['-', 'X#1', 'Y#0'], 299]
         ]
     ]
     actual_result = disambiguate_variables(ast, [])
@@ -40,8 +40,8 @@ def test_variable_disambiguation_parallel_exists_with_same_vars():
     expected_result = [
         'or',
         [
-            'exists', [['X', 'Int']],
-                ['<=', ['-', 'X'], 299]],
+            'exists', [['X#0', 'Int']],
+                ['<=', ['-', 'X#0'], 299]],
         [
             'exists', [['X#1', 'Int']],
                 ['<=', ['+', 'X#1'], 42]],
@@ -58,7 +58,7 @@ def test_variable_disambiguation_with_global_symbols():
 
     expected_result = [
         'exists', [['X#1', 'Int']],
-            ['<=', ['-', 'X#1', 'Y'], 299]]
+            ['<=', ['-', 'X#1', 'Y#0'], 299]]
 
     constant_fn_symbols = [
         FunctionSymbol(name='X', arity=0, args=[], return_type=VariableType.INT),
