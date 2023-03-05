@@ -1,6 +1,8 @@
 from dataclasses import dataclass
-from itertools import chain
+import collections
+import itertools
 from typing import (
+    Any,
     Dict,
     Generator,
     Iterable,
@@ -11,7 +13,6 @@ from typing import (
     Union,
 )
 
-import amaya.ast_relations as relations
 from amaya.ast_definitions import (
     AST_Leaf,
     AST_NaryNode,
@@ -20,11 +21,13 @@ from amaya.ast_definitions import (
     NodeEncounteredHandler,
     NodeEncounteredHandlerStatus,
 )
+import amaya.ast_relations as relations
 from amaya.relations_structures import (
     DivTerm,
     ModuloTerm,
-    NonlinearTermReplacementInfo,
     Relation,
+    RewritableTerm,
+    TermRewrites,
 )
 from amaya.preprocessing.ite_preprocessing import (
     rewrite_ite_expressions,
@@ -64,63 +67,53 @@ def is_ast_bool_equavalence(ast: AST_Node, bool_fn_symbols: Set[str]):
     )
 
 
-def generate_atomic_constraints_for_replaced_mod_terms(
-        replacement_infos: List[NonlinearTermReplacementInfo[ModuloTerm]]) -> List[Relation]:
+def generate_atomic_constraints_for_replaced_terms(rewrites: Dict[RewritableTerm, str]) -> List[Relation]:
     """
-    Generate the atomic constraints limiting the range of the variables replacing modulo terms, as well as
-    the congruence constraints.
+    Generate the atomic constraints to semantically bind the introduced variable with the original term.
 
     The returned constraints are sorted according to the predicted size of their automata in an ascending order.
 
-    :param replacement_info: Information about what mod term was replaced by what variable.
+    :param rewrites: Information about what term was replaced by what variable.
     """
     constraints: List[Relation] = []
-    for replacement_info in replacement_infos:
-        reminder_lower_bound = Relation.new_lin_relation(variable_names=[replacement_info.variable],
-                                                         variable_coefficients=[-1], absolute_part=0, predicate_symbol='<=')
+    for term, variable in rewrites.items():
+        if isinstance(term, ModuloTerm):
+            reminder_lower_bound = Relation.new_lin_relation(variable_names=[variable],
+                                                             variable_coefficients=[-1], absolute_part=0, predicate_symbol='<=')
 
-        reminder_upper_bound = Relation.new_lin_relation(variable_names=[replacement_info.variable],
-                                                         variable_coefficients=[1], predicate_symbol='<=',
-                                                         absolute_part=replacement_info.term.modulo - 1)
+            reminder_upper_bound = Relation.new_lin_relation(variable_names=[variable],
+                                                             variable_coefficients=[1], predicate_symbol='<=',
+                                                             absolute_part=term.modulo - 1)
 
-        # Modify the original modulo term by subtracting the replacement variable, and use it to form the congruence
-        modulo_term = ModuloTerm(variables=replacement_info.term.variables + (replacement_info.variable,),
-                                 variable_coefficients=replacement_info.term.variable_coefficients + (-1,),
-                                 constant=replacement_info.term.constant, modulo=replacement_info.term.modulo)
-        modulo_term = modulo_term.into_sorted()
-        congruence = Relation.new_congruence_relation(modulo_terms=[modulo_term],  modulo_term_coefficients=[1])
+            # The difference of the original variables and the rewrite variable should be congruent to 0
+            modulo_term = ModuloTerm(variables=term.variables + (variable,),
+                                     variable_coefficients=term.variable_coefficients + (-1,),
+                                     constant=term.constant, modulo=term.modulo)
 
-        constraints.extend((reminder_lower_bound, reminder_upper_bound, congruence))
+            modulo_term = modulo_term.into_sorted()
+            congruence = Relation.new_congruence_relation(modulo_terms=[modulo_term], modulo_term_coefficients=[1])
+
+            constraints.extend((reminder_lower_bound, reminder_upper_bound, congruence))
+        else:
+            _vars = term.variables + (variable,)
+            _var_coefs = term.variable_coefficients + (-term.divisor,)
+
+            # Sort the variables and their coefficients according to their names
+            _vars, _var_coefs = zip(*sorted(zip(_vars, _var_coefs), key=lambda pair: pair[0]))
+
+            # Create bounds limiting the divisor so that the original_expr - divisor*var gives a reminder as
+            # when performing integer division
+            reminder_lower_bound = Relation.new_lin_relation(variable_names=list(_vars),
+                                                             variable_coefficients=[-coef for coef in _var_coefs],
+                                                             absolute_part=0, predicate_symbol='<=')
+
+            reminder_upper_bound = Relation.new_lin_relation(variable_names=list(_vars),
+                                                             variable_coefficients=list(_var_coefs),
+                                                             absolute_part=replacement_info.term.divisor - 1,
+                                                             predicate_symbol='<=')
+            constraints.extend((reminder_lower_bound, reminder_upper_bound))
 
     return sorted(constraints, key=lambda constraint: constraint.calc_approximate_automaton_size())
-
-
-def generate_atomic_constraints_for_replaced_div_terms(
-        replacement_infos: List[NonlinearTermReplacementInfo[DivTerm]]) -> List[Relation]:
-    """
-    Generate the atomic constraints limiting the value of the variables that replaced div terms.
-
-    :param replacement_info: Information about what div term was replaced by what variable.
-    """
-    constraints: List[Relation] = []
-    for replacement_info in replacement_infos:
-        _vars = replacement_info.term.variables + (replacement_info.variable,)
-        _var_coefs = replacement_info.term.variable_coefficients + (-replacement_info.term.divisor,)
-
-        # Sort the variables and their coefficients according to their names
-        _vars, _var_coefs = zip(*sorted(zip(_vars, _var_coefs), key=lambda pair: pair[0]))
-
-        reminder_lower_bound = Relation.new_lin_relation(variable_names=list(_vars),
-                                                         variable_coefficients=[-coef for coef in _var_coefs],
-                                                         absolute_part=0, predicate_symbol='<=')
-        reminder_upper_bound = Relation.new_lin_relation(variable_names=list(_vars),
-                                                         variable_coefficients=list(_var_coefs),
-                                                         absolute_part=replacement_info.term.divisor - 1,
-                                                         predicate_symbol='<=')
-
-        constraints.extend((reminder_lower_bound, reminder_upper_bound))
-
-    return constraints
 
 
 def condense_relation_asts_to_relations(ast: AST_NaryNode, bool_fn_symbols: Set[str]) -> AST_Node:
@@ -143,89 +136,92 @@ def condense_relation_asts_to_relations(ast: AST_NaryNode, bool_fn_symbols: Set[
     return [node_type, *reduced_subtrees]
 
 
-def _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNode, coalese_with_surroundings: bool) -> Tuple[bool, AST_NaryNode]:
+BindingList = List[List[str]]
+
+
+def _rewrite_terms_in_relations(relations: List[Relation],
+                                rewrite_info: TermRewrites,
+                                vars_in_rewritten_terms: Optional[Set[str]] = None) -> Tuple[List[Relation], BindingList, List[Relation]]:
+    # We don't want to rewrite modulo terms if they occur only once and that is in the form of congruence
+    mod_term_uses: Dict[RewritableTerm, List[Relation]] = collections.defaultdict(list)
+    for relation in relations:
+        for term in relation.modulo_terms:
+            mod_term_uses[term].append(relation)
+
+    def is_only_in_congruence(term_relations: List[Relation]) -> bool:
+        return len(term_relations) == 1 and term_relations[0].is_congruence_equality()
+
+    congruence_relations = [
+        term_relations[0] for term, term_relations in mod_term_uses.items() if is_only_in_congruence(term_relations)
+    ]
+
+    vars_rewriting_terms: Dict[RewritableTerm, str] = {}
+    relations_to_propagate: List[Relation] = []
+    for relation in relations:
+
+        # @Optimize: This performs a linear search in the list of relations, but there should not be many of them
+        if relation in congruence_relations:
+            continue
+
+        relation.replace_chosen_nonlinear_terms_with_variables(vars_in_rewritten_terms, vars_rewriting_terms, rewrite_info)
+        if relation.modulo_terms or relation.div_terms:
+            relations_to_propagate.append(relation)
+    binding_list = [[var, 'Int'] for var in vars_rewriting_terms.values()]
+
+    atoms = generate_atomic_constraints_for_replaced_terms(vars_rewriting_terms)
+    return relations_to_propagate, binding_list, atoms
+
+
+def _rewrite_nonlinear_terms(ast: AST_NaryNode, rewrite_info: TermRewrites) -> Tuple[List[Relation], AST_NaryNode]:
     if isinstance(ast, Relation):
         relation: Relation = ast
-        if relation.direct_construction_exists():
-            return False, relation
 
-        relation_without_modulos, mod_replacements, div_replacements = relation.replace_nonlinear_terms_with_variables()
-
-        # Make sure we are not expanding something that should have a direct construction
-        failure_desc = 'Relation did not have a direct construction, yet there were no modulos inside(?)'
-        assert mod_replacements or div_replacements, failure_desc
-
-        # We need to add relations expressing modulo/reminder domains etc.
-        resulting_relations: List[Relation] = [relation_without_modulos]
-        resulting_relations += generate_atomic_constraints_for_replaced_div_terms(div_replacements)
-        resulting_relations += generate_atomic_constraints_for_replaced_mod_terms(mod_replacements)
-
-        variable_binding_list = [
-            [var, 'Int'] for var in sorted(info.variable for info in chain(div_replacements, mod_replacements))
-        ]
-        return (True, ['exists', variable_binding_list, ['and', *resulting_relations]])
+        rewrite_candidate = [relation] if relation.modulo_terms or relation.div_terms else []
+        return (rewrite_candidate, relation)
 
     if isinstance(ast, str):
-        return (False, ast)
+        return ([], ast)
 
     node_type = ast[0]
 
-    if node_type == 'and':
-        rewritten_subtrees = []
-        rewritten_subtrees_count = 0
-        last_rewritten_subtree_index = None
-        for subtree_index, subtree in enumerate(ast[1:]):
-            was_rewritten, rewritten_subtree = _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree, coalese_with_surroundings)
-            rewritten_subtrees.append(rewritten_subtree)
-            if was_rewritten:
-                rewritten_subtrees_count += 1
-                last_rewritten_subtree_index = subtree_index
+    if node_type in ('or', 'and', 'not', '='):
+        rewrite_results = (_rewrite_nonlinear_terms(subtree, rewrite_info) for subtree in ast[1:])
 
-        if rewritten_subtrees_count == 1 and coalese_with_surroundings:
-            subtree_to_coalese = rewritten_subtrees[last_rewritten_subtree_index]
+        subtree_relations, subtrees = zip(*rewrite_results)
+        subtree_relations = itertools.chain(*subtree_relations)
 
-            assert subtree_to_coalese[0] == 'exists', '(invariant) The subtrees to coalesce with surroundings should have exists on top.'
-
-            subtree_to_coalese_contents = subtree_to_coalese[2]
-            assert subtree_to_coalese_contents[0] == 'and', '(invariant) The subtrees to coalesce with surroundings should be existentially quantified conjunctions.'
-
-            coalesed_subtree_contents = subtree_to_coalese_contents[1:]
-
-            new_contents = []
-            for idx, subtree in enumerate(rewritten_subtrees):
-                if idx == last_rewritten_subtree_index:
-                    new_contents.extend(coalesed_subtree_contents)
-                else:
-                    new_contents.append(subtree)
-
-            return (True, ['exists', subtree_to_coalese[1], new_contents])
-
-        return (False, ['and', *rewritten_subtrees])
-
-    elif node_type in ('or', 'not', '='):
-        # We are not interested in coalescence info as we are not
-        rewritten_subtrees = (
-            _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree, coalese_with_surroundings)[1] for subtree in ast[1:]
-        )
-        return (False, [node_type, *rewritten_subtrees])
+        return (list(subtree_relations), [node_type, *subtrees])
     elif node_type == 'exists':
         subtree = ast[2]
-        was_rewritten, rewritten_subtree = _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree, coalese_with_surroundings)
+        quantified_vars = set(var for var, _type in ast[1])
 
-        if was_rewritten and coalese_with_surroundings:
-            assert rewritten_subtree[0] == 'exists', '(invariant) The subtrees to coalesce with surroundings should have exists on top.'
-            quantifed_vars = ast[1] + rewritten_subtree[1]
-            # Merge the quantifiers together, but propagate False to prevent from further pushing quantifiers above, as we
-            # can guarantee only about the bottom-most one that it will not bind a previously unbound variable.
-            return (False, ['exists', quantifed_vars, rewritten_subtree[2]])
+        relations, rewritten_subtree = _rewrite_nonlinear_terms(subtree, rewrite_info)
 
-        return (False, [node_type, ast[1], rewritten_subtree])
+        relations_to_propagate, binding_list, new_atoms = _rewrite_terms_in_relations(relations, rewrite_info, quantified_vars)
+
+        if new_atoms:
+            term_vars_limits = ['and', *new_atoms]
+            if isinstance(rewritten_subtree, list) and rewritten_subtree[0] == 'and':
+                term_vars_limits += rewritten_subtree[1:]
+            else:
+                term_vars_limits.append(rewritten_subtree)
+            rewritten_subtree = term_vars_limits
+
+        extended_binding_list = ast[1] + binding_list
+        return (relations_to_propagate, ['exists', extended_binding_list, rewritten_subtree])
 
     raise ValueError(f'Unknown node: {node_type=} {ast=}')
 
 
-def rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNode, coalese_with_surroundings: bool = True) -> AST_NaryNode:
-    _, rewritten_formula = _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast, coalese_with_surroundings)
+def rewrite_nonlinear_terms(ast: AST_NaryNode) -> AST_NaryNode:
+    rewrite_info = TermRewrites(count=0)
+    relations_with_nonlinear_terms, rewritten_formula = _rewrite_nonlinear_terms(ast, rewrite_info)
+
+    # Some relations might contain terms consisting entirely of free variables
+    if relations_with_nonlinear_terms:
+        reminding_relations, binding_list, new_atoms = _rewrite_terms_in_relations(relations_with_nonlinear_terms, rewrite_info, vars_in_rewritten_terms=None)  # Rewrite all
+        return ['exists', binding_list, ['and', *new_atoms, rewritten_formula]]
+
     return rewritten_formula
 
 
@@ -235,7 +231,7 @@ def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AS
 
     Some subtress such as bindings in (forall) and (exists) are not iterated.
     :param root_node: Root node which subtrees will be yielded.
-    :returns: Funcion is generating tuples containing the subtree node and
+    :returns: Function is generating tuples containing the subtree node and
               a tuple containing a parent and index which points to the subtree.
     """
     if not isinstance(root_node, list):

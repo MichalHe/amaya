@@ -510,7 +510,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
                 var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL
             }
             formula_to_evaluate = preprocessing.condense_relation_asts_to_relations(formula_to_evaluate, bool_symbols)
-            formula_to_evaluate = preprocessing.rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(formula_to_evaluate)
+            formula_to_evaluate = preprocessing.rewrite_nonlinear_terms(formula_to_evaluate)
 
             if solver_config.preprocessing.perform_antiprenexing:
                 logger.info('Performing antiprenexing of: %s', formula_to_evaluate)
