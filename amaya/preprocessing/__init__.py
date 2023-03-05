@@ -143,11 +143,11 @@ def condense_relation_asts_to_relations(ast: AST_NaryNode, bool_fn_symbols: Set[
     return [node_type, *reduced_subtrees]
 
 
-def rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNode):
+def _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNode, coalese_with_surroundings: bool) -> Tuple[bool, AST_NaryNode]:
     if isinstance(ast, Relation):
         relation: Relation = ast
         if relation.direct_construction_exists():
-            return relation
+            return False, relation
 
         relation_without_modulos, mod_replacements, div_replacements = relation.replace_nonlinear_terms_with_variables()
 
@@ -163,25 +163,70 @@ def rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNod
         variable_binding_list = [
             [var, 'Int'] for var in sorted(info.variable for info in chain(div_replacements, mod_replacements))
         ]
-        return ['exists', variable_binding_list, ['and', *resulting_relations]]
+        return (True, ['exists', variable_binding_list, ['and', *resulting_relations]])
 
     if isinstance(ast, str):
-        return ast
+        return (False, ast)
 
     node_type = ast[0]
 
-    if node_type in ('or', 'and', 'not', '='):
+    if node_type == 'and':
+        rewritten_subtrees = []
+        rewritten_subtrees_count = 0
+        last_rewritten_subtree_index = None
+        for subtree_index, subtree in enumerate(ast[1:]):
+            was_rewritten, rewritten_subtree = _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree, coalese_with_surroundings)
+            rewritten_subtrees.append(rewritten_subtree)
+            if was_rewritten:
+                rewritten_subtrees_count += 1
+                last_rewritten_subtree_index = subtree_index
+
+        if rewritten_subtrees_count == 1 and coalese_with_surroundings:
+            subtree_to_coalese = rewritten_subtrees[last_rewritten_subtree_index]
+
+            assert subtree_to_coalese[0] == 'exists', '(invariant) The subtrees to coalesce with surroundings should have exists on top.'
+
+            subtree_to_coalese_contents = subtree_to_coalese[2]
+            assert subtree_to_coalese_contents[0] == 'and', '(invariant) The subtrees to coalesce with surroundings should be existentially quantified conjunctions.'
+
+            coalesed_subtree_contents = subtree_to_coalese_contents[1:]
+
+            new_contents = []
+            for idx, subtree in enumerate(rewritten_subtrees):
+                if idx == last_rewritten_subtree_index:
+                    new_contents.extend(coalesed_subtree_contents)
+                else:
+                    new_contents.append(subtree)
+
+            return (True, ['exists', subtree_to_coalese[1], new_contents])
+
+        return (False, ['and', *rewritten_subtrees])
+
+    elif node_type in ('or', 'not', '='):
+        # We are not interested in coalescence info as we are not
         rewritten_subtrees = (
-            rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree) for subtree in ast[1:]
+            _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree, coalese_with_surroundings)[1] for subtree in ast[1:]
         )
-        return [node_type, *rewritten_subtrees]
+        return (False, [node_type, *rewritten_subtrees])
     elif node_type == 'exists':
-        rewritten_subtrees = (
-            rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree) for subtree in ast[2:]
-        )
-        return [node_type, ast[1], *rewritten_subtrees]
+        subtree = ast[2]
+        was_rewritten, rewritten_subtree = _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(subtree, coalese_with_surroundings)
+
+        if was_rewritten and coalese_with_surroundings:
+            assert rewritten_subtree[0] == 'exists', '(invariant) The subtrees to coalesce with surroundings should have exists on top.'
+            quantifed_vars = ast[1] + rewritten_subtree[1]
+            # Merge the quantifiers together, but propagate False to prevent from further pushing quantifiers above, as we
+            # can guarantee only about the bottom-most one that it will not bind a previously unbound variable.
+            return (False, ['exists', quantifed_vars, rewritten_subtree[2]])
+
+        return (False, [node_type, ast[1], rewritten_subtree])
 
     raise ValueError(f'Unknown node: {node_type=} {ast=}')
+
+
+def rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast: AST_NaryNode, coalese_with_surroundings: bool = True) -> AST_NaryNode:
+    _, rewritten_formula = _rewrite_relations_with_mod_and_div_terms_to_evaluable_atoms(ast, coalese_with_surroundings)
+    return rewritten_formula
 
 
 def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AST_NaryNode, int]], None, None]:
@@ -394,8 +439,7 @@ class VarDisambiguationInfo:
     conflict_count: int
 
 
-def _disambiguate_variables_rec(ast: AST_Node,
-                                variable_rename_map: Dict[str, VarDisambiguationInfo]) -> AST_Node:
+def _disambiguate_variables_rec(ast: AST_Node, variable_rename_map: Dict[str, VarDisambiguationInfo]) -> AST_Node:
     if isinstance(ast, str):
         if ast in variable_rename_map:
             return variable_rename_map[ast].new_name
@@ -506,7 +550,7 @@ def preprocess_ast(ast: AST_Node,
     }
     transform_ast(ast, third_pass_context, third_pass_transformations)
     logger.info('Removed %d negation pairs.', third_pass_context["negation_pairs_removed_cnt"])
-    
+
     if solver_config.preprocessing.disambiguate_variables:
         ast = disambiguate_variables(ast, constant_function_symbols)
 
