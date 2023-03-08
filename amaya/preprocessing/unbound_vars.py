@@ -5,157 +5,221 @@ from dataclasses import (
     field
 )
 import functools
+import itertools
 from typing import (
     Dict,
-    Union,
+    List,
+    Optional,
     Set,
+    Tuple,
+    Union,
 )
 
 from amaya.ast_definitions import AST_Node
-from amaya.relations_structures import Relation
+from amaya.relations_structures import ModuloTerm, Relation
 
 
 @dataclass
-class Bounds_Info:
-    has_upper_bound: bool = False
-    has_lower_bound: bool = False
-
-
-@dataclass
-class Mod_Term_Bounds:
-    lower_bound: int
-    upper_bound: int
+class Value_Interval:
+    lower_limit: Optional[int] = None
+    upper_limit: Optional[int] = None
 
 
 @dataclass
 class AST_Internal_Node_With_Bounds_Info:
     node_type: str
-    children: AST_Node_With_Bounds_Info
-    bounds: Dict[str, Bounds_Info] = field(default_factory=lambda: defaultdict(Bounds_Info))
-    mod_term_bounds: Dict[ModuloTerm, Mod_Term_Bounds] = field(default_factory=dict)
+    children: List[AST_Node_With_Bounds_Info]
+    var_values: Dict[str, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
 @dataclass
 class AST_Quantifier_Node_With_Bounds_Info:
     node_type: str
-    children: AST_Node_With_Bounds_Info
-    bindings: List[Tuple[str, str]]
-    bounds: Dict[str, Bounds_Info] = field(default_factory=lambda: defaultdict(Bounds_Info))
-    mod_term_bounds: Dict[ModuloTerm, Mod_Term_Bounds] = field(default_factory=dict)
+    child: AST_Node_With_Bounds_Info
+    bindings: List[List[str]]
+    var_values: Dict[str, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
 @dataclass
 class AST_Leaf_Node_With_Bounds_Info:
     contents: Union[Relation, str]
-    bounds: Dict[str, Bounds_Info] = field(default_factory=lambda: defaultdict(Bounds_Info))
-    mod_term_bounds: Dict[ModuloTerm, Mod_Term_Bounds] = field(default_factory=dict)
+    var_values: Dict[str, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
 AST_Node_With_Bounds_Info = Union[AST_Leaf_Node_With_Bounds_Info, AST_Quantifier_Node_With_Bounds_Info, AST_Internal_Node_With_Bounds_Info]
 
 
-def extract_bounds_set_on_mod_terms(relation: Relation, ast_node_with_bounds_info: AST_Node_With_Bounds_Info) -> bool:
-    # Detect restrictions put forth on the values of the modulo terms, e.g., `(x mod 10) >= 1` so if x does not have 
-    # an upper bound, we will replace the term with correct value and not, e.g., 0.
-    if len(relation.modulo_terms) == 1 and not relation.div_terms and not relation.variable_names:
-        mod_term = relation.modulo_terms[0]
-        mod_term_coef = relation.modulo_term_coefficients[0]
-        if mod_term_coef == 0:
-            return True  # Propagate, that the relation had the form this function looks for
-        if relation.predicate_symbol == '=': 
-            mod_term_bounds = Mod_Term_Bounds(lower_bound=max(0, relation.absolute_part),
-                                              upper_bound=min(mod_term.modulo - 1, relation.absolute_part))
-        else: 
-            relation_rhs_constant = relation.absolute_part
+def make_value_interval_intersection(left_intervals: List[Value_Interval], right_intervals: List[Value_Interval]):
+    if not left_intervals or not right_intervals:
+        return []
 
-            # Change the relation predicate symbol to be only < or <=
-            if relation.predicate_symbol in ('>', '<='):
-                mod_term_coef *= -1
-                relation_rhs_constant *= -1
+    def _max(a, b):
+        if a is None:
+            return b
+        if b is None:
+            return a
+        return max(a, b)
 
-            # Change the relation predicate symbol to be only <=
-            if relation.predicate_symbol in ('<', '>'): 
-                relation_rhs_constant -= 1
+    def _min(a, b):
+        if a is None:
+            return b
+        if b is None:
+            return a
+        return min(a, b)
 
-            if mod_term_coef > 0:
-                mod_term_bounds = Mod_Term_Bounds(lower_bound=0, upper_bound=relation_rhs_constant)
-            elif mod_term_coef < 0:
-                mod_term_bounds = Mod_Term_Bounds(lower_bound=relation_rhs_constant, upper_bound=mod_term.modulo - 1)
-        ast_node_with_bounds_info.mod_term_bounds[mod_term] = mod_term_bounds
-        return True
-    return False
-    
+    result: List[Value_Interval] = []
+    left_idx = 0
+    right_idx = 0
+
+    while left_idx < len(left_intervals) and right_idx < len(right_intervals):
+        left = left_intervals[left_idx]
+        right = right_intervals[right_idx]
+
+        lower = _max(left.lower_limit, right.lower_limit)
+        upper = _min(left.upper_limit, right.upper_limit)
+
+        if upper == left.upper_limit:
+            left_idx += 1
+        else:
+            right_idx += 1
+
+        if lower is None or upper is None or lower <= upper:
+            result.append(Value_Interval(lower, upper))
+
+    return result
+
+
+def make_value_interval_union(left_intervals: List[Value_Interval], right_intervals: List[Value_Interval]):
+    if not left_intervals:
+        return right_intervals
+    if not right_intervals:
+        return left_intervals
+
+    def is_less(point_a, point_b):
+        if point_a[0] is None:
+            return -1 if point_a[1] == 's' else 1
+        if point_b[0] is None:
+            return 1 if point_b[1] == 's' else -1
+        return -1 if point_a[0] < point_b[0] else 1
+
+    points = []
+    for interval in itertools.chain(left_intervals, right_intervals):
+        points.append((interval.lower_limit, 's'))
+        points.append((interval.upper_limit, 'e'))
+
+    sorted_points = sorted(points, key=functools.cmp_to_key(is_less))
+
+    start = None
+    end = None
+    resulting_intervals = []
+    for point in sorted_points:
+        if not start:
+            start = point
+            continue
+        if not end:
+            end = point
+            continue
+
+        if end[1] == point[1] or end[1] == 's':
+            # Both are starts, or both are ends so we can safely add point to the current interval
+            end = point
+        else:
+            resulting_intervals.append(Value_Interval(lower_limit=start[0], upper_limit=end[0]))
+            start = point
+            end = None
+
+    resulting_intervals.append(Value_Interval(lower_limit=start[0], upper_limit=end[0]))
+
+    # @Todo: Do interval coalesence
+    return resulting_intervals
+
+
+def make_value_interval_negation(intervals: List[Value_Interval]) -> List[Value_Interval]:
+    if not intervals:
+        return [Value_Interval(lower_limit=None, upper_limit=None)]
+
+    result = []
+
+    if intervals[0].lower_limit is not None:
+        result.append(Value_Interval(lower_limit=None, upper_limit=intervals[0].lower_limit - 1))
+
+    for i in range(len(intervals)-1):
+        start = intervals[i].upper_limit + 1  # type: ignore
+        end = intervals[i+1].lower_limit - 1  # type: ignore
+        result.append(Value_Interval(lower_limit=start, upper_limit=end))
+
+    if intervals[-1].upper_limit is not None:
+        result.append(Value_Interval(lower_limit=intervals[-1].upper_limit + 1, upper_limit=None))
+
+    return result
+
 
 def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Bounds_Info:
     if isinstance(ast, Relation):
         relation: Relation = ast
-        relation_with_bounds_info = AST_Leaf_Node_With_Bounds_Info(contents=relation)
-        
-        if extract_bounds_set_on_mod_terms(relation, relation_with_bounds_info):
-            # The relation has the form (x mod K) <> C, thus we don't have to continue as there are no variables
-            return relation_with_bounds_info
+        bounds_info = AST_Leaf_Node_With_Bounds_Info(contents=relation)
 
-        if relation.predicate_symbol in ('<=', '<', '='):
-            for var_coef, var_name in zip(relation.variable_coefficients, relation.variable_names):
+        if len(relation.variable_names) == 1:
+            var_name, var_coef = relation.variable_names[0], relation.variable_coefficients[0]
+            bound = relation.absolute_part // var_coef
+            if relation.predicate_symbol == '=':
+                bounds_info.var_values[var_name] = [Value_Interval(bound, bound)]
+            elif relation.predicate_symbol == '<=':
+                value_interval = Value_Interval()
                 if var_coef > 0:
-                    relation_with_bounds_info.bounds[var_name].has_upper_bound = True
-                elif var_coef < 0:
-                    relation_with_bounds_info.bounds[var_name].has_lower_bound = True
+                    value_interval.upper_limit = bound
+                else:
+                    value_interval.lower_limit = bound
+                bounds_info.var_values[var_name] = [value_interval]
+        return bounds_info
 
-        if relation.predicate_symbol in ('>', '>=', '='):
-            for var_coef, var_name in zip(relation.variable_coefficients, relation.variable_names):
-                if var_coef > 0:
-                    relation_with_bounds_info.bounds[var_name].has_lower_bound = True
-                elif var_coef < 0:
-                    relation_with_bounds_info.bounds[var_name].has_upper_bound = True
-
-        return relation_with_bounds_info
     elif isinstance(ast, str):
         return AST_Leaf_Node_With_Bounds_Info(contents=ast)  # A Boolean variable does not tell us anything about bounds
 
     node_type = ast[0]
-    # We check for both quantifiers, because we have to remove consequent negation after quantifier simplification
-    # due to bounds, since the simplification might remove a quantifier node altogether, causing consequent negation
-    # to appear
+
+    assert isinstance(node_type, str)
+
     if node_type in ('exists', 'forall'):
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[2])
 
         quantifier_node_with_bounds_info = AST_Quantifier_Node_With_Bounds_Info(node_type=node_type,
-                                                                                children=[subtree_bounds_info],
-                                                                                bindings=ast[1],
-                                                                                bounds=subtree_bounds_info.bounds,
-                                                                                mod_term_bounds=subtree_bounds_info.mod_term_bounds)
+                                                                                child=subtree_bounds_info,
+                                                                                bindings=ast[1],  # type: ignore
+                                                                                var_values=subtree_bounds_info.var_values)
         return quantifier_node_with_bounds_info
 
-    elif node_type in ('and', 'or'):
+    elif node_type == 'and':
         subtrees_with_bounds = [perform_variable_bounds_analysis_on_ast(subtree) for subtree in ast[1:]]
 
-        internal_node_with_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type,
-                                                                            children=subtrees_with_bounds)
-        # NOTE(OR-nodes): We collect bounds information so we can simplify existential quantification. Therefore,
-        # we need certainty that a variable is unbound in all branches of the OR-node. Otherwise we would simplify
-        # relations in an OR-node branch based on information coming from another branch, which is obviously wrong.
+        overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type, children=subtrees_with_bounds)
         for subtree_with_bounds in subtrees_with_bounds:
-            for var_name, bounds_info in subtree_with_bounds.bounds.items():
-                internal_node_with_bounds_info.bounds[var_name].has_lower_bound |= bounds_info.has_lower_bound
-                internal_node_with_bounds_info.bounds[var_name].has_upper_bound |= bounds_info.has_upper_bound
+            for var_name, var_value_intervals in subtree_with_bounds.var_values.items():
+                overall_bounds_info.var_values[var_name] = make_value_interval_intersection(overall_bounds_info.var_values[var_name],
+                                                                                            var_value_intervals)
 
-            for mod_term, mod_term_bounds in subtree_with_bounds.mod_term_bounds.items():
-                if mod_term not in internal_node_with_bounds_info.mod_term_bounds:
-                    internal_node_with_bounds_info.mod_term_bounds[mod_term] = mod_term_bounds
-                else:
-                    propagated_mod_term = internal_node_with_bounds_info.mod_term_bounds[mod_term]
-                    propagated_mod_term.lower_bound = max(propagated_mod_term.lower_bound, mod_term_bounds.lower_bound)
-                    propagated_mod_term.upper_bound = min(propagated_mod_term.upper_bound, mod_term_bounds.upper_bound)
+        return overall_bounds_info
 
-        return internal_node_with_bounds_info
+    elif node_type == 'or':
+        subtrees_with_bounds = [perform_variable_bounds_analysis_on_ast(subtree) for subtree in ast[1:]]
+
+        overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type, children=subtrees_with_bounds)
+        for subtree_with_bounds in subtrees_with_bounds:
+            for var_name, bounds_info in subtree_with_bounds.var_values.items():
+                overall_bounds_info.var_values[var_name] = make_value_interval_union(overall_bounds_info.var_values[var_name],
+                                                                                     bounds_info)
+
+        return overall_bounds_info
 
     elif node_type == 'not':
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[1])
+        negated_var_values = {}
+        for var_name, var_values in subtree_bounds_info.var_values.items():
+            negated_var_values[var_name] = make_value_interval_negation(var_values)
+
         return AST_Internal_Node_With_Bounds_Info(node_type=node_type,
                                                   children=[subtree_bounds_info],
-                                                  bounds=subtree_bounds_info.bounds,
-                                                  mod_term_bounds=subtree_bounds_info.mod_term_bounds)
+                                                  var_values=negated_var_values)
 
     raise ValueError(f'[Variable bounds analysis] Cannot descend into AST - unknown node: {node_type=}, {ast=}')
 
@@ -283,5 +347,20 @@ def remove_existential_quantification_of_unbound_vars(ast: AST_Node_With_Bounds_
     assert False
 
 
-def simplify_existential_quantif_of_unbound_var(ast: AST_Node) -> AST_Node:
+def _simplify_atom_conjunctions(ast: AST_Node_With_Bounds_Info) -> Optional[AST_Node]:
+    if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
+        return ast.contents
+
+    if isinstance(ast,  AST_Internal_Node_With_Bounds_Info):
+        subtrees = (_simplify_atom_conjunctions(child) for child in ast.children)
+        subtrees = [subtree for subtree in subtrees if subtree]
+
+    node_type = ast[0]
+    if node_type == 'and' and all(isinstance(Relation, child) for child in ast[1:]):
+        # Simplify the bounds if x >= 10 and x != 10 into x >= 11
+        hard_variable_bounds = {}
+
+
+def simplify_atom_conjunctions(ast: AST_Node) -> AST_Node:
     ast_with_bounds = perform_variable_bounds_analysis_on_ast(ast)
+
