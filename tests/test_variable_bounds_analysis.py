@@ -1,3 +1,8 @@
+from typing import (
+    Dict,
+    List,
+)
+
 from amaya.relations_structures import (
     ModuloTerm,
     Relation,
@@ -12,6 +17,8 @@ from amaya.preprocessing.unbound_vars import (
     make_value_interval_intersection,
     make_value_interval_negation,
     make_value_interval_union,
+    _simplify_bounded_atoms,
+    simplify_bounded_atoms,
 )
 
 import pytest
@@ -178,3 +185,72 @@ def test_variable_bounds_analysis_on_ultimate_automizer_fragment():
 
     assert len(ast_with_bounds_info.var_values) == 1
     assert ast_with_bounds_info.var_values['m'] == [Value_Interval(lower_limit=1, upper_limit=299_992)]
+
+
+def test_simple_variable_bounds_simplification():
+    var_bounds: Dict[str, List[Value_Interval]] = {
+        'x': [Value_Interval(lower_limit=10, upper_limit=20)],
+        'y': [Value_Interval(lower_limit=1, upper_limit=2)]
+    }
+
+    preserved_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 2], predicate_symbol='=', absolute_part=-30)
+
+    relations = [
+         Relation.new_lin_relation(variable_names=['y'], variable_coefficients=[1], predicate_symbol='<=', absolute_part=30),
+         Relation.new_lin_relation(variable_names=['x'], variable_coefficients=[1], predicate_symbol='<=', absolute_part=30),
+         Relation.new_lin_relation(variable_names=['x'], variable_coefficients=[-2], predicate_symbol='<=', absolute_part=-30),
+         preserved_relation,
+    ]
+
+    analyzed_relations: List[AST_Node_With_Bounds_Info] = [AST_Leaf_Node_With_Bounds_Info(contents=relation, var_values={}) for relation in relations]
+
+    analyzed_ast = AST_Internal_Node_With_Bounds_Info(node_type='and',
+                                                      children=analyzed_relations,
+                                                      var_values=var_bounds,)
+
+    result = _simplify_bounded_atoms(analyzed_ast, {'y'})
+
+    expected_lower_bound = Relation.new_lin_relation(variable_names=['x'], variable_coefficients=[-1], predicate_symbol='<=', absolute_part=10)
+    expected_upper_bound = Relation.new_lin_relation(variable_names=['x'], variable_coefficients=[1], predicate_symbol='<=', absolute_part=20)
+
+    assert isinstance(result, list)
+    assert len(result) == 4
+    assert 'and' == result[0]
+    assert expected_lower_bound in result
+    assert expected_upper_bound in result
+    assert preserved_relation in result
+
+
+def test_bounds_simplification_on_ultimate_automizer_fragment():
+    modulo_term = ModuloTerm(variables=('m', 'v'), variable_coefficients=(-1, 1), constant=0, modulo=299_993)
+    preserved_relations = [
+        Relation.new_lin_relation(variable_names=['x', 'v'], variable_coefficients=[1, -1],
+                                  predicate_symbol='<=', absolute_part=600_000),
+        Relation.new_lin_relation(variable_names=['m', 'y'], variable_coefficients=[1, -1],
+                                  predicate_symbol='<=', absolute_part=0),
+        Relation.new_congruence_relation(modulo_terms=[modulo_term], modulo_term_coefficients=[1], absolute_part=0),
+    ]
+
+    ast = [
+        'and',
+        Relation.new_lin_relation(variable_names=['m'], variable_coefficients=[-1],
+                                  predicate_symbol='<=', absolute_part=0),
+        Relation.new_lin_relation(variable_names=['m'], variable_coefficients=[1],
+                                  predicate_symbol='<=', absolute_part=299_992),
+        ['not', Relation.new_lin_relation(variable_names=['m'], variable_coefficients=[1],
+                                          predicate_symbol='=', absolute_part=0)],
+        *preserved_relations,
+    ]
+
+    result = simplify_bounded_atoms(ast)
+    assert isinstance(result, list)
+    assert result[0] == 'and'
+    assert len(result) == 6
+
+    for preserved_relation in preserved_relations:
+        assert preserved_relation in result
+
+    upper_bound = Relation.new_lin_relation(variable_names=['m'], variable_coefficients=[1], predicate_symbol='<=', absolute_part=299_992)
+    lower_bound = Relation.new_lin_relation(variable_names=['m'], variable_coefficients=[-1], predicate_symbol='<=', absolute_part=1)
+    assert upper_bound in result
+    assert lower_bound in result

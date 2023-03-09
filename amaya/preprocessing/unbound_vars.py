@@ -15,7 +15,7 @@ from typing import (
     Union,
 )
 
-from amaya.ast_definitions import AST_Node
+from amaya.ast_definitions import AST_NaryNode,  AST_Node
 from amaya.relations_structures import ModuloTerm, Relation
 
 
@@ -347,20 +347,64 @@ def remove_existential_quantification_of_unbound_vars(ast: AST_Node_With_Bounds_
     assert False
 
 
-def _simplify_atom_conjunctions(ast: AST_Node_With_Bounds_Info) -> Optional[AST_Node]:
+def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[str]) -> Optional[AST_Node]:
     if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
-        return ast.contents
+        if isinstance(ast.contents, str):
+            return ast.contents
+
+        relation: Relation = ast.contents
+        if len(relation.variable_names) == 1 and not relation.modulo_terms and not relation.div_terms:
+            # The current relation represents a bound on a single variable
+            bound_for_var = relation.variable_names[0]
+            if bound_for_var in vars_with_rewritten_bounds:
+                return None
+        return relation
 
     if isinstance(ast,  AST_Internal_Node_With_Bounds_Info):
-        subtrees = (_simplify_atom_conjunctions(child) for child in ast.children)
-        subtrees = [subtree for subtree in subtrees if subtree]
+        if ast.node_type == 'and':
+            # At the current level we want to rewrite bounds only for those variables that will
+            # not have their bounds rewritten at some upper level
+            vars_to_rewrite_bounds_at_current_level: Set[str] = set()
+            for var, bound_info in ast.var_values.items():
+                if len(bound_info) == 1 and var not in vars_with_rewritten_bounds:
+                    vars_to_rewrite_bounds_at_current_level.add(var)
 
-    node_type = ast[0]
-    if node_type == 'and' and all(isinstance(Relation, child) for child in ast[1:]):
-        # Simplify the bounds if x >= 10 and x != 10 into x >= 11
-        hard_variable_bounds = {}
+            new_ast_node: AST_NaryNode = ['and']
+            for var_to_rewrite_bounds in vars_to_rewrite_bounds_at_current_level:
+                var_bounds = ast.var_values[var_to_rewrite_bounds][0]
+                if var_bounds.lower_limit is not None:
+                    lower_bound = Relation.new_lin_relation(variable_names=[var_to_rewrite_bounds], variable_coefficients=[-1],
+                                                            predicate_symbol='<=', absolute_part=var_bounds.lower_limit)
+                    new_ast_node.append(lower_bound)
+                if var_bounds.upper_limit is not None:
+                    upper_bound = Relation.new_lin_relation(variable_names=[var_to_rewrite_bounds], variable_coefficients=[1],
+                                                            predicate_symbol='<=', absolute_part=var_bounds.upper_limit)
+                    new_ast_node.append(upper_bound)
+
+            vars_to_not_rewrite_at_lower_levels = vars_to_rewrite_bounds_at_current_level.union(vars_with_rewritten_bounds)
+            for subtree in ast.children:
+                simplified_subtree = _simplify_bounded_atoms(subtree, vars_to_not_rewrite_at_lower_levels)
+                if simplified_subtree:
+                    new_ast_node.append(simplified_subtree)
+            return new_ast_node if len(new_ast_node) > 1 else None
+        else:
+            rewritten_subtrees = (_simplify_bounded_atoms(subtree, vars_with_rewritten_bounds) for subtree in ast.children)
+            preserved_subtrees = (tree for tree in rewritten_subtrees if tree)
+            new_ast_node = [ast.node_type, *preserved_subtrees]
+            return new_ast_node if len(new_ast_node) > 1 else None
+
+    if isinstance(ast, AST_Quantifier_Node_With_Bounds_Info):
+        rewritten_subtree = _simplify_bounded_atoms(ast.child, vars_with_rewritten_bounds)
+
+        assert_msg = ('The entire subtree under a quantifier has been factored out, meaning the quantifier has no semantic value?'
+                      ' More likely are doing something wrong.')
+
+        assert rewritten_subtree, assert_msg
+        return [ast.node_type, ast.bindings, rewritten_subtree]  # type: ignore
+
+    raise ValueError(f'Don\'t know how to process the node {ast=} when simplifying variable bounds.')
 
 
-def simplify_atom_conjunctions(ast: AST_Node) -> AST_Node:
+def simplify_bounded_atoms(ast: AST_Node) -> Optional[AST_Node]:
     ast_with_bounds = perform_variable_bounds_analysis_on_ast(ast)
-
+    return _simplify_bounded_atoms(ast_with_bounds, set())
