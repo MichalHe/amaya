@@ -24,6 +24,11 @@ class Value_Interval:
     lower_limit: Optional[int] = None
     upper_limit: Optional[int] = None
 
+    def __repr__(self) -> str:
+        lower = self.lower_limit if self.lower_limit is not None else '-inf'
+        upper = self.upper_limit if self.upper_limit is not None else '+inf'
+        return f'<{lower}, {upper}>'
+
 
 @dataclass
 class AST_Internal_Node_With_Bounds_Info:
@@ -183,10 +188,15 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
     if node_type in ('exists', 'forall'):
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[2])
 
+        quantified_vars: Set[str] = {var_type_pair[0] for var_type_pair in ast[1]}  # type: ignore
+        var_values: Dict[str, List[Value_Interval]] = {}
+        for var, var_value_intervals in subtree_bounds_info.var_values.items():
+            new_var_value_intervals = [Value_Interval(None, None)] if var in quantified_vars else var_value_intervals
+
         quantifier_node_with_bounds_info = AST_Quantifier_Node_With_Bounds_Info(node_type=node_type,
                                                                                 child=subtree_bounds_info,
                                                                                 bindings=ast[1],  # type: ignore
-                                                                                var_values=subtree_bounds_info.var_values)
+                                                                                var_values=var_values)
         return quantifier_node_with_bounds_info
 
     elif node_type == 'and':
@@ -367,6 +377,9 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
             vars_to_rewrite_bounds_at_current_level: Set[str] = set()
             for var, bound_info in ast.var_values.items():
                 if len(bound_info) == 1 and var not in vars_with_rewritten_bounds:
+                    bound = bound_info[0]
+                    if bound.lower_limit is None and bound.upper_limit is None:
+                        continue
                     vars_to_rewrite_bounds_at_current_level.add(var)
 
             new_ast_node: AST_NaryNode = ['and']
@@ -405,6 +418,25 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
     raise ValueError(f'Don\'t know how to process the node {ast=} when simplifying variable bounds.')
 
 
+def _fmt_bound_analysis_tree_into_str(ast: AST_Node_With_Bounds_Info, depth: int) -> List[str]:
+    prefix = '  '*depth
+    if isinstance(ast, AST_Quantifier_Node_With_Bounds_Info):
+        result = [f'{prefix}{ast.node_type}{ast.bindings}']
+        result += _fmt_bound_analysis_tree_into_str(ast.child, depth+1)
+        return result
+    if isinstance(ast, AST_Internal_Node_With_Bounds_Info):
+        result = [f'{prefix}{ast.node_type}  :: {dict(ast.var_values)}']
+        for child in ast.children:
+            result += _fmt_bound_analysis_tree_into_str(child, depth+1)
+        return result
+    if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
+        return [f'{prefix}{ast.contents}']
+
+
+def fmt_bound_analysis_tree_into_str(ast):
+    return '\n'.join(_fmt_bound_analysis_tree_into_str(ast, 0))
+
+
 def simplify_bounded_atoms(ast: AST_Node) -> Optional[AST_Node]:
     ast_with_bounds = perform_variable_bounds_analysis_on_ast(ast)
-    return _simplify_bounded_atoms(ast_with_bounds, set())
+    simplified_tree = _simplify_bounded_atoms(ast_with_bounds, set())
