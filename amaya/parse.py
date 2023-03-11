@@ -45,8 +45,9 @@ import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
 from amaya.preprocessing import (
     antiprenexing,
-    prenexing
+    prenexing,
 )
+import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.tokenize import tokenize
 from amaya.semantics_tracking import (
     AH_Atom,
@@ -512,6 +513,12 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             formula_to_evaluate = preprocessing.condense_relation_asts_to_relations(formula_to_evaluate, bool_symbols)
             formula_to_evaluate = preprocessing.rewrite_nonlinear_terms(formula_to_evaluate)
 
+            if solver_config.preprocessing.simplify_variable_bounds:
+                logger.info(f'Simplifying variable bounds of formula {formula_to_evaluate=}')
+                formulate_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
+                logger.info(f'Simplified formula: {formula_to_evaluate=}')
+                import sys; sys.exit(0)
+
             if solver_config.preprocessing.perform_antiprenexing:
                 logger.info('Performing antiprenexing of: %s', formula_to_evaluate)
                 formula_to_evaluate = preprocessing.antiprenexing.perform_antiprenexing(formula_to_evaluate)
@@ -579,7 +586,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
     # Congruence relations of the form a.x ~ k must be handled differently - it is necessary to reorder
     # the modulo term inside, not the nonmodular variables
-    if relation.is_conguence_equality():
+    if relation.is_congruence_equality():
         logger.debug(f'Given relation: %s is congruence equivalence. Reordering variables.', relation)
         modulo_term = relation.modulo_terms[0]
         variable_id_pairs = sorted(ctx.get_multiple_variable_ids(modulo_term.variables),

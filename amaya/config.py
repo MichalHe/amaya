@@ -26,6 +26,7 @@ class PreprocessingConfig:
     perform_prenexing: bool = False
     perform_antiprenexing: bool = False
     disambiguate_variables: bool = True
+    simplify_variable_bounds: bool = False
 
 
 @dataclass
