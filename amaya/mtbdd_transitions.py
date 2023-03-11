@@ -2,6 +2,7 @@ from __future__ import annotations
 import ctypes as ct
 from typing import (
     Any,
+    Callable,
     Dict,
     Iterable,
     List,
@@ -12,11 +13,14 @@ from typing import (
     Union,
 )
 from collections import defaultdict
+import enum
+import itertools
 import pathlib
 import os
 
 from amaya import logger
-from amaya.alphabet import LSBF_AlphabetSymbol
+from amaya.alphabet import LSBF_Alphabet, LSBF_AlphabetSymbol
+from amaya.relations_structures import ModuloTerm, Relation
 
 if TYPE_CHECKING:
     from amaya.mtbdd_automatons import MTBDD_NFA
@@ -41,6 +45,56 @@ class Serialized_NFA(ct.Structure):
         ('vars', ct.POINTER(ct.c_uint64)),
         ('var_count', ct.c_uint64),
     ]
+
+
+def deserialize_nfa(serialized_nfa: Serialized_NFA,
+                    used_variables: List[int],
+                    alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+
+    from amaya.mtbdd_automatons import MTBDD_NFA
+
+    nfa = MTBDD_NFA(
+        states={serialized_nfa.states[i] for i in range(serialized_nfa.state_count)},
+        initial_states={serialized_nfa.initial_state},
+        final_states={
+            serialized_nfa.final_states[i] for i in range(serialized_nfa.final_state_count)
+        },
+        used_variables=used_variables,
+        alphabet=alphabet,
+        state_semantics=None  # @TODO
+    )
+
+    for i in range(serialized_nfa.state_count):
+        state = serialized_nfa.states[i]
+        mtbdd = serialized_nfa.mtbdds[i]
+        nfa.transition_fn.mtbdds[state] = mtbdd
+
+    return nfa
+
+
+class Serialized_Atom(ct.Structure):
+    _fields_ = [
+        ('type', ct.c_uint64),
+        ('coefs', ct.POINTER(ct.c_int64)),
+        ('coef_cnt', ct.c_uint64),
+        ('modulus', ct.c_int64),
+    ]
+
+
+class Serialized_Atom_Conjunction(ct.Structure):
+    _fields_ = [
+        ('atoms', ct.POINTER(Serialized_Atom)),
+        ('atom_cnt', ct.c_uint64),
+        ('initial_state', ct.POINTER(ct.c_int64)),
+        ('vars', ct.POINTER(ct.c_uint64)),
+        ('var_cnt', ct.c_uint64),
+    ]
+
+
+class Serialized_Atom_Type(enum.IntEnum):
+    INEQ = 1,
+    EQ = 2,
+    CONGRUENCE = 3
 
 
 mtbdd_wrapper.amaya_mtbdd_build_single_terminal.argtypes = (
@@ -202,10 +256,8 @@ mtbdd_wrapper.amaya_sylvan_clear_cache.restype = None
 mtbdd_wrapper.amaya_minimize_hopcroft.argtypes = (ct.POINTER(Serialized_NFA), )
 mtbdd_wrapper.amaya_minimize_hopcroft.restype = ct.POINTER(Serialized_NFA)
 
-# mtbdd_wrapper.amaya_print_dot.argtypes = (
-#     ct.c_ulong,
-#     ct.c_int32
-# )
+mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.argtypes = (ct.POINTER(Serialized_Atom_Conjunction),)
+mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.restype = ct.POINTER(Serialized_NFA)
 
 # TODO: fix the shared lib - this symbol is not available ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
 mtbdd_false = 0
@@ -1153,21 +1205,54 @@ class MTBDDTransitionFn():
 
         minimized_serialized_dfa = mtbdd_wrapper.amaya_minimize_hopcroft(serialized_dfa).contents
 
-        minimized_dfa = MTBDD_NFA(
-            states={minimized_serialized_dfa.states[i] for i in range(minimized_serialized_dfa.state_count)},
-            initial_states={minimized_serialized_dfa.initial_state},
-            final_states={
-                minimized_serialized_dfa.final_states[i] for i in range(minimized_serialized_dfa.final_state_count)
-            },
-            used_variables=dfa.used_variables,
-            alphabet=dfa.alphabet,
-            state_semantics=None  # @TODO
-        )
-
-        for i in range(minimized_serialized_dfa.state_count):
-            state = minimized_serialized_dfa.states[i]
-            mtbdd = minimized_serialized_dfa.mtbdds[i]
-            minimized_dfa.transition_fn.mtbdds[state] = mtbdd
+        minimized_dfa = deserialize_nfa(minimized_serialized_dfa, dfa.used_variables, dfa.alphabet)
 
         logger.info('[MTBDD Hopcroft minimization] Exiting minimization routine')
         return minimized_dfa
+
+    @staticmethod
+    def construct_dfa_for_atom_conjunction(conjuction: List[Relation],
+                                           var_to_id_mapping_fn: Callable[[str], int],
+                                           alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+        all_variables = set(itertools.chain(*(atom.get_variables() for atom in conjunction)))
+        all_variables = sorted(all_variables, key=var_to_id_mapping_fn)
+
+        coef_cnt = ct.c_uint64(len(all_variables))
+
+        serialized_atoms = (Serialized_Atom * len(conjunction))()
+
+        for i, atom in enumerate(conjunction):
+            modulus = 0
+            if atom.is_congruence_equality():
+                mod_term = atom.modulo_terms[0]
+                modulus = mod_term.modulo
+                var_to_coef_map: Dict[str, int] = dict(zip(mod_term.variables, mod_term.variable_coefficients))
+            else:
+                var_to_coef_map: Dict[str, int] = dict(zip(atom.variable_names, atom.variable_coefficients))
+
+            coefs = (ct.c_int64 * len(all_variables))(*(var_to_coef_map.get(var, 0) for var in all_variables))
+
+            atom_type = Serialized_Atom_Type.EQ if atom.predicate_symbol == '=' else Serialized_Atom_Type.INEQ
+            if atom_type == Serialized_Atom_Type.EQ and atom.is_congruence_equality():
+                atom_type = Serialized_Atom_Type.CONGRUENCE
+
+            serialized_atom = Serialized_Atom(type=atom_type, coef_cnt=coef_cnt, coefs=coefs, modulus=modulus)
+            serialized_atoms[i] = serialized_atom
+
+        vars = [var_to_id_mapping_fn(var) for var in all_variables]
+        serialized_vars = (ct.c_uint64 * len(vars))(*vars)
+
+        initial_state = tuple(rel.absolute_part for rel in conjunction)
+        serialized_initial_state = (ct.c_int64 * len(initial_state))(*initial_state)
+
+        serialized_conjunction = Serialized_Atom_Conjunction(
+            atoms=serialized_atoms,
+            atom_cnt=ct.c_uint64(len(conjunction)),
+            initial_state=serialized_initial_state,
+            vars=serialized_vars,
+            var_cnt=ct.c_uint64(len(vars))
+        )
+
+        serialized_result = mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction(serialized_conjunction).contents
+        result = deserialize_nfa(serialized_result, vars, alphabet)
+        return result

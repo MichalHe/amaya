@@ -19,7 +19,7 @@ def tag_ast_nodes_with_variables_used_inside_their_ast(root: AST_Node) -> Tagged
     """Tag every inner AST node with information about variables used in their AST-subtrees."""
     if not isinstance(root, list):
         relation: Relation = root
-        variables = set(relation.get_used_variables())
+        variables = relation.get_variables()
         return Tagged_AST_Node(node=root, variables=variables)
 
     root_node_type = root[0]
@@ -49,7 +49,7 @@ def push_quantifiers_inside_on_tagged_ast(root: Tagged_AST_Node,
     if isinstance(root.node, Relation):
         # We might have arrived with to a relation carrying an quantifier binding only variables in this relation
         relation: Relation = root.node
-        relation_variables = relation.get_used_variables()
+        relation_variables = relation.get_variables()
         bindings = [
             [var_name, var_type] for var_name, var_type in carried_quantifiers if var_name in relation_variables
         ]

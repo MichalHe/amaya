@@ -11,6 +11,7 @@ from typing import (
     Generic,
     Tuple,
     TypeVar,
+    Set,
     Union,
 )
 
@@ -309,12 +310,11 @@ class Relation(object):
     def __repr__(self):
         return 'Relation(' + self.into_string(use_latex_notation=False) + ')'
 
-    def get_used_variables(self) -> Set[str]:
-        '''Retrieve a collection of all the variables used in this relation.'''
+    def get_variables(self) -> Set[str]:
         used_variables = set(self.variable_names)
         for modulo_term in self.modulo_terms:
             used_variables.update(modulo_term.variables)
-        return sorted(used_variables)
+        return used_variables
 
     def is_in_canoical_form(self) -> bool:
         sign_count = len(self.variable_coefficients) + len(self.modulo_term_coefficients)
