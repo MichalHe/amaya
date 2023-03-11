@@ -17,6 +17,7 @@ import enum
 import itertools
 import pathlib
 import os
+import sys
 
 from amaya import logger
 from amaya.alphabet import LSBF_Alphabet, LSBF_AlphabetSymbol
@@ -81,13 +82,15 @@ class Serialized_Atom(ct.Structure):
     ]
 
 
-class Serialized_Atom_Conjunction(ct.Structure):
+class Serialized_Quantified_Atom_Conjunction(ct.Structure):
     _fields_ = [
         ('atoms', ct.POINTER(Serialized_Atom)),
         ('atom_cnt', ct.c_uint64),
         ('initial_state', ct.POINTER(ct.c_int64)),
         ('vars', ct.POINTER(ct.c_uint64)),
         ('var_cnt', ct.c_uint64),
+        ('quantified_vars', ct.POINTER(ct.c_uint64)),
+        ('quantified_var_cnt', ct.c_uint64),
     ]
 
 
@@ -256,7 +259,7 @@ mtbdd_wrapper.amaya_sylvan_clear_cache.restype = None
 mtbdd_wrapper.amaya_minimize_hopcroft.argtypes = (ct.POINTER(Serialized_NFA), )
 mtbdd_wrapper.amaya_minimize_hopcroft.restype = ct.POINTER(Serialized_NFA)
 
-mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.argtypes = (ct.POINTER(Serialized_Atom_Conjunction),)
+mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.argtypes = (ct.POINTER(Serialized_Quantified_Atom_Conjunction),)
 mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.restype = ct.POINTER(Serialized_NFA)
 
 # TODO: fix the shared lib - this symbol is not available ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
@@ -1211,9 +1214,11 @@ class MTBDDTransitionFn():
         return minimized_dfa
 
     @staticmethod
-    def construct_dfa_for_atom_conjunction(conjuction: List[Relation],
+    def construct_dfa_for_atom_conjunction(conjunction: List[Relation],
+                                           quantified_vars: List[str],
                                            var_to_id_mapping_fn: Callable[[str], int],
                                            alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+
         all_variables = set(itertools.chain(*(atom.get_variables() for atom in conjunction)))
         all_variables = sorted(all_variables, key=var_to_id_mapping_fn)
 
@@ -1245,12 +1250,18 @@ class MTBDDTransitionFn():
         initial_state = tuple(rel.absolute_part for rel in conjunction)
         serialized_initial_state = (ct.c_int64 * len(initial_state))(*initial_state)
 
-        serialized_conjunction = Serialized_Atom_Conjunction(
+        quantified_vars_offset = min(var_to_id_mapping_fn(var) for var in all_variables)
+        quantified_var_ids = [var_to_id_mapping_fn(var) - quantified_vars_offset for var in quantified_vars]
+        serialized_quantified_vars = (ct.c_uint64 * len(quantified_vars))(*quantified_var_ids)
+
+        serialized_conjunction = Serialized_Quantified_Atom_Conjunction(
             atoms=serialized_atoms,
             atom_cnt=ct.c_uint64(len(conjunction)),
             initial_state=serialized_initial_state,
             vars=serialized_vars,
-            var_cnt=ct.c_uint64(len(vars))
+            var_cnt=ct.c_uint64(len(vars)),
+            quantified_vars=serialized_quantified_vars,
+            quantified_var_cnt=len(quantified_vars),
         )
 
         serialized_result = mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction(serialized_conjunction).contents

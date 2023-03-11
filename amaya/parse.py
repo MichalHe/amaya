@@ -514,10 +514,9 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             formula_to_evaluate = preprocessing.rewrite_nonlinear_terms(formula_to_evaluate)
 
             if solver_config.preprocessing.simplify_variable_bounds:
-                logger.info(f'Simplifying variable bounds of formula {formula_to_evaluate=}')
-                formulate_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
-                logger.info(f'Simplified formula: {formula_to_evaluate=}')
-                import sys; sys.exit(0)
+                logger.info(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)
+                formula_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
+                logger.info(f'Simplified formula: %s', formula_to_evaluate)
 
             if solver_config.preprocessing.perform_antiprenexing:
                 logger.info('Performing antiprenexing of: %s', formula_to_evaluate)
@@ -832,6 +831,17 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
     variable_bindings: Dict[str, VariableType] = parse_variable_bindings_list_to_internal_repr(exists_expr[1])
     logger.debug(f'Exists - Extracted variable type bindings for {variable_bindings.keys()}')
     ctx.add_multiple_variables_to_current_frame(variable_bindings)
+
+    # Perform a look-ahead to see whether we can construct the NFA for the entire conjunction using a lazy approach
+    if solver_config.backend_type == BackendType.MTBDD:
+        if isinstance(exists_expr[2], list) and exists_expr[2][0] == 'and':
+            conjunction = exists_expr[2]
+            if all(isinstance(child, Relation) for child in conjunction[1:]):
+                atoms: List[Relation] = conjunction[1:]  # type: ignore
+                from amaya.mtbdd_transitions import MTBDDTransitionFn
+                quantified_vars: List[str] = [var for var in variable_bindings]
+                nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, quantified_vars, ctx.get_variable_id, ctx.get_alphabet())
+                return nfa
 
     nfa = get_automaton_for_operand(exists_expr[2], ctx, _depth)
 

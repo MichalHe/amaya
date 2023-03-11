@@ -440,3 +440,4 @@ def fmt_bound_analysis_tree_into_str(ast):
 def simplify_bounded_atoms(ast: AST_Node) -> Optional[AST_Node]:
     ast_with_bounds = perform_variable_bounds_analysis_on_ast(ast)
     simplified_tree = _simplify_bounded_atoms(ast_with_bounds, set())
+    return simplified_tree
