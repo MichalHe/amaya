@@ -109,7 +109,7 @@ def generate_atomic_constraints_for_replaced_terms(rewrites: Dict[RewritableTerm
 
             reminder_upper_bound = Relation.new_lin_relation(variable_names=list(_vars),
                                                              variable_coefficients=list(_var_coefs),
-                                                             absolute_part=replacement_info.term.divisor - 1,
+                                                             absolute_part=term.divisor - 1,
                                                              predicate_symbol='<=')
             constraints.extend((reminder_lower_bound, reminder_upper_bound))
 
