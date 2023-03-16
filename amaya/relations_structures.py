@@ -350,7 +350,7 @@ class Relation(object):
     def direct_construction_exists(self) -> bool:
         """Returns true if there exists a direct construction for the stored relation."""
         is_congruence_eq = self.is_conguence_equality()
-        is_linear_relation = bool(self.variable_names) and not bool(self.modulo_terms)
+        is_linear_relation = bool(self.variable_names) and not bool(self.modulo_terms) and not bool(self.div_terms)
 
         return is_congruence_eq or is_linear_relation
 
