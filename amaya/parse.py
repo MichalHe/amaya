@@ -717,7 +717,11 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
     Perform the evaluation of AND and OR expressions in an abstract fashion using the provided
     reduction function (used to compose the individual operands into a result).
     """
-    assert type(expr) == list and len(expr) >= 3
+    assert type(expr) == list
+
+    if len(expr) == 2:
+        expr = expr[1]
+
     first_operand = expr[1]
 
     reduction_result = get_automaton_for_operand(first_operand, ctx, _depth)
