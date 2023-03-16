@@ -567,7 +567,7 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
     def remove_nonfinishing_states(self, states: Set, final_states: Set) -> Set:
         '''BFS on rotated transitions'''
-        logger.info('Removing nonfinishing states.')
+        logger.info('Removing nonfinishing states (#states=%d).', len(states))
         logger.info('Rotating transition function.')
         rotated_transitions = make_rotate_transition_function(self.data)
 
@@ -576,7 +576,6 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
         while queue:
             current_state = queue.popleft()
-            reachable_states.add(current_state)
 
             logger.debug(f'Processing state {current_state} (remaining in the queue: {len(queue)})')
 
@@ -586,6 +585,7 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
 
             for reachable_state in rotated_transitions[current_state]:
                 if reachable_state not in reachable_states:
+                    reachable_states.add(reachable_state)
                     queue.append(reachable_state)
 
         unreachable_states = states - reachable_states
