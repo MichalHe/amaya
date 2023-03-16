@@ -448,7 +448,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
     tokens = tokenize(source_text)
     ast = build_syntax_tree(tokens)
-    
+
     eval_result: Optional[NFA] = None
     smt_info: Dict[str, Any] = {}
     function_symbol_to_info_map: Dict[str, FunctionSymbol] = {}
@@ -698,6 +698,8 @@ def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
     if solver_config.minimization_method == MinimizationAlgorithms.BRZOZOWSKI:
         minimized_dfa = nfa.minimize_brzozowski()
     else:
+        if nfa.automaton_type != AutomatonType.DFA:
+            nfa = nfa.determinize()
         minimized_dfa = nfa.minimize_hopcroft()
 
     logger.info('Minimization applied - inputs has %d states, result %d.', len(nfa.states), len(minimized_dfa.states))
@@ -720,7 +722,7 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
     assert type(expr) == list
 
     if len(expr) == 2:
-        expr = expr[1]
+        expr = expr[1]  # type: ignore
 
     first_operand = expr[1]
 
