@@ -1,6 +1,12 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import (
     Dict,
+    List,
     Set,
+    Union,
+    Tuple,
 )
 
 from amaya.ast_definitions import (
@@ -9,91 +15,164 @@ from amaya.ast_definitions import (
     AST_Node,
     NodeEncounteredHandlerStatus,
 )
+from amaya.relations_structures import Relation
 from amaya.utils import number_to_bit_tuple
 
 
-def collect_ite_control_variables(ast) -> Set[str]:
-    '''Returns the set of boolean variables found in the ITE expressions in the given AST.'''
-    if type(ast) != list:
-        return set()
+@dataclass
+class ConditionCounter:
+    """A wrapper around an int so we can mutate its value by reference."""
+    value: int = 0
 
-    root = ast[0]
-    if root == 'ite':
-        assert len(ast) == 4
-        ite_variable = ast[1]
-        ite_true_tree = ast[2]
-        ite_false_tree = ast[3]
+    def fetch_and_add(self) -> int:
+        ret = self.value
+        self.value += 1
+        return ret
 
-        ite_true_info = collect_ite_control_variables(ite_true_tree)
-        ite_false_info = collect_ite_control_variables(ite_false_tree)
 
-        return set([ite_variable]).union(ite_true_info).union(ite_false_info)
-    elif root in ['+',  '*', '<=', '>=', '>', '<', '=', 'mod']:
-        return collect_ite_control_variables(ast[1]).union(collect_ite_control_variables(ast[2]))
-    elif root in ['-']:
-        if len(root) == 3:
-            return collect_ite_control_variables(ast[1]).union(collect_ite_control_variables(ast[2]))
+AST_With_Placeholders = Union[AST_Node, List['AST_With_Placeholders'], int]
+
+PlaceholderInfo = Tuple[int, AST_With_Placeholders]
+"""Information about what a placeholder (int) stands for (node)"""
+
+
+def mark_and_collect_ite_conditions(ast: AST_Node, counter: ConditionCounter) -> Tuple[AST_With_Placeholders, List[PlaceholderInfo]]:
+    """Return a list of ite conditions found in the given tree. All conditions founnd in the tree are assigned a unique integer. """
+    if not isinstance(ast, list):
+        return (ast, [])
+
+    node_type = ast[0]
+    if node_type == 'ite':
+        assert len(ast) == 4, 'if-then-else expressions should have the form of (ite <condition> <positive_branch> <negative_branch>)'
+        condition = ast[1]
+        condition_id = counter.fetch_and_add()
+        ast[1] = condition_id  # type: ignore
+
+        positive_branch = ast[2]
+        negative_branch = ast[3]
+
+        pos_branch_marked_ast, pos_branch_conditions = mark_and_collect_ite_conditions(positive_branch, counter)
+        neg_branch_marked_ast, neg_branch_conditions = mark_and_collect_ite_conditions(negative_branch, counter)
+
+        # Nothing prevents if-then-else from having another if-then-else inside the condition
+        marked_cond_ast, cond_conditions = mark_and_collect_ite_conditions(condition, counter)
+
+        # @Todo: We need to descend into the condition as if-then-else expressions can be nested, e.g., (ite (ite B B1 B2) P N)
+        #        should be equivalend to (ite (or (and B B1) (and (not B) B2)) -> (ite (or (and B B1) (and (not B) B2)) P N) which yields
+        #        (or (and (or (and B B1) (and (not B) B2)) P) (and (nor (or (and B B1) (and (not B) B2))) N)
+
+        ast_conditions = [(condition_id, marked_cond_ast)] + pos_branch_conditions + neg_branch_conditions
+        placeholdered_ast = ['ite', condition_id, pos_branch_marked_ast, neg_branch_marked_ast]
+
+        return (placeholdered_ast, ast_conditions)
+
+    elif node_type in ['+',  '*', '<=', '>=', '>', '<', '=', 'mod', 'div']:
+        left_marked_ast, left_conditions = mark_and_collect_ite_conditions(ast[1], counter)
+        right_marked_ast, right_conditions = mark_and_collect_ite_conditions(ast[2], counter)
+
+        marked_ast = [node_type, left_marked_ast, right_marked_ast]
+        return (marked_ast, left_conditions + right_conditions)
+
+    elif node_type in ['and', 'or', 'not']:
+        # @Todo: Remove this. We are handling this because we cannot distinguish between Boolean equivalency
+        #        and equations. A proper solution is to extend disambiguation of variables to disambiguate
+        #        entire tree (rename Boolean equivalency to some internal name), so that we don't have to
+        #        deal with those kinds of problems.
+        left_marked_ast, left_conditions = mark_and_collect_ite_conditions(ast[1], counter)
+        right_marked_ast, right_conditions = mark_and_collect_ite_conditions(ast[2], counter)
+
+        marked_ast = [node_type, left_marked_ast, right_marked_ast]
+        return (marked_ast, left_conditions + right_conditions)
+
+    elif node_type in ['-']:
+        if len(node_type) == 3:
+            left_marked_ast, left_conditions = mark_and_collect_ite_conditions(ast[1], counter)
+            right_marked_ast, right_conditions = mark_and_collect_ite_conditions(ast[2], counter)
+            marked_ast = [node_type, left_marked_ast, right_marked_ast]
+            return (marked_ast, left_conditions + right_conditions)
         else:
-            return collect_ite_control_variables(ast[1])
-    return set()
+            marked_ast, conditions = mark_and_collect_ite_conditions(ast[1], counter)
+            return ([node_type, marked_ast], conditions)
+
+    assert False, f'Unknown node type: {node_type}'
+    return ([], [])
 
 
-def expand_ite_expressions_inside_presburger_relation(relation_root: AST_NaryNode, 
-                                                      is_reeval: bool,
-                                                      ctx: Dict) -> NodeEncounteredHandlerStatus:
-    from amaya.ast_relations import evaluate_ite_for_var_assignment
-    ite_control_variables = collect_ite_control_variables(relation_root)
+def copy_ast(ast: AST_With_Placeholders) -> AST_With_Placeholders:
+    if isinstance(ast, str) or isinstance(ast, int):
+        return ast
+    elif isinstance(ast, Relation):
+        return Relation.copy_of(ast)
 
-    if not ite_control_variables:
-        # There are no control variables, no modification to the AST needs to be performed.
-        return NodeEncounteredHandlerStatus(False, False)
+    assert isinstance(ast, list)
 
-    # Generate the expanded ite-expression
-    expanded_expr = ['or']
-    for i in range(2**len(ite_control_variables)):
-        control_variables_bit_values = number_to_bit_tuple(i, len(ite_control_variables))
-        # Convert the bit values into corresponing formulas:
-        # (A=0, B=0, C=1) --> ~A, ~B, C
-        variable_literals = [variable if variable_bit else ['not', variable] for variable, variable_bit in zip(ite_control_variables, control_variables_bit_values)]
-
-        variable_truth_assignment = dict(zip(ite_control_variables, map(bool, control_variables_bit_values)))
-
-        conjuction = ['and', *variable_literals, evaluate_ite_for_var_assignment(relation_root, variable_truth_assignment)]
-        expanded_expr.append(conjuction)
-
-    # replace the contents of `relation_root` with the results.
-    relation_root.pop(-1)
-    relation_root.pop(-1)
-    relation_root.pop(-1)
-
-    for node in expanded_expr:
-        relation_root.append(node)
-
-    ctx['ite_expansions_cnt'] += len(ite_control_variables)
-
-    return NodeEncounteredHandlerStatus(True, False)
+    return [copy_ast(item) for item in ast]
 
 
-def ite_expansion_handler(ast: AST_NaryNode, is_reeval: bool, ctx: Dict) -> NodeEncounteredHandlerStatus:
-    _, bool_expr, if_branch, else_branch = ast
+def instantiate_condition_handles(ast: AST_With_Placeholders, conditions: Dict[int, AST_With_Placeholders], valuation_bits: int) -> AST_Node:
+    if not isinstance(ast, list):
+        return ast  # type: ignore
+    node_type: str = ast[0]  # type: ignore
+    if node_type == 'ite':
+        cond_id: int = ast[1]  # type: ignore
+        is_cond_positive = (valuation_bits >> cond_id) % 2
+        cond = copy_ast(conditions[cond_id])
 
-    presbureger_relation_roots = {'<=', '<', '=', '>', '>='}
+        cond_body = ast[2] if is_cond_positive else ast[3]
+        instantiated_body = instantiate_condition_handles(cond_body, conditions, valuation_bits)
 
-    # Walk the history and see whether we are under any of the presb. relation roots
-    is_ite_inside_atomic_formula = False
-    for parent_tree in ctx['history']:
-        if parent_tree[0] in presbureger_relation_roots:
-            is_ite_inside_atomic_formula = True
+        return instantiated_body
+    else:
+        inst_subtrees = (instantiate_condition_handles(subtree, conditions, valuation_bits) for subtree in ast[1:])
+        return [node_type, *inst_subtrees]
 
-    if is_ite_inside_atomic_formula:
-        # We don't want to perform expansions inside atomic relations -
-        # the expansions must be performed in a different fashion.
-        return NodeEncounteredHandlerStatus(False, False)
 
-    ast[0] = 'or'
-    ast[1] = ['and', bool_expr, if_branch]
-    ast[2] = ['and', ['not', bool_expr], else_branch]
+def rewrite_ite_expressions(ast: AST_Node) -> AST_Node:
+    if not isinstance(ast, list):
+        return ast
 
-    ctx['ite_expansions_cnt'] += 1
+    node_type: str = ast[0]  # type: ignore
 
-    return NodeEncounteredHandlerStatus(True, False)
+    if node_type == 'ite':
+        assert len(ast) == 4, 'The ite expr should have the form of (ite C P N)'
+        condition, positive_branch, negative_branch = ast[1:]
+
+        rewritten_positive_branch = rewrite_ite_expressions(positive_branch)  # type: ignore
+        rewritten_negative_branch = rewrite_ite_expressions(negative_branch)  # type: ignore
+
+        positive_branch_expr = ['and', condition, rewritten_positive_branch]
+        negative_branch_expr = ['and', ['not', copy_ast(condition)], rewritten_negative_branch]
+        return ['or', positive_branch_expr, negative_branch_expr]
+    elif node_type in ('exists', 'forall'):
+        return [node_type, ast[1], rewrite_ite_expressions(ast[2])]
+    elif node_type in ('<=', '<', '=', '>', '>='):
+        # @Note: We have to handle if-then-else expressions also inside atoms as such are not forbidden and they appear in formulae.
+        #        Moreover, we cannot just expand them right away, as we would create a malformed AST with Boolean connectives inside
+        #        an atom.
+        cond_counter = ConditionCounter()
+        marked_ast, conditions = mark_and_collect_ite_conditions(ast, cond_counter)
+        if not conditions:
+            return ast  # There are no if-then-else expressions in the relation
+
+        # We must be careful with nested conditions as when we instantiate a condition we have to also instantiate
+        # the conditions inside it.
+        def put_condition_with_positiveness(cond_with_id: Tuple[int, AST_With_Placeholders], conditions: Dict[int, AST_With_Placeholders], valuation_bits: int):
+            cond_id, cond = cond_with_id
+            is_positive = (valuation_bits >> cond_id) % 2
+            cond = copy_ast(cond)
+            cond = instantiate_condition_handles(cond, conditions, valuation_bits)
+            return cond if is_positive else ['not', cond]
+
+        handle_to_condition_map = dict(conditions)
+
+        result_ast: AST_Node = ['or']
+
+        # Generate boolean combinations of all conditions and rewrite the relation accordingly
+        for cond_valuation_vector in range(2**len(conditions)):
+            branch_guard = [put_condition_with_positiveness(cond_with_handle, handle_to_condition_map, cond_valuation_vector) for cond_with_handle in conditions]
+            branch_body = instantiate_condition_handles(marked_ast, handle_to_condition_map, cond_valuation_vector)
+            result_ast.append(['and', *branch_guard, branch_body])
+        return result_ast
+
+    else:
+        return [node_type, *(rewrite_ite_expressions(subtree) for subtree in ast[1:])]

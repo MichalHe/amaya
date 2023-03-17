@@ -26,8 +26,7 @@ from amaya.relations_structures import (
     Relation,
 )
 from amaya.preprocessing.ite_preprocessing import (
-    expand_ite_expressions_inside_presburger_relation,
-    ite_expansion_handler,
+    rewrite_ite_expressions,
 )
 from amaya import (
     logger,
@@ -463,32 +462,25 @@ def preprocess_ast(ast: AST_Node,
     ast = expand_let_macros(ast, [])
     logger.debug('[Preprocessing] AST after let macro expansion: %s', ast)
 
-    logger.info('Entering the second preprocessing pass: `ite` expansion, `forall` removal.')
+    logger.info('[Preprocessing] Rewriting if-then-else expressions.')
+    ast = rewrite_ite_expressions(ast)
 
-    second_pass_transformations = {
+    third_pass_transformations = {
         'forall': replace_forall_with_exists_handler,
-        'ite': ite_expansion_handler,
-        '>=': expand_ite_expressions_inside_presburger_relation,
-        '<=': expand_ite_expressions_inside_presburger_relation,
-        '=': expand_ite_expressions_inside_presburger_relation,
-        '>': expand_ite_expressions_inside_presburger_relation,
-        '<': expand_ite_expressions_inside_presburger_relation,
         '=>': expand_implications_handler,
     }
 
-    second_pass_context = {
+    third_pass_context = {
         'forall_replaced_cnt': 0,
-        'ite_expansions_cnt': 0,
         'implications_expanded_cnt': 0
     }
-    transform_ast(ast, second_pass_context, second_pass_transformations)
+    transform_ast(ast, third_pass_context, third_pass_transformations)
 
     logger.debug('[Preprocessing] AST after ite expansion, implications rewriting, and forall rewriting: %s', ast)
 
     logger.info('First pass stats: ')
-    logger.info('Replaced %d forall quantifiers with exists.', second_pass_context["forall_replaced_cnt"])
-    logger.info('Expanded %d ite expressions outside of atomic Presburfer formulas.', second_pass_context["ite_expansions_cnt"])
-    logger.info('Expanded %d implications.', second_pass_context["implications_expanded_cnt"])
+    logger.info('Replaced %d forall quantifiers with exists.', third_pass_context["forall_replaced_cnt"])
+    logger.info('Expanded %d implications.', third_pass_context["implications_expanded_cnt"])
 
     logger.info('Entering the third preprocessing pass: double negation removal.')
     third_pass_transformations = {
