@@ -572,7 +572,7 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
         rotated_transitions = make_rotate_transition_function(self.data)
 
         queue = collections.deque(final_states)
-        reachable_states = set()
+        reachable_states = set(final_states)
 
         while queue:
             current_state = queue.popleft()
