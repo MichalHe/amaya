@@ -8,6 +8,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Union,
 )
 
 import amaya.ast_relations as relations
@@ -275,6 +276,20 @@ def transform_ast(ast: AST_Node,  # NOQA
     ctx['history'].pop(-1)
 
 
+Arbitrary_AST = Union[List["Arbitrary_AST"], str, int]
+
+
+def copy_ast(ast: Arbitrary_AST) -> Arbitrary_AST:
+    if isinstance(ast, str) or isinstance(ast, int):
+        return ast
+    elif isinstance(ast, Relation):
+        return Relation.copy_of(ast)
+
+    assert isinstance(ast, list)
+
+    return [copy_ast(item) for item in ast]
+
+
 def expand_let_macros(ast: AST_Node,
                          macro_def_scopes: List[Dict[str, AST_Node]]):
     """Perform let macro expansion."""
@@ -282,7 +297,7 @@ def expand_let_macros(ast: AST_Node,
         # We've encountered a string leaf, check if it is bound to something, if yes, expand it.
         for macro_def_scope in reversed(macro_def_scopes):
             if ast in macro_def_scope:
-                return macro_def_scope[ast]
+                return copy_ast(macro_def_scope[ast])
         return ast
 
     node_name = ast[0]

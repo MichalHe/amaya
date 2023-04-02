@@ -61,7 +61,7 @@ def mark_and_collect_ite_conditions(ast: AST_Node, counter: ConditionCounter) ->
         #        should be equivalend to (ite (or (and B B1) (and (not B) B2)) -> (ite (or (and B B1) (and (not B) B2)) P N) which yields
         #        (or (and (or (and B B1) (and (not B) B2)) P) (and (nor (or (and B B1) (and (not B) B2))) N)
 
-        ast_conditions = [(condition_id, marked_cond_ast)] + pos_branch_conditions + neg_branch_conditions
+        ast_conditions = [(condition_id, marked_cond_ast)] + pos_branch_conditions + neg_branch_conditions + cond_conditions
         placeholdered_ast = ['ite', condition_id, pos_branch_marked_ast, neg_branch_marked_ast]
 
         return (placeholdered_ast, ast_conditions)
@@ -73,7 +73,7 @@ def mark_and_collect_ite_conditions(ast: AST_Node, counter: ConditionCounter) ->
         marked_ast = [node_type, left_marked_ast, right_marked_ast]
         return (marked_ast, left_conditions + right_conditions)
 
-    elif node_type in ['and', 'or', 'not']:
+    elif node_type in ['and', 'or']:
         # @Todo: Remove this. We are handling this because we cannot distinguish between Boolean equivalency
         #        and equations. A proper solution is to extend disambiguation of variables to disambiguate
         #        entire tree (rename Boolean equivalency to some internal name), so that we don't have to
@@ -83,6 +83,11 @@ def mark_and_collect_ite_conditions(ast: AST_Node, counter: ConditionCounter) ->
 
         marked_ast = [node_type, left_marked_ast, right_marked_ast]
         return (marked_ast, left_conditions + right_conditions)
+
+    elif node_type == 'not':
+        body_marked_ast, body_conditions = mark_and_collect_ite_conditions(ast[1], counter)
+        marked_ast = [node_type, body_marked_ast]
+        return (marked_ast, body_conditions)
 
     elif node_type in ['-']:
         if len(node_type) == 3:
