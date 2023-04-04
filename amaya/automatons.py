@@ -321,6 +321,10 @@ class NFA:
             new_nfa.initial_states = set(self.initial_states)
             new_nfa.final_states = set(self.final_states)
 
+            # Assumes that the variables are kept sorted - does not perform sorting again
+            new_used_vars = [var_id for var_id in self.used_variables if var_id != variable_id]
+            new_nfa.used_variables = new_used_vars
+
             bit_pos = calculate_variable_bit_position(self.alphabet.variable_numbers, variable_id)
             if bit_pos is None:
                 raise ValueError(f'Could not find variable_name "{variable_id}" in current alphabet {self.alphabet}')
@@ -334,9 +338,6 @@ class NFA:
                 if maybe_state_added_in_pad_closure:
                     states_added_in_pad_closure.add(maybe_state_added_in_pad_closure)
 
-            # Assumes that the variables are kept sorted - does not perform sorting again
-            new_used_vars = [var_id for var_id in self.used_variables if var_id != variable_id]
-            new_nfa.used_variables = new_used_vars
             labels = {state: state for state in self.states}
             new_nfa.state_semantics = AH_Projection(child=self.state_semantics, states_added_in_pad_closure=states_added_in_pad_closure)
             return new_nfa

@@ -84,10 +84,12 @@ def pad_closure2(nfa: NFA) -> Optional[int]:
 
     # Add a new final state so that the modifications to the automaton structure will not cause overapproximations
     new_final_state: Optional[int] = None
-
-    for symbol in nfa.alphabet.symbols:
+    
+    local_alphabet = nfa.alphabet.gen_projection_symbols_onto_variables(nfa.used_variables)
+    for symbol in local_alphabet:
         states = set()
         work_list = []
+
         # Start by collecting all states that have a transition to a final state
         for final_state in nfa.final_states:
             for pre_state in nfa.transition_fn.get_state_pre_with_symbol(final_state, symbol):
