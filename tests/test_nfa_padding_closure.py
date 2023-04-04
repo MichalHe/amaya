@@ -35,6 +35,7 @@ def mk_simple_nfa(factory: AutomatonFactory) -> NFA:
     nfa.states = set(states)
     nfa.add_final_state(final_state)
     nfa.add_initial_state(0)
+    nfa.used_variables = [1]
 
     sigma = (0,)
     transitions = [
@@ -58,6 +59,7 @@ def mk_multipath_nfa(factory: AutomatonFactory) -> NFA:
     multipath_nfa.states = set(states)
     multipath_nfa.add_initial_state(0)
     multipath_nfa.add_final_state(final_state)
+    multipath_nfa.used_variables = [1, 2]
 
     sigma_1 = (0, 0)
     sigma_2 = (1, 1)
@@ -88,6 +90,7 @@ def mk_advanced_nfa(factory: AutomatonFactory) -> NFA:
     advanced_nfa.states = set(states)
     advanced_nfa.add_initial_state(-1)
     advanced_nfa.add_final_state(final_state)
+    advanced_nfa.used_variables = [1, 2]
 
     sigma_0 = (0, 0)
     sigma_1 = (0, 1)
@@ -116,7 +119,7 @@ def mk_advanced_nfa(factory: AutomatonFactory) -> NFA:
 
 @pytest.fixture()
 def real_nfa() -> NFA:
-    equality = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1], 
+    equality = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1],
                                          absolute_part=2, predicate_symbol='=')
     alphabet = LSBF_Alphabet.from_variable_ids([1, 2])
     return build_nfa_from_linear_equality(equality, [1, 2], alphabet, NFA)
@@ -127,7 +130,8 @@ def nfa_no_modif_needed(constr: AutomatonFactory) -> NFA:
     """Constructs the automaton using the given factory that does not need repairing."""
     alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
     nfa = constr(alphabet=alphabet, automaton_type=AutomatonType.NFA, state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
-    
+    nfa.used_variables = [1, 2]
+
     nfa.states = {0, 1, 2, 100}
 
     transitions = (
@@ -136,7 +140,7 @@ def nfa_no_modif_needed(constr: AutomatonFactory) -> NFA:
 
         (1, (1, 0), 1),
         (1, (1, 0), 100),
-        
+
         (2, (1, 1), 100),
     )
 
