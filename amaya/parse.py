@@ -841,10 +841,10 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
                 from amaya.mtbdd_transitions import MTBDDTransitionFn
                 quantified_vars: List[str] = [var for var in variable_bindings]
                 nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, quantified_vars, ctx.get_variable_id, ctx.get_alphabet())
+                ctx.pop_variable_frame()
                 return nfa
 
     nfa = get_automaton_for_operand(exists_expr[2], ctx, _depth)
-
     vars_info = ctx.get_variables_info_for_current_frame()
 
     # We need to establish an order of individual projections applied, so that we can tell when we are projecting away
@@ -860,6 +860,7 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
 
     if not projected_var_ids:
         # No projection will occur
+        ctx.pop_variable_frame()
         return nfa
 
     logger.debug(f'Established projection order: {projected_var_ids}')
