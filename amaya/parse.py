@@ -706,6 +706,7 @@ def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
     else:
         if nfa.automaton_type != AutomatonType.DFA:
             nfa = nfa.determinize()
+            ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_DETERMINIZE)
         minimized_dfa = nfa.minimize_hopcroft()
 
     logger.info('Minimization applied - inputs has %d states, result %d.', len(nfa.states), len(minimized_dfa.states))
@@ -833,7 +834,7 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
     ctx.add_multiple_variables_to_current_frame(variable_bindings)
 
     # Perform a look-ahead to see whether we can construct the NFA for the entire conjunction using a lazy approach
-    if solver_config.backend_type == BackendType.MTBDD:
+    if solver_config.backend_type == BackendType.MTBDD and False:
         if isinstance(exists_expr[2], list) and exists_expr[2][0] == 'and':
             conjunction = exists_expr[2]
             if all(isinstance(child, Relation) for child in conjunction[1:]):

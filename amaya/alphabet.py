@@ -51,6 +51,9 @@ class LSBF_Alphabet():
         :returns: The cylindrified symbol that belongs to this alphabet with don't care bits on tracks whose
                   variables are not in `variables`.
         """
+        if not variables:
+            return tuple('*' for num in self.variable_numbers)
+
         alphabet_size = len(self.variable_numbers)
 
         # Create a list of indices where we should put the values from the

@@ -39,7 +39,8 @@ class Serialized_NFA(ct.Structure):
     _fields_ = [
         ('states', ct.POINTER(c_side_state_type)),
         ('state_count', ct.c_uint64),
-        ('initial_state', c_side_state_type),
+        ('initial_states', ct.POINTER(c_side_state_type)),
+        ('initial_state_count', ct.c_uint64),
         ('final_states', ct.POINTER(c_side_state_type)),
         ('final_state_count', ct.c_uint64),
         ('mtbdds', ct.POINTER(ct.c_ulong)),
@@ -48,21 +49,18 @@ class Serialized_NFA(ct.Structure):
     ]
 
 
-def deserialize_nfa(serialized_nfa: Serialized_NFA,
-                    used_variables: List[int],
-                    alphabet: LSBF_Alphabet) -> MTBDD_NFA:
-
+def deserialize_nfa(serialized_nfa: Serialized_NFA, alphabet: LSBF_Alphabet) -> MTBDD_NFA:
     from amaya.mtbdd_automatons import MTBDD_NFA
 
     nfa = MTBDD_NFA(
         states={serialized_nfa.states[i] for i in range(serialized_nfa.state_count)},
-        initial_states={serialized_nfa.initial_state},
+        initial_states={serialized_nfa.initial_states[i] for i in range(serialized_nfa.initial_state_count)},
         final_states={
             serialized_nfa.final_states[i] for i in range(serialized_nfa.final_state_count)
         },
-        used_variables=used_variables,
+        used_variables=sorted(serialized_nfa.vars[i] for i in range(serialized_nfa.var_count)),
         alphabet=alphabet,
-        state_semantics=None  # @TODO
+        state_semantics=None  # type: ignore @TODO
     )
 
     for i in range(serialized_nfa.state_count):
@@ -71,6 +69,33 @@ def deserialize_nfa(serialized_nfa: Serialized_NFA,
         nfa.transition_fn.mtbdds[state] = mtbdd
 
     return nfa
+
+
+def free_serialized_nfa(serialized_nfa):
+    mtbdd_wrapper.amaya_do_free(serialized_nfa.contents.states)
+    mtbdd_wrapper.amaya_do_free(serialized_nfa.contents.initial_states)
+    mtbdd_wrapper.amaya_do_free(serialized_nfa.contents.final_states)
+    mtbdd_wrapper.amaya_do_free(serialized_nfa.contents.vars)
+    mtbdd_wrapper.amaya_do_free(serialized_nfa)
+
+
+def serialize_nfa(nfa: MTBDD_NFA) -> Serialized_NFA:
+    _states = tuple(nfa.states)
+    _mtbdds = tuple(nfa.transition_fn.mtbdds.get(s, mtbdd_false) for s in _states)
+    mtbdds = (ct.c_ulong * len(nfa.states))(*_mtbdds)
+
+    serialized_nfa = Serialized_NFA(
+        states=(c_side_state_type * len(nfa.states))(*_states),
+        state_count=len(nfa.states),
+        initial_states=(c_side_state_type * len(nfa.initial_states))(*tuple(nfa.initial_states)),
+        initial_state_count=len(nfa.initial_states),
+        final_states=(c_side_state_type * len(nfa.final_states))(*tuple(nfa.final_states)),
+        final_state_count=len(nfa.final_states),
+        mtbdds=mtbdds,
+        vars=(ct.c_uint64 * len(nfa.used_variables))(*nfa.used_variables),
+        var_count=ct.c_uint64(len(nfa.used_variables))
+    )
+    return serialized_nfa
 
 
 class Serialized_Atom(ct.Structure):
@@ -178,27 +203,6 @@ mtbdd_wrapper.amaya_mtbdd_get_transitions.argtypes = (
 )
 mtbdd_wrapper.amaya_mtbdd_get_transitions.restype = ct.POINTER(ct.c_uint8)
 
-mtbdd_wrapper.amaya_mtbdd_intersection.argtypes = (
-    ct.c_ulong,     # MTBDD 1
-    ct.c_ulong,     # MTBDD 2
-
-    ct.POINTER(ct.POINTER(c_side_state_type)),   # New discoveries made during intersection
-    ct.POINTER(ct.c_uint32),                     # New discoveries size.
-)
-mtbdd_wrapper.amaya_mtbdd_intersection.restype = ct.c_ulong
-
-mtbdd_wrapper.amaya_begin_intersection.argtypes = (
-    ct.c_bool,                      # Is early pruning ON?
-    ct.POINTER(c_side_state_type),  # Final states
-    ct.c_uint32                     # Final states cnt
-)
-mtbdd_wrapper.amaya_end_intersection.argtypes = ()
-
-mtbdd_wrapper.amaya_update_intersection_state.argtypes = (
-    ct.POINTER(c_side_state_type),     # Metastates [m0_0, m0_1, m1_0, m1_1 ...]
-    ct.POINTER(c_side_state_type),     # Metastate names
-)
-
 mtbdd_wrapper.amaya_set_debugging.argtypes = (ct.c_bool, )
 
 mtbdd_wrapper.amaya_rename_macrostates_to_int.argtypes = (
@@ -259,11 +263,14 @@ mtbdd_wrapper.amaya_sylvan_clear_cache.restype = None
 mtbdd_wrapper.amaya_minimize_hopcroft.argtypes = (ct.POINTER(Serialized_NFA), )
 mtbdd_wrapper.amaya_minimize_hopcroft.restype = ct.POINTER(Serialized_NFA)
 
+mtbdd_wrapper.amaya_compute_nfa_intersection.argtypes = (ct.POINTER(Serialized_NFA), ct.POINTER(Serialized_NFA))
+mtbdd_wrapper.amaya_compute_nfa_intersection.restype = ct.POINTER(Serialized_NFA)
+
 mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.argtypes = (ct.POINTER(Serialized_Quantified_Atom_Conjunction),)
 mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.restype = ct.POINTER(Serialized_NFA)
 
 # TODO: fix the shared lib - this symbol is not available ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
-mtbdd_false = 0
+mtbdd_false = ct.c_ulong(0)
 
 MTBDD = ct.c_ulong
 Symbol = Tuple[Union[str, int], ...]
@@ -334,7 +341,7 @@ class MTBDDTransitionFn():
         # Keep only the newly created mtbdd, drop the sigle-terminal one and
         # the old transition mtbdd
         self.inc_mtbdd_ref(resulting_mtbdd)
-        self.dec_mtbdd_ref_unsafe(mtbdd_new)
+        # self.dec_mtbdd_ref_unsafe(mtbdd_new)
         self.dec_mtbdd_ref(current_mtbdd)
 
         self.mtbdds[source] = resulting_mtbdd
@@ -444,7 +451,7 @@ class MTBDDTransitionFn():
         for i, state_old_mtbdd_pair in enumerate(self.mtbdds.items()):
             state, old_mtbdd = state_old_mtbdd_pair
             new_mtbdds[mappings[state]] = renamed_mtbdds[i]
-            self.dec_mtbdd_ref(old_mtbdd)  # The old ones are not used anymore
+            # self.dec_mtbdd_ref(old_mtbdd)  # The old ones are not used anymore
         self.mtbdds = new_mtbdds
 
     def project_variable_away(self, variable: int):
@@ -806,64 +813,6 @@ class MTBDDTransitionFn():
                 i += 1
             yield (origin_state, cs, destination_state)
 
-    def get_intersection_for_states(self, states: Iterable[int]):
-        '''Calculates a MTBDD that contains only transitions present
-        in every transition function of the given states.'''
-
-        intersect_start = 0
-        # Locate first of the states that has some transitions stored.
-        for state in states:
-            if state in self.mtbdds:
-                break
-            else:
-                intersect_start += 1
-
-        if intersect_start == len(states):
-            return mtbdd_false
-
-        intersect_mtbdd = self.mtbdds[states[intersect_start]]
-        for i in range(intersect_start + 1, len(states)):
-            state = states[i]
-            if state not in self.mtbdds:
-                continue
-
-            curr_mtbdd = self.mtbdds[state]
-            print(curr_mtbdd)
-            intersect_mtbdd = mtbdd_wrapper.amaya_mtbdd_intersection(
-                intersect_mtbdd,
-                curr_mtbdd
-            )
-
-        return intersect_mtbdd
-
-    @staticmethod
-    def compute_mtbdd_intersect(mtbdd1: MTBDD,
-                                mtbdd2: MTBDD,
-                                generated_metastates: Optional[Dict[int, Tuple[int, int]]] = None) -> MTBDD:
-        '''Computes the intersection MTBDD for given MTBDDs'''
-
-        discovered_states_arr = ct.POINTER(c_side_state_type)()
-        discovered_states_cnt = ct.c_uint32()
-
-        intersect_mtbdd = mtbdd_wrapper.amaya_mtbdd_intersection(
-            mtbdd1,
-            mtbdd2,
-            ct.byref(discovered_states_arr),
-            ct.byref(discovered_states_cnt)
-        )
-
-        if generated_metastates is not None:
-            for i in range(discovered_states_cnt.value):
-                meta_left = discovered_states_arr[3*i]
-                meta_right = discovered_states_arr[3*i + 1]
-                state = discovered_states_arr[3*i + 2]
-                generated_metastates[state] = (meta_left, meta_right)
-
-        if discovered_states_cnt.value > 0:
-            mtbdd_wrapper.amaya_do_free(discovered_states_arr)
-
-        return intersect_mtbdd
-
     @staticmethod
     def union_of(mtfn0: MTBDDTransitionFn, mtfn1: MTBDDTransitionFn) -> MTBDDTransitionFn:
         '''Creates a new MTBDD transition function that contains transitions
@@ -891,54 +840,6 @@ class MTBDDTransitionFn():
             mtbdd_wrapper.amaya_mtbdd_ref(mtbdd)
 
         return union_tfn
-
-    @staticmethod
-    def begin_intersection(prune: Tuple[bool, Iterable[int]] = (False, [])):
-        '''Informs the C side that global state for the intersection should be prepared.
-        Params:
-            prune - The pruning configuration - tuple of two items:
-                0th - (bool) - is pruninig on?
-                1th - (List[int]) - List of final states that when detected will not be generated.
-
-                This pruning should be used with great care - only when no determinization
-                was performed (or other procedure that manipulates which states are final),
-                as it relies on the property that the final state in presburger NFA (over \\Z)
-                has no states in its Post set.
-        Returns:
-            None
-        '''
-        should_prune, states = prune
-        _should_prune = ct.c_bool(should_prune)
-        _states = (c_side_state_type * len(states))(*states)
-        _states_cnt = ct.c_uint32(len(states))
-        mtbdd_wrapper.amaya_begin_intersection(
-            _should_prune,
-            ct.cast(_states, ct.POINTER(c_side_state_type)),
-            _states_cnt)
-
-    @staticmethod
-    def update_intersection_state(state_update: Dict[int, Tuple[int, int]]):
-        size = len(state_update)
-
-        metastates_arr = (c_side_state_type * (2*size))()
-        metastates_names = (c_side_state_type * size)()
-        cnt = ct.c_uint32(size)
-
-        for i, mapping in enumerate(state_update.items()):
-            state, metastate = mapping
-            metastates_arr[2*i] = c_side_state_type(metastate[0])
-            metastates_arr[2*i + 1] = c_side_state_type(metastate[1])
-            metastates_names[i] = c_side_state_type(state)
-
-        mtbdd_wrapper.amaya_update_intersection_state(
-            ct.cast(metastates_arr, ct.POINTER(c_side_state_type)),
-            ct.cast(metastates_names, ct.POINTER(c_side_state_type)),
-            cnt
-        )
-
-    @staticmethod
-    def end_intersection():
-        mtbdd_wrapper.amaya_end_intersection()
 
     @staticmethod
     def rename_macrostates_after_determinization(mtbdds: Iterable[MTBDD],
@@ -1186,84 +1087,32 @@ class MTBDDTransitionFn():
             states_in_leaves.append(_out_states[i])
 
     @staticmethod
+    def compute_nfa_intersection(left: MTBDD_NFA, right: MTBDD_NFA) -> MTBDD_NFA:
+        """Compute the intersection of two automata with transitions represented by MTBDDs."""
+        left_serialized = serialize_nfa(left)
+        right_serialized = serialize_nfa(right)
+        serialized_result_ptr = mtbdd_wrapper.amaya_compute_nfa_intersection(left_serialized, right_serialized);
+        serialized_result = serialized_result_ptr.contents
+        intersection = deserialize_nfa(serialized_result, left.alphabet)
+        free_serialized_nfa(serialized_result_ptr)
+        return intersection
+
+    @staticmethod
     def minimize_hopcroft(dfa: MTBDD_NFA) -> MTBDD_NFA:
         """Call to the MTBDD backend to minimize the given DFA"""
         from amaya.mtbdd_automatons import MTBDD_NFA  # We have to import it here to avoid circular imports
         logger.info('[MTBDD Hopcroft minimization] Entering minimization routine - serializing data.')
 
-        _states = tuple(dfa.states)
-        _mtbdds = tuple(dfa.transition_fn.mtbdds.get(s, mtbdd_false) for s in _states)
-        mtbdds = (ct.c_ulong * len(dfa.states))(*_mtbdds)
+        serialized_dfa = serialize_nfa(dfa)
+        minimized_serialized_dfa_ptr = mtbdd_wrapper.amaya_minimize_hopcroft(serialized_dfa)
+        minimized_serialized_dfa = minimized_serialized_dfa_ptr.contents
 
-        serialized_dfa = Serialized_NFA(
-            states=(c_side_state_type * len(dfa.states))(*_states),
-            state_count=len(dfa.states),
-            initial_state=c_side_state_type(next(iter(dfa.initial_states))),
-            final_states=(c_side_state_type * len(dfa.final_states))(*tuple(dfa.final_states)),
-            final_state_count=len(dfa.final_states),
-            mtbdds=mtbdds,
-            vars=(ct.c_uint64 * len(dfa.used_variables))(*dfa.used_variables),
-            var_count=ct.c_uint64(len(dfa.used_variables))
-        )
-
-        minimized_serialized_dfa = mtbdd_wrapper.amaya_minimize_hopcroft(serialized_dfa).contents
-
-        minimized_dfa = deserialize_nfa(minimized_serialized_dfa, dfa.used_variables, dfa.alphabet)
+        minimized_dfa = deserialize_nfa(minimized_serialized_dfa, dfa.alphabet)
+        mtbdd_wrapper.amaya_do_free(minimized_serialized_dfa_ptr)
 
         logger.info('[MTBDD Hopcroft minimization] Exiting minimization routine')
         return minimized_dfa
 
     @staticmethod
-    def construct_dfa_for_atom_conjunction(conjunction: List[Relation],
-                                           quantified_vars: List[str],
-                                           var_to_id_mapping_fn: Callable[[str], int],
-                                           alphabet: LSBF_Alphabet) -> MTBDD_NFA:
-
-        all_variables = set(itertools.chain(*(atom.get_variables() for atom in conjunction)))
-        all_variables = sorted(all_variables, key=var_to_id_mapping_fn)
-
-        coef_cnt = ct.c_uint64(len(all_variables))
-
-        serialized_atoms = (Serialized_Atom * len(conjunction))()
-
-        for i, atom in enumerate(conjunction):
-            modulus = 0
-            if atom.is_congruence_equality():
-                mod_term = atom.modulo_terms[0]
-                modulus = mod_term.modulo
-                var_to_coef_map: Dict[str, int] = dict(zip(mod_term.variables, mod_term.variable_coefficients))
-            else:
-                var_to_coef_map: Dict[str, int] = dict(zip(atom.variable_names, atom.variable_coefficients))
-
-            coefs = (ct.c_int64 * len(all_variables))(*(var_to_coef_map.get(var, 0) for var in all_variables))
-
-            atom_type = Serialized_Atom_Type.EQ if atom.predicate_symbol == '=' else Serialized_Atom_Type.INEQ
-            if atom_type == Serialized_Atom_Type.EQ and atom.is_congruence_equality():
-                atom_type = Serialized_Atom_Type.CONGRUENCE
-
-            serialized_atom = Serialized_Atom(type=atom_type, coef_cnt=coef_cnt, coefs=coefs, modulus=modulus)
-            serialized_atoms[i] = serialized_atom
-
-        vars = [var_to_id_mapping_fn(var) for var in all_variables]
-        serialized_vars = (ct.c_uint64 * len(vars))(*vars)
-
-        initial_state = tuple(rel.absolute_part for rel in conjunction)
-        serialized_initial_state = (ct.c_int64 * len(initial_state))(*initial_state)
-
-        quantified_vars_offset = min(var_to_id_mapping_fn(var) for var in all_variables)
-        quantified_var_ids = [var_to_id_mapping_fn(var) - quantified_vars_offset for var in quantified_vars]
-        serialized_quantified_vars = (ct.c_uint64 * len(quantified_vars))(*quantified_var_ids)
-
-        serialized_conjunction = Serialized_Quantified_Atom_Conjunction(
-            atoms=serialized_atoms,
-            atom_cnt=ct.c_uint64(len(conjunction)),
-            initial_state=serialized_initial_state,
-            vars=serialized_vars,
-            var_cnt=ct.c_uint64(len(vars)),
-            quantified_vars=serialized_quantified_vars,
-            quantified_var_cnt=len(quantified_vars),
-        )
-
-        serialized_result = mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction(serialized_conjunction).contents
-        result = deserialize_nfa(serialized_result, vars, alphabet)
-        return result
+    def fast_determinize(dfa: MTBDD_NFA) -> MTBDD_NFA:
+        pass

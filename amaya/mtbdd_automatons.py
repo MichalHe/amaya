@@ -129,107 +129,11 @@ class MTBDD_NFA(NFA):
         no_determinization = 'determinization' not in self.applied_operations_info
         return no_determinization
 
-    def intersection(self, other: MTBDD_NFA, metastate_map: Optional[Dict[int, Tuple[int, int]]] = None):  # NOQA
-        logger.debug('Entering MTBDD NFA intersection procedure.')
-        if metastate_map is None:
-            metastate_map = dict()
-
-        logger.debug(f'Beginning to renumber states. Self state count: {len(self.states)} {len(other.states)}')
-        logger.debug('Is pruning enabled? {0}'.format(self.fast_prunining_enabled))
-        if self.fast_prunining_enabled:
-            logger.debug('Is early safe pruning possible? self={0} other={1}'.format(self.is_safe_to_quick_prune_intersection_states(), other.is_safe_to_quick_prune_intersection_states()))
-
-        # @Note(codeboy): This is a debug call, remove it.
-        # MTBDDTransitionFn.transition_fn.get_states_in_mtbdd_leaves()
-
-        hightest_state = self.renumber_states(start_from=0)
-        other.renumber_states(start_from=hightest_state)
-        logger.debug('Intersection state renumbering done.')
-
-        prune_configuration = (False, [])
-        if MTBDD_NFA.fast_prunining_enabled:
-            if self.is_safe_to_quick_prune_intersection_states() and other.is_safe_to_quick_prune_intersection_states():
-                prune_configuration = (True, list(self.final_states.union(other.final_states)))
-
-        MTBDDTransitionFn.begin_intersection(prune_configuration)
-
-        def set_cross(s1: Iterable[int], s2: Iterable[int]):
-            for left_state in s1:
-                for right_state in s2:
-                    yield (left_state, right_state)
-
-        # Origin states
-        intersect_initial_states = list(set_cross(self.initial_states, other.initial_states))
-        work_queue = []
-        for i, init_metastate in enumerate(intersect_initial_states):
-            metastate_map[i] = init_metastate
-            work_queue.append(i)
-
-        MTBDDTransitionFn.update_intersection_state(metastate_map)
-
-        int_nfa = MTBDD_NFA(self.alphabet, AutomatonType.NFA)
-        # Make sure that we use the single-integer state numbers not pairs
-        logger.info(f'Setting initial states to: {metastate_map.keys()} {metastate_map}')
-        int_nfa.initial_states = set(metastate_map.keys())
-
-        work_set = set(work_queue)
-        processed_states_cnt = 0
-        while work_queue:
-            cur_state = work_queue.pop(-1)
-            work_set.remove(cur_state)
-            cur_metastate = metastate_map[cur_state]
-            logger.debug('MTBDD NFA Intersection: Processing metastate: %s, remaining in work queue: %d',
-                         cur_state,
-                         len(work_queue))
-
-            if cur_state in int_nfa.states:
-                continue  # Each state can be processed only once
-
-            int_nfa.add_state(cur_state)
-
-            left_state, right_state = cur_metastate
-            if left_state in self.final_states and right_state in other.final_states:
-                int_nfa.add_final_state(cur_state)
-
-            l_mtbdd = self.transition_fn.mtbdds.get(left_state, None)
-            r_mtbdd = other.transition_fn.mtbdds.get(right_state, None)
-
-            if l_mtbdd is None or r_mtbdd is None:
-                # The current metastate is dead end.
-                continue
-
-            generated_metastates = {}
-            cur_int_mtbdd = self.transition_fn.compute_mtbdd_intersect(
-                l_mtbdd,
-                r_mtbdd,
-                generated_metastates=generated_metastates  # Get generated metastates
-            )
-
-            # Prevent the created MTBDD from getting GCd
-            MTBDDTransitionFn.inc_mtbdd_ref(cur_int_mtbdd)
-
-            for gm in generated_metastates.items():
-                gen_state, gen_metastate = gm
-                metastate_map[gen_state] = gen_metastate
-
-                if gen_state not in work_set and gen_state not in work_queue:
-                    work_queue.append(gen_state)
-                    work_set.add(gen_state)
-
-            int_nfa.transition_fn.mtbdds[cur_state] = cur_int_mtbdd
-            processed_states_cnt += 1
-
-        MTBDDTransitionFn.end_intersection()
-        int_nfa.applied_operations_info = self.applied_operations_info + ['intersection']
-
-        int_nfa.used_variables = sorted(set(self.used_variables + other.used_variables))
-
-        int_nfa.remove_nonfinishing_states()
-
-        logger.info('MTBDD NFA Intersection done. Processed states %d. Result has %d states.',
-                    processed_states_cnt,
-                    len(int_nfa.states))
-        return int_nfa
+    def intersection(self, other: MTBDD_NFA, metastate_map: Optional[Dict[int, Tuple[int, int]]] = None):
+        logger.info('Performing intersection of two automata of size %d and %d', len(self.states), len(other.states))
+        result = MTBDDTransitionFn.compute_nfa_intersection(self, other)
+        logger.info('Intersection done: result size=%d, left operand size: %d , right operand size: %d', len(result.states), len(self.states), len(other.states))
+        return result
 
     def perform_pad_closure(self):
         new_final_state = max(self.states) + 1
@@ -255,8 +159,6 @@ class MTBDD_NFA(NFA):
         work_queue = [tuple(self.initial_states)]
         work_set = set(work_queue)
         dfa = MTBDD_NFA(self.alphabet, automaton_type=AutomatonType.DFA, state_semantics=None)
-
-        # import pdb; pdb.set_trace()
 
         states = set()
         initial_states = set(work_queue)
