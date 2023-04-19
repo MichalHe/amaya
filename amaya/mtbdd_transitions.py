@@ -268,6 +268,9 @@ mtbdd_wrapper.amaya_minimize_hopcroft.restype = ct.POINTER(Serialized_NFA)
 mtbdd_wrapper.amaya_compute_nfa_intersection.argtypes = (ct.POINTER(Serialized_NFA), ct.POINTER(Serialized_NFA))
 mtbdd_wrapper.amaya_compute_nfa_intersection.restype = ct.POINTER(Serialized_NFA)
 
+mtbdd_wrapper.amaya_determinize.argtypes = (ct.POINTER(Serialized_NFA), )
+mtbdd_wrapper.amaya_determinize.restype = ct.POINTER(Serialized_NFA)
+
 mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.argtypes = (ct.POINTER(Serialized_Quantified_Atom_Conjunction),)
 mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.restype = ct.POINTER(Serialized_NFA)
 
@@ -1166,5 +1169,10 @@ class MTBDDTransitionFn():
         return nfa
 
     @staticmethod
-    def fast_determinize(dfa: MTBDD_NFA) -> MTBDD_NFA:
-        pass
+    def determinize(nfa: MTBDD_NFA) -> MTBDD_NFA:
+        serialized_dfa = serialize_nfa(nfa)
+        result_ptr = mtbdd_wrapper.amaya_determinize(serialized_dfa)
+        dfa = deserialize_nfa(result_ptr.contents, nfa.alphabet)
+        free_serialized_nfa(result_ptr)
+        dfa.automaton_type = AutomatonType.DFA
+        return dfa

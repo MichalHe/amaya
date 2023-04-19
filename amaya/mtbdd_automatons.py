@@ -144,100 +144,12 @@ class MTBDD_NFA(NFA):
             self.states.add(new_final_state)
             self.final_states.add(new_final_state)
 
-    def determinize(self):
-        """
-        Performs in-place determinization of the automaton.
-
-        No determinization is performed if the automaton is already marked as a
-        DFA.
-
-        The resulting automaton is complete - a transition to trapstate is
-        added where needed.
-        """
-        logger.debug('Performing MTBDD NFA determinization.')
-
-        work_queue = [tuple(self.initial_states)]
-        work_set = set(work_queue)
-        dfa = MTBDD_NFA(self.alphabet, automaton_type=AutomatonType.DFA, state_semantics=None)
-
-        states = set()
-        initial_states = set(work_queue)
-        final_states = set()
-
-        # Stores the actual structure of the automaton.
-        mtbdds = {}
-
-        while work_queue:
-            logger.debug(f'Determinization: The number of states remaining in the work queue: {len(work_queue)}')
-            c_macrostate = work_queue.pop(-1)
-            work_set.remove(c_macrostate)
-
-            # @Optimize: This is true only for the initial state. Other states are reachable from other and are remapped when the transition is added.
-            states.add(c_macrostate)
-            if set(c_macrostate).intersection(self.final_states):
-                final_states.add(c_macrostate)
-
-            c_macrostate_union_mtbdd = self.transition_fn.get_union_mtbdd_for_states(c_macrostate)
-
-            # The mtbdd has already ref count increased, do not increase it
-
-            if c_macrostate_union_mtbdd is None:
-                continue
-            mtbdds[c_macrostate] = c_macrostate_union_mtbdd
-
-            reachable_macrostates = MTBDDTransitionFn.call_get_mtbdd_leaves(c_macrostate_union_mtbdd)
-            for r_macrostate in reachable_macrostates:
-                r_macrostate = tuple(r_macrostate)
-
-                if r_macrostate not in states and r_macrostate not in work_set:
-                    work_queue.append(r_macrostate)
-                    work_set.add(r_macrostate)
-
-        # Check an edge case when there were no transitions in the automaton - only the initial state is present in the DFA.
-        if not mtbdds:
-            assert len(states) == 1
-            # There is only one macrostates, so there is no need to do some advanced mapping of the macrostates to ints.
-            dfa.states.add(0)
-            dfa.initial_states.add(0)
-            if final_states:
-                dfa.final_states.add(0)
-            dfa.transition_fn.mtbdds[0] = mtbdd_false
-            dfa.used_variables = list(self.used_variables)
-            return dfa
-
-        # We have explored the entire structure - time to mangle the generated
-        # macrostates into integers, so that the automaton has the correct form.
-        macrostates, _mtbdds = zip(*mtbdds.items())
-        patched_mtbdds, macrostate2int_map = MTBDDTransitionFn.rename_macrostates_after_determinization(_mtbdds)
-
-        # The patched mtbdds have already ref count incremented, no need to
-        # increment the ref counter. The old mtbdds will be decremented when
-        # MTBDDTransitionFn will be GC'd by Python garbage collection.
-
-        max_state = max(macrostate2int_map.values())
-        for state in states:
-            # Initial states might never get discovered - we need to remap them manually,
-            # because they will not be present in any of the mtbdd leaves
-            if state in macrostate2int_map:
-                dfa.add_state(macrostate2int_map[state])
-            else:
-                max_state += 1
-                macrostate2int_map[state] = max_state
-                dfa.add_state(max_state)
-        for f_state in final_states:
-            dfa.add_final_state(macrostate2int_map[f_state])
-        for i_state in initial_states:
-            dfa.add_initial_state(macrostate2int_map[i_state])
-
-        for macrostate, patched_mtbdd in zip(macrostates, patched_mtbdds):
-            state = macrostate2int_map[macrostate]
-            dfa.transition_fn.mtbdds[state] = patched_mtbdd
-
-        dfa.add_trap_state()
-
-        dfa.applied_operations_info = self.applied_operations_info + ['determinization']
-        dfa.used_variables = list(self.used_variables)
-        logger.debug('Exiting MTBDD NFA determinization procedure.')
+    def determinize(self) -> MTBDD_NFA:
+        # @Todo: Before simplification, this method previously called: mtbdd union, mtbdd rename, get leaves.
+        #        Check whether any of these API calls can be removed.
+        logger.debug('Performing MTBDD NFA determinization. Automaton size: #states=%d', len(self.states))
+        dfa = MTBDDTransitionFn.determinize(self)
+        logger.debug('MTBDD NFA determinization done. Results size: #states=%d', len(dfa.states))
         return dfa
 
     def complement(self) -> MTBDD_NFA:
