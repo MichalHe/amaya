@@ -98,7 +98,7 @@ class VariableInfo:
 
 
 class EvaluationContext:
-    def __init__(self, emit_introspect=lambda nfa, operation: None, alphabet: Optional[LSBF_Alphabet] = None):
+    def __init__(self, emit_introspect=lambda nfa, operation: None, alphabet: Optional[LSBF_Alphabet] = None, global_scope: Optional[Dict[str, VariableInfo]] = None):
         self.introspect_handle = emit_introspect
 
         # Evaluation stats
@@ -108,7 +108,7 @@ class EvaluationContext:
 
         self.next_available_variable_id = 1  # Number them from 1, MTBDDs require
         self.variables_info_stack: List[Dict[str, VariableInfo]] = []
-        self.global_variables: Dict[str, VariableInfo] = {}
+        self.global_variables: Dict[str, VariableInfo] = global_scope if global_scope is not None else {}
 
         # Lazy load MTBDD automata module if needed
         self.automata_cls = NFA
@@ -498,14 +498,15 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             ctx = EvaluationContext()
             function_symbols = sorted(function_symbol_to_info_map.values(), key=lambda symbol: symbol.name)
 
-            for fun_symbol in function_symbols:
-                ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
-
             # If there are multiple assert statements, evaluate their conjunction
             formula_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
 
             # @Note: Preprocessing will modify the given list
-            formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate, constant_function_symbols=function_symbols)
+            function_symbols, formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate,
+                                                                                 constant_function_symbols=function_symbols)
+
+            for fun_symbol in function_symbols:
+                ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
 
             bool_symbols = {
                 var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL
@@ -673,7 +674,6 @@ def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _de
                      'Searching variable scopes for its definition.')
 
         variable_info = ctx.lookup_variable(operand_ast)
-
         if (variable_info and variable_info.type == VariableType.BOOL):
             logger.debug(f'Found definition for %s - symbol defined as a boolean variable.', operand_ast)
             variable_info.usage_count += 1

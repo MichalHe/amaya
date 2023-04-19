@@ -10,6 +10,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TypeVar,
     Union,
 )
 
@@ -439,6 +440,14 @@ class Var_Scope_Info:
 
 
 def _disambiguate_vars(ast: AST_Node, var_scope_info: Dict[str, Var_Scope_Info], var_scope_cnts: Dict[str, int]) -> AST_Node:
+    """
+    Give every number a unique suffix so that every variable in the formula has an unique name.
+
+    Param:
+        - var_scope_info: Maps a variable to the actual scope it is in so that an unique suffix with scope id can be generated.
+        - var_scope_cnts: Counts the number of different scopes the variable has been seen so far so that a different suffix
+                          would be generated for a variable in a newly encountered context.
+    """
     if isinstance(ast, str):
         if ast in var_scope_info:
             return var_scope_info[ast].put_scope_id_into_name(ast)
@@ -448,11 +457,7 @@ def _disambiguate_vars(ast: AST_Node, var_scope_info: Dict[str, Var_Scope_Info],
     elif isinstance(ast, Relation):
         # This branch might not be hit if the relations were not yet condensed into relations.
         relation: Relation = ast
-        relation.variable_names = list(variable_rename_map[var_name] for var_name in relation.variable_names)
-        for mod_term in relation.modulo_terms:
-            mod_term.variables = tuple(variable_rename_map[var_name] for var_name in mod_term.variables)
-        for div_term in relation.div_terms:
-            div_term.variables = tuple(variable_rename_map[var_name] for var_name in div_term.variables)
+        relation.rename_variables(lambda var: var_scope_info[var].put_scope_id_into_name(var))
         return ast
 
     assert isinstance(ast, list)
@@ -483,7 +488,7 @@ def _disambiguate_vars(ast: AST_Node, var_scope_info: Dict[str, Var_Scope_Info],
     raise NotImplementedError(f'[Variable name disambiguation] Unhandled {node_type=} while traversing ast.')
 
 
-def disambiguate_variables(ast: AST_Node, constant_function_symbols: Iterable[FunctionSymbol]) -> AST_Node:
+def disambiguate_variables(ast: AST_Node, constant_function_symbols: Iterable[FunctionSymbol]) -> Tuple[Iterable[FunctionSymbol], AST_Node]:
     """Modifies the AST so that all variables have unique names."""
     global_scope_info: Dict[str, Var_Scope_Info] = {}
     var_scope_cnt: Dict[str, int] = {}
@@ -491,12 +496,22 @@ def disambiguate_variables(ast: AST_Node, constant_function_symbols: Iterable[Fu
         global_scope_info[constatnt_symbol.name] = Var_Scope_Info(scope_id=0)
         var_scope_cnt[constatnt_symbol.name] = 1
 
-    return _disambiguate_vars(ast, global_scope_info, var_scope_cnt)
+    disambiguated_tree = _disambiguate_vars(ast, global_scope_info, var_scope_cnt)
+
+    # We have likely changed also how are the global symbols named, therefore, we have to disambiguate them
+    # as well so thay can be injected into the evaluation context
+    disambiguated_global_symbols = []
+    for symbol in constant_function_symbols:
+        new_symbol = FunctionSymbol(name=global_scope_info[symbol.name].put_scope_id_into_name(symbol.name),
+                                    arity=symbol.arity, args=symbol.args, return_type=symbol.return_type)
+        disambiguated_global_symbols.append(new_symbol)
+
+    return (disambiguated_global_symbols, disambiguated_tree)
 
 
 def preprocess_ast(ast: AST_Node,
                    constant_function_symbols: Iterable[FunctionSymbol],
-                   solver_config: SolverConfig = solver_config) -> AST_Node:
+                   solver_config: SolverConfig = solver_config) -> Tuple[Iterable[FunctionSymbol], AST_Node]:
     """
     Peforms preprocessing on the given AST. The following proprocessing operations are performed:
         - universal quantifiers are replaced with existential quantifiers,
@@ -504,8 +519,12 @@ def preprocess_ast(ast: AST_Node,
         - consequent negation pairs are removed,
 
     Params:
-        ast - The SMT tree to be preprocessed. The preprocessing is performed in place.
-    """
+        - ast - The SMT tree to be preprocessed. The preprocessing is performed in place.
+        - constant_function_symbols - Global function symbols with with 0args (global vars)
+    Returns:
+        - A tuple (modified_constant_function_symbols, modified_ast). The constant function symbols might
+          be modified due to, e.g., variable disambiguation.
+     """
 
     logger.debug('[Preprocessing] original AST: %s', ast)
     ast = expand_let_macros(ast, [])
@@ -542,6 +561,8 @@ def preprocess_ast(ast: AST_Node,
     logger.info('Removed %d negation pairs.', third_pass_context["negation_pairs_removed_cnt"])
 
     if solver_config.preprocessing.disambiguate_variables:
-        ast = disambiguate_variables(ast, constant_function_symbols)
+        disambiguated_global_symbols, ast = disambiguate_variables(ast, constant_function_symbols)
+    else:
+        disambiguated_global_symbols = constant_function_symbols
 
-    return ast
+    return disambiguated_global_symbols, ast

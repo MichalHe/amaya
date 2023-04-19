@@ -174,6 +174,14 @@ class ModuloTerm:
         return ModuloTerm(variables=sorted_vars, variable_coefficients=sorted_coefs,
                           constant=self.constant, modulo=self.modulo)
 
+    def rename_variables(self, renaming_fn: Callable[[str], str]) -> ModuloTerm:
+        new_variables = tuple(renaming_fn(var_name) for var_name in self.variables)
+        new_term = ModuloTerm(variables=new_variables,
+                              variable_coefficients=self.variable_coefficients,
+                              constant=self.constant,
+                              modulo=self.modulo)
+        return new_term
+
 
 @dataclass(frozen=True)
 class DivTerm(object):
@@ -199,6 +207,14 @@ class DivTerm(object):
             variable_coefficients=var_coefficients,
             divisor=divisor
         )
+
+    def rename_variables(self, renaming_fn: Callable[[str], str]) -> DivTerm:
+        new_variables = tuple(renaming_fn(var_name) for var_name in self.variables)
+        new_term = DivTerm(variables=new_variables,
+                           variable_coefficients=self.variable_coefficients,
+                           constant=self.constant,
+                           divisor=self.divisor)
+        return new_term
 
 
 RewritableTerm = Union[ModuloTerm, DivTerm]
@@ -424,57 +440,31 @@ class Relation(object):
             return abs(self.modulo_terms[0].modulo)
         return 0
 
-    def rename_frozen_terms(self,
-                            terms: List[T],
-                            renaming: Dict[str, VariableRenamingInfo],
-                            term_constr: Callable[[Tuple[str], T], T]) -> Optional[Tuple[bool, List[T]]]:
-        """
-        Rename the variables in the given terms according to supplied renaming.
-
-        Returns a tuple containing:
-            - a boolean indicating whether was any variable renamed
-            - a list of the renamed terms
-        """
-        renamed_terms = []
-        was_any_variable_renamed = False
-        for term in terms:
-            renamed_variables = tuple(renaming[var].new_name if var in renaming else var for var in term.variables)
-            if renamed_variables != term.variables:
-                was_any_variable_renamed = True
-                renamed_term = term_constr(renamed_variables, term)
-                renamed_terms.append(renamed_term)
-            else:
-                renamed_terms.append(term)
-        return was_any_variable_renamed, renamed_terms
-
-    def rename_variables(self, renaming: Dict[str, VariableRenamingInfo]) -> bool:
+    def rename_variables(self, rename_fn: Callable[[str], str]) -> bool:
         """Rename the variables used in this relation. Returns True if any variable was renamed."""
         was_any_variable_renamed = False
-        new_var_names = [renaming[var].new_name if var in renaming else var for var in self.variable_names]
+        new_var_names = [rename_fn(var) for var in self.variable_names]
 
         if new_var_names != self.variable_names:
             self.variable_names = new_var_names
             was_any_variable_renamed = True
 
         # Modulo and Div terms are frozen - they have to be recreated with correct variables
-        was_any_variable_inside_modulo_renamed, self.modulo_terms = self.rename_frozen_terms(
-            self.modulo_terms, renaming,
-            lambda renamed_vars, mod_term: ModuloTerm(variables=renamed_vars,
-                                                      variable_coefficients=mod_term.variable_coefficients,
-                                                      modulo=mod_term.modulo, constant=mod_term.constant)
-        )
-        was_any_variable_renamed |= was_any_variable_inside_modulo_renamed
+        new_mod_terms = []
+        for mod_term in self.modulo_terms:
+            new_term = mod_term.rename_variables(rename_fn)
+            was_any_variable_renamed |= (new_term != mod_term)
+            new_mod_terms.append(new_term)
+        self.modulo_terms = new_mod_terms
 
-        was_any_variable_inside_div_renamed, self.div_terms = self.rename_frozen_terms(
-            self.div_terms, renaming,
-            lambda renamed_vars, div_term: DivTerm(variables=renamed_vars,
-                                                   variable_coefficients=div_term.variable_coefficients,
-                                                   divisor=div_term.divisor, constant=div_term.constant)
-        )
-        was_any_variable_renamed |= was_any_variable_inside_div_renamed
+        new_div_terms = []
+        for div_term in self.div_terms:
+            new_term = div_term.rename_variables(rename_fn)
+            was_any_variable_renamed |= (new_term != div_term)
+            new_mod_terms.append(new_term)
+        self.div_terms = new_mod_terms
 
         self.sort_variables_alphabetically()
-
         return was_any_variable_renamed
 
     @staticmethod
