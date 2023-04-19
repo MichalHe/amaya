@@ -834,14 +834,14 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
     ctx.add_multiple_variables_to_current_frame(variable_bindings)
 
     # Perform a look-ahead to see whether we can construct the NFA for the entire conjunction using a lazy approach
-    if solver_config.backend_type == BackendType.MTBDD and False:
+    if solver_config.backend_type == BackendType.MTBDD and solver_config.allow_lazy_evaluation:
         if isinstance(exists_expr[2], list) and exists_expr[2][0] == 'and':
             conjunction = exists_expr[2]
             if all(isinstance(child, Relation) for child in conjunction[1:]):
                 atoms: List[Relation] = conjunction[1:]  # type: ignore
                 from amaya.mtbdd_transitions import MTBDDTransitionFn
                 quantified_vars: List[str] = [var for var in variable_bindings]
-                nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, quantified_vars, ctx.get_variable_id, ctx.get_alphabet())
+                nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, quantified_vars, ctx.get_alphabet(), ctx.get_variable_id)
                 ctx.pop_variable_frame()
                 return nfa
 

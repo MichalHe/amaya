@@ -39,6 +39,9 @@ class SolverConfig(object):
     track_operation_runtime: bool = False
     track_state_semantics: bool = False
 
+    allow_lazy_evaluation: bool = False
+    """Enable lazy evaluation of subformulae of the form `(exists (..) (and atom1 atom2 ...))`"""
+
     vis_display_only_free_vars: bool = False
     """Export transition symbols with bits only for the free variables in the corresponding automaton."""
 

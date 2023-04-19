@@ -98,6 +98,13 @@ argparser.add_argument('--domain',
                              'from atomic presburger formulae. NATURALS support'
                              'is very questionable currently.'))
 
+argparser.add_argument('-l', '--lazy',
+                       action='store_true',
+                       dest='allow_lazy_evaluation',
+                       default=False,
+                       help=('Enable experimental lazy evaluation of subformulae of the form '
+                             ' (exists (..) (and atom1 atom2 ...))'))
+
 argparser.add_argument('-m',
                        '--minimize',
                        choices=('hopcroft', 'brzozowski'),
@@ -258,6 +265,8 @@ elif args.minimization_method == 'brzozowski':
         sys.exit(1)
 else:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
+
+solver_config.allow_lazy_evaluation = args.allow_lazy_evaluation
 
 
 def ensure_output_destination_valid(output_destination: str):
