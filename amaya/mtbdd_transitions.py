@@ -190,24 +190,6 @@ mtbdd_wrapper.amaya_mtbdd_get_transitions.restype = ct.POINTER(ct.c_uint8)
 
 mtbdd_wrapper.amaya_set_debugging.argtypes = (ct.c_bool, )
 
-mtbdd_wrapper.amaya_rename_macrostates_to_int.argtypes = (
-    ct.POINTER(ct.c_ulong),   # The mtbdd roots that were located during determinization
-    ct.c_uint32,              # The number of mtbdd roots
-    c_side_state_type,        # The number from which the numbering will start
-    ct.POINTER(ct.POINTER(c_side_state_type)),  # OUT: Metastates serialized
-    ct.POINTER(ct.POINTER(ct.c_uint64)),        # OUT: Metastates sizes
-    ct.POINTER(ct.c_uint64)                     # OUT: Metastates count
-)
-mtbdd_wrapper.amaya_rename_macrostates_to_int.restype = ct.POINTER(ct.c_ulong)
-
-mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.argtypes = (
-    ct.c_ulong,                 # The MTBDD
-    c_side_state_type,          # The trapstate ID
-    ct.POINTER(ct.c_bool)       # OUT - Information about whether the operator did add a transition to a trapstate somewhere
-)
-
-mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate.restype = ct.c_long
-
 mtbdd_wrapper.amaya_get_state_post_with_some_transition.argtypes = (
     ct.c_ulong,                 # The mtbdd
     ct.POINTER(ct.c_uint32),    # An array with variables
@@ -719,71 +701,6 @@ class MTBDDTransitionFn():
             mtbdd_wrapper.amaya_mtbdd_ref(mtbdd)
 
         return union_tfn
-
-    @staticmethod
-    def rename_macrostates_after_determinization(mtbdds: Iterable[MTBDD],
-                                                 start_numbering_from: int = 0) -> Tuple[List[ct.c_ulong], Dict[Tuple[int, ...], int]]:
-        in_mtbdds = (ct.c_ulong * len(mtbdds))()
-        for i, mtbdd in enumerate(mtbdds):
-            in_mtbdds[i] = mtbdd
-        in_mtbdd_cnt = ct.c_uint32(len(mtbdds))
-        in_start_numbering_from = c_side_state_type(start_numbering_from)
-
-        out_metastates_serialized = ct.POINTER(c_side_state_type)()
-        out_metastates_sizes = ct.POINTER(ct.c_uint64)()
-        out_metastates_cnt = ct.c_uint64()
-
-        out_patched_mtbdds = mtbdd_wrapper.amaya_rename_macrostates_to_int(
-            ct.cast(in_mtbdds, ct.POINTER(ct.c_ulong)),
-            in_mtbdd_cnt,
-            in_start_numbering_from,
-            ct.byref(out_metastates_serialized),
-            ct.byref(out_metastates_sizes),
-            ct.byref(out_metastates_cnt),
-        )
-
-        mapping = {}
-        metastates_cnt = out_metastates_cnt.value
-        metastates_serialized_i = 0
-
-        _start_from = start_numbering_from
-        for i in range(metastates_cnt):
-            metastate = []
-            metastate_size = out_metastates_sizes[i]
-            for j in range(metastate_size):
-                metastate.append(out_metastates_serialized[metastates_serialized_i])
-                metastates_serialized_i += 1
-
-            mapping[tuple(metastate)] = _start_from
-            _start_from += 1
-
-        mtbdd_wrapper.amaya_do_free(out_metastates_serialized)
-        mtbdd_wrapper.amaya_do_free(out_metastates_sizes)
-
-        patched_mtbdds = []
-        for i in range(len(mtbdds)):
-            patched_mtbdds.append(out_patched_mtbdds[i])
-
-        mtbdd_wrapper.amaya_do_free(out_patched_mtbdds)
-
-        return (patched_mtbdds, mapping)
-
-    @staticmethod
-    def complete_mtbdd_with_trapstate(mtbdd: ct.c_long, trapstate_id: int) -> Tuple[ct.c_long, bool]:
-        """Wrapper call.
-
-        Add a transition to the given trapstate for every alphabet symbol
-        for which the given mtbdd does not have any (valid) transition.
-
-        Returns the mtbdd resulting from the completion (might be unchanged if the
-        mtbdd already was complete) and the information about whether the operation
-        did indeed modify the mtbdd somehow.
-        """
-        _trapstate = c_side_state_type(trapstate_id)
-        _had_effect = ct.c_bool()
-
-        mtbdd = mtbdd_wrapper.amaya_complete_mtbdd_with_trapstate(mtbdd, _trapstate, ct.byref(_had_effect))
-        return (mtbdd, _had_effect)
 
     @staticmethod
     def set_debugging(debug_on: bool):
