@@ -274,6 +274,9 @@ mtbdd_wrapper.amaya_determinize.restype = ct.POINTER(Serialized_NFA)
 mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.argtypes = (ct.POINTER(Serialized_Quantified_Atom_Conjunction),)
 mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.restype = ct.POINTER(Serialized_NFA)
 
+mtbdd_wrapper.amaya_perform_pad_closure.argtypes = (ct.POINTER(Serialized_NFA), )
+mtbdd_wrapper.amaya_perform_pad_closure.restype = ct.POINTER(Serialized_NFA)
+
 # TODO: fix the shared lib - this symbol is not available ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
 mtbdd_false = ct.c_ulong(0)
 
@@ -669,6 +672,15 @@ class MTBDDTransitionFn():
 
         MTBDDTransitionFn.call_end_pad_closure()
         return new_final_state_added
+
+    @staticmethod
+    def do_pad_closure2(nfa: MTBDD_NFA) -> MTBDD_NFA:
+        serialized_nfa = serialize_nfa(nfa)
+        serialized_result = mtbdd_wrapper.amaya_perform_pad_closure(serialized_nfa)
+        result = deserialize_nfa(serialized_result.contents, nfa.alphabet)
+        free_serialized_nfa(serialized_result)
+        return result
+
 
     @staticmethod
     def call_begin_pad_closure(new_final_state: int, final_states: List[int]):

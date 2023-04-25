@@ -125,10 +125,6 @@ class MTBDD_NFA(NFA):
         logger.debug('Exiting MTBDD NFA union procedure.')
         return self
 
-    def is_safe_to_quick_prune_intersection_states(self) -> bool:
-        no_determinization = 'determinization' not in self.applied_operations_info
-        return no_determinization
-
     def intersection(self, other: MTBDD_NFA, metastate_map: Optional[Dict[int, Tuple[int, int]]] = None):
         logger.info('Performing intersection of two automata of size %d and %d', len(self.states), len(other.states))
         result = MTBDDTransitionFn.compute_nfa_intersection(self, other)
@@ -136,13 +132,14 @@ class MTBDD_NFA(NFA):
         return result
 
     def perform_pad_closure(self):
-        new_final_state = max(self.states) + 1
-        saturation_prop_repaired = self.transition_fn.do_pad_closure(self.initial_states,
-                                                                     self.final_states,
-                                                                     new_final_state)
-        if saturation_prop_repaired:
-            self.states.add(new_final_state)
-            self.final_states.add(new_final_state)
+        result = MTBDDTransitionFn.do_pad_closure2(self)
+        if len(result.states) > len(self.states):
+            self.states = result.states
+            self.final_states = result.final_states
+
+            # Swap transition function so that the currently held mtbdds will be GC'd with `result`
+            self.transition_fn.mtbdds, result.transition_fn.mtbdds = result.transition_fn.mtbdds, self.transition_fn.mtbdds
+
 
     def determinize(self) -> MTBDD_NFA:
         # @Todo: Before simplification, this method previously called: mtbdd union, mtbdd rename, get leaves.
@@ -382,5 +379,5 @@ class MTBDD_NFA(NFA):
 
     def minimize_hopcroft(self) -> MTBDD_NFA:
         """Minimize the underlying automaton using hopcroft's minimization algorithm."""
-        dfa = self.determinize()
-        return MTBDDTransitionFn.minimize_hopcroft(dfa)
+        assert bool(self.automaton_type & AutomatonType.DFA)
+        return MTBDDTransitionFn.minimize_hopcroft(self)
