@@ -178,23 +178,6 @@ mtbdd_wrapper.amaya_mtbdd_get_state_post.argtypes = (
 )
 mtbdd_wrapper.amaya_mtbdd_get_state_post.restype = ct.POINTER(c_side_state_type)
 
-
-mtbdd_wrapper.amaya_begin_pad_closure.argtypes = (
-    c_side_state_type,              # The final state to be added if the saturation property was broken.
-    ct.POINTER(c_side_state_type),  # Array with final states.
-    ct.c_uint32                     # Number of final states
-)
-
-mtbdd_wrapper.amaya_end_pad_closure.argtypes = ()
-
-mtbdd_wrapper.amaya_mtbdd_do_pad_closure.argtypes = (
-    c_side_state_type,   # Left state
-    ct.c_ulong,          # MTBDD left
-    c_side_state_type,   # Right state
-    ct.c_ulong,          # MTBDD right
-)
-mtbdd_wrapper.amaya_mtbdd_do_pad_closure.restype = ct.c_ulong  # New mtbdd
-
 mtbdd_wrapper.amaya_mtbdd_get_transitions.argtypes = (
     ct.c_ulong,                                     # MTBDD root
     ct.POINTER(ct.c_uint32),                        # Array with variables.
@@ -604,134 +587,13 @@ class MTBDDTransitionFn():
                 reversed_adjacency_matrix[destination_state].add(origin_state)
         return reversed_adjacency_matrix
 
-    def do_pad_closure(self, initial_states: Iterable[int], final_states: List[int], new_final_state: int) -> bool:
-        """
-        Ensures padding closure is satisfied.
-
-        Padding closure:
-            Every solution encoding obtained by repeating the sign bit (last one) is accepted.
-
-        Fixing padding closure might create new MTBDDs (as new transitions might be added), and therefore,
-        a reference counting updates are taken care of.
-
-        :returns: True if the saturation property was broken.
-        """
-        # We need adjacency matrix so that we can add the predecessors of the states
-        # for which the transition to a final state was added to the work list
-        adjacency_matrix = self.build_automaton_adjacency_matrix(initial_states)
-        reversed_adjacency_matrix = MTBDDTransitionFn.reverse_adjacency_matrix(adjacency_matrix)
-
-        # Do not start with the final states, instead, start with their predecessors
-        final_states_predecessors: Set[int] = set()
-        for fs in final_states:
-            final_states_predecessors.update(reversed_adjacency_matrix[fs])
-
-        work_list = list(final_states_predecessors)
-        work_set = set(work_list)
-
-        stat_operations_skipped = 0
-        stat_closures_succeeded_cnt = 0
-
-        MTBDDTransitionFn.call_begin_pad_closure(new_final_state, final_states)
-
-        new_final_state_added: bool = False
-        while work_list:
-            logger.debug(f'Padding closure: remaining in work queue: {len(work_list)}')
-
-            state = work_list.pop()
-            work_set.remove(state)
-
-            state_pre_list = reversed_adjacency_matrix[state]
-            for pre_state in state_pre_list:
-
-                # Skip if there are no transitions from the pre-state of from the current state
-                if pre_state not in self.mtbdds or state not in self.mtbdds:
-                    # TODO: Can this even happen?
-                    stat_operations_skipped += 1
-                    continue
-
-                left_mtbdd = self.mtbdds[pre_state]
-                right_mtbdd = self.mtbdds[state]
-
-                patched_left_mtbdd = MTBDDTransitionFn.call_do_pad_closure(pre_state, left_mtbdd,
-                                                                           state, right_mtbdd)
-
-                if patched_left_mtbdd != left_mtbdd:  # The pad closure did have effect.
-                    # Replace the old left mtbdd with the patched and update reference counters accordingly
-                    MTBDDTransitionFn.inc_mtbdd_ref_unsafe(patched_left_mtbdd)
-                    MTBDDTransitionFn.dec_mtbdd_ref_unsafe(left_mtbdd)
-                    self.mtbdds[pre_state] = patched_left_mtbdd
-
-                    stat_closures_succeeded_cnt += 1  # @DeleteMe
-
-                    new_final_state_added = True
-
-                    if pre_state not in work_set:
-                        work_list.append(pre_state)
-                        work_set.add(pre_state)
-
-        MTBDDTransitionFn.call_end_pad_closure()
-        return new_final_state_added
-
     @staticmethod
-    def do_pad_closure2(nfa: MTBDD_NFA) -> MTBDD_NFA:
+    def do_pad_closure(nfa: MTBDD_NFA) -> MTBDD_NFA:
         serialized_nfa = serialize_nfa(nfa)
         serialized_result = mtbdd_wrapper.amaya_perform_pad_closure(serialized_nfa)
         result = deserialize_nfa(serialized_result.contents, nfa.alphabet)
         free_serialized_nfa(serialized_result)
         return result
-
-
-    @staticmethod
-    def call_begin_pad_closure(new_final_state: int, final_states: List[int]):
-        """
-        Performs a call to the C side which initializes structures used when performing pad closure.
-
-        :param new_final_state: The value of the final state to be added if the saturation property was broken.
-        :param final_states:    Final states of the automaton.
-        """
-
-        _new_final_state = c_side_state_type(new_final_state)
-        _final_states_arr = (c_side_state_type * len(final_states))(*final_states)
-        _final_states_cnt = ct.c_uint32(len(final_states))
-
-        mtbdd_wrapper.amaya_begin_pad_closure(_new_final_state,
-                                              _final_states_arr,
-                                              _final_states_cnt)
-
-    @staticmethod
-    def call_do_pad_closure(left_state: int,
-                            left_mtbdd: ct.c_ulong,
-                            right_state: int,
-                            right_mtbdd: ct.c_ulong) -> ct.c_ulong:
-        """
-        Given a state, its predecesor and their MTBDDs, fix the saturation property in the predecesor MTBDD.
-
-        The saturation property is broken if there is a transition to a final state along some symbol S from the state,
-        but there is no such transition along S from the predecessor. This would mean that a word wSS would be accepted
-        from the state, but word wS would not be - two encodings of the same value but one is not accepted.
-
-        :param left_state: The predecessor state to given right_state whose saturation property should be fixed.
-        :param left_mtbdd: The MTBDD encoding transitions from the predecessor state.
-        :param right_state: A state from which a final state is reachable.
-        :param right_mtbdd: The MTBDD encoding transitions from the predecessor state.
-        :returns: A new MTBDD with the saturation property fixed, or the original one (left_mtbdd) if the saturation
-                  property was not broken.
-        """
-
-        resulting_mtbdd = mtbdd_wrapper.amaya_mtbdd_do_pad_closure(
-            c_side_state_type(left_state),
-            left_mtbdd,
-            c_side_state_type(right_state),
-            right_mtbdd
-        )
-        return resulting_mtbdd
-
-    @staticmethod
-    def call_end_pad_closure():
-        '''Performs the call to the C side so that the memory used during pad
-        closure can be freed and other maintenance tasks performed.'''
-        mtbdd_wrapper.amaya_end_pad_closure()
 
     def iter_single_state(self,
                           state: int,

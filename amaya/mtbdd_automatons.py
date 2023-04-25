@@ -132,7 +132,7 @@ class MTBDD_NFA(NFA):
         return result
 
     def perform_pad_closure(self):
-        result = MTBDDTransitionFn.do_pad_closure2(self)
+        result = MTBDDTransitionFn.do_pad_closure(self)
         if len(result.states) > len(self.states):
             self.states = result.states
             self.final_states = result.final_states
