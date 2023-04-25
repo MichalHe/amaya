@@ -150,13 +150,11 @@ class MTBDD_NFA(NFA):
         return dfa
 
     def complement(self) -> MTBDD_NFA:
-        '''Creates the automaton complement. Determinization (and
-        completion with a trapstate) is performed only if the current automaton
-        is not DFA (.automaton_type).
+        """
+        Modifies the automaton instance to accept the complement of the language.
 
-        Note that the complement is peformed to \\sigma^* - \\eps, as the empty
-        word cannot never be contained in a language encoding presburger
-        formula over \\mathcal{Z}.  '''
+        Returns reference to self, no new automaton is created.
+        """
 
         # dfa = self.determinize()
         assert self.automaton_type & AutomatonType.DFA
@@ -167,38 +165,6 @@ class MTBDD_NFA(NFA):
         self.applied_operations_info += ['complement']
         # Do not need to set used_variables here as the determinized automaton already has them set
         return self
-
-    def add_trap_state(self):
-        '''Creates a new state - the trapstate and for every state that
-        does not have an outgoing transition for some alphabet symbol A creates
-        a new transition from the this state via A to this trapstate.'''
-
-        # Some states might not be present in the transition fn - have no
-        # outgoing entries - fix it, so the they will have the transition to
-        # trapstate afterwards
-        logger.debug('MTBDD NFA Adding trapstate...')
-
-        logger.debug('Populating transition function with empty mtbdd where an origin state is missing.')
-        for state in self.states:
-            if state not in self.transition_fn.mtbdds:
-                self.transition_fn.mtbdds[state] = mtbdd_false
-        logger.debug('Done.')
-
-        trapstate = max(self.states) + 1
-        was_trapstate_added = self.transition_fn.complete_transitions_with_trapstate(trapstate)
-        logger.debug(f'Was a trapstate needed? {was_trapstate_added}.')
-
-        if was_trapstate_added:
-            logger.debug(f'The trapstate value is: {trapstate}.')
-            self.trapstate = trapstate
-            self.states.add(self.trapstate)
-
-            all_symbols = tuple(['*'] * len(self.alphabet.variable_numbers))
-
-            self.transition_fn.insert_transition(self.trapstate,
-                                                 all_symbols,
-                                                 self.trapstate
-                                                 )
 
     def do_projection(self, var: int, skip_pad_closure: bool = False):
         logger.info(f'Performing MTBDD NFA projection on variable: {var}. Currently employed variables: {self.used_variables}')
@@ -232,15 +198,14 @@ class MTBDD_NFA(NFA):
 
     @staticmethod
     def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> MTBDD_NFA:
-        '''Creates a new NFA backed by MTBDDs that contains only one state (that is initial
-        and not final) and has loop to self over all alphabet symbols.
+        """
+        Creates an MTBDD NFA with an empty language.
 
         Params:
-            alphabet - The lsbf alphabet for the created automaton.
+            alphabet - The LSBF alphabet for the created automaton.
         Returns:
-            The created (trivial) mtbdd automaton.
-        @TODO: Can we somehow get merge the trivial automatons of plain NFA with ours?
-        '''
+            The created automaton.
+        """
         nfa = MTBDD_NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
         nfa.add_state(0)
         nfa.add_initial_state(0)
@@ -251,14 +216,14 @@ class MTBDD_NFA(NFA):
 
     @staticmethod
     def trivial_accepting(alphabet: LSBF_Alphabet) -> MTBDD_NFA:
-        '''Creates a new NFA backed by MTBDDs that contains only one state (that is initial
-        and and **final**) and has loop to self over all alphabet symbols.
+        """
+        Create a new MTBDD NFA with universal lanugage.
 
         Params:
-            alphabet - The lsbf alphabet for the created automaton.
+            alphabet - The LSBF alphabet for the created automaton.
         Returns:
-            The created (trivial) mtbdd automaton.
-        '''
+            The created automaton.
+        """
         nfa = MTBDD_NFA.trivial_nonaccepting(alphabet)
         nfa.add_final_state(0)  # Just toggle the finality of the rejecting state
         return nfa
@@ -302,8 +267,7 @@ class MTBDD_NFA(NFA):
         return None
 
     def get_visualization_representation(self) -> AutomatonVisRepresentation:
-
-        '''Returns a structure carrying all necessary information to visualize this automaton.'''
+        """Returns a structure carrying all necessary information to visualize this automaton."""
         # Most of the information is already present, the only thing remaining
         # is to collect the transition function stored within the mtbdds.
         def replace_dont_care_bits_with_star(symbol):
