@@ -10,7 +10,9 @@ from amaya.automatons import NFA
 def assert_dfas_isomorphic(actual: NFA, expected: NFA):
     assert len(actual.initial_states) == 1
     assert len(actual.initial_states) == len(expected.initial_states)
-    assert set(actual.used_variables) == set(expected.used_variables)
+    assert len(actual.final_states) == len(expected.final_states)
+    assert len(actual.states) == len(expected.states), f'{len(actual.states)=} {len(expected.states)=}'
+    assert set(actual.used_variables) == set(expected.used_variables), f'{actual.used_variables=} {expected.used_variables}'
 
     isomorphism: Dict[int, int] = {next(iter(actual.initial_states)): next(iter(expected.initial_states))}
 
@@ -26,7 +28,7 @@ def assert_dfas_isomorphic(actual: NFA, expected: NFA):
             assert len(actual_post) == len(expected_post)
             if not actual_post:
                 continue
-            assert len(actual_post) == 1
+            assert len(actual_post) == 1, f'Post from state {actual_state}: {actual_post}'
             actual_dest, expected_dest = next(iter(actual_post)), next(iter(expected_post))
             if actual_dest in isomorphism:
                 assert isomorphism[actual_dest] == expected_dest
