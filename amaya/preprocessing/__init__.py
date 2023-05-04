@@ -173,6 +173,24 @@ def _rewrite_terms_in_relations(relations: List[Relation],
     return relations_to_propagate, binding_list, atoms
 
 
+def convert_ast_to_evaluable_form(ast: AST_NaryNode):
+    """
+    Implementation notes:
+        - a table of all so-far seen term bodies has to be kept so we use the same TermRef for same terms
+        - a function to make make the exprs inside the term canoical is required for the same reasons
+
+    Example:
+        Input: ['<=', ['mod', ['mod', 'x', 3], 4], ['mod', 'x', 3]]
+        Output:
+            [TermInfo(id=1, body=('mod', 'x', 3), supports=[2]), TermInfo(id=2, body=['mod', TermRef(id=1), 4], supports=[])]
+            [Relation(Term(id=2) - Term(id=1) <= 0)]
+        Further evaluation:
+            The relation is kept in position. The term info table (id -> term_info) is propagated upwards, until an existential
+            quantifier binding a variable in one of the *leaves* is found, triggerring the drop of some of the terms. The dropped
+            stuff should likely be only an instruction for a second pass that removes TermRefs and adds actual variables instead.
+    """
+
+
 def _rewrite_nonlinear_terms(ast: AST_NaryNode, rewrite_info: TermRewrites) -> Tuple[List[Relation], AST_NaryNode]:
     if isinstance(ast, Relation):
         relation: Relation = ast
@@ -215,6 +233,13 @@ def _rewrite_nonlinear_terms(ast: AST_NaryNode, rewrite_info: TermRewrites) -> T
 
 
 def rewrite_nonlinear_terms(ast: AST_NaryNode) -> AST_NaryNode:
+    """
+    Rewrite mod and div terms using existential quantifier.
+
+    The non-linear terms that have to be rewritten are propagated up the AST tree,
+    until an existential quantifier that bounds a variable inside the term is found.
+    The term is then rewritten at the same level as the existential quantifier.
+    """
     rewrite_info = TermRewrites(count=0)
     relations_with_nonlinear_terms, rewritten_formula = _rewrite_nonlinear_terms(ast, rewrite_info)
 

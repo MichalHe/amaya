@@ -43,8 +43,10 @@ from amaya.config import (
 import amaya.presburger.constructions.naturals as relations_to_dfa
 import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
+
 from amaya.preprocessing import (
     antiprenexing,
+    eval as ast_eval_lib,
     prenexing,
 )
 import amaya.preprocessing.unbound_vars as var_bounds_lib
@@ -511,8 +513,10 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             bool_symbols = {
                 var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL
             }
-            formula_to_evaluate = preprocessing.condense_relation_asts_to_relations(formula_to_evaluate, bool_symbols)
-            formula_to_evaluate = preprocessing.rewrite_nonlinear_terms(formula_to_evaluate)
+            formula_to_evaluate, _ = ast_eval_lib.convert_ast_into_evaluable_form(formula_to_evaluate, bool_symbols)
+            logger.info('Created following evaluable AST: %s', formula_to_evaluate)
+
+            # formula_to_evaluate = preprocessing.rewrite_nonlinear_terms(formula_to_evaluate)
 
             if solver_config.preprocessing.simplify_variable_bounds:
                 logger.info(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)

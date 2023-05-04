@@ -16,6 +16,7 @@ from typing import (
 )
 
 
+# @Todo: get rid of this
 @dataclass
 class PresburgerExpr:
     absolute_part: int = 0
@@ -492,3 +493,34 @@ class Relation(object):
                         div_terms=list(relation.div_terms),
                         div_term_coefficients=list(relation.div_term_coefficients),
                         absolute_part=relation.absolute_part, predicate_symbol=relation.predicate_symbol)
+
+    def __eq__(self, other: Relation) -> bool:
+        if not isinstance(other, Relation):
+            return False
+        if self.predicate_symbol != other.predicate_symbol:
+            return False
+        if self.absolute_part != other.absolute_part:
+            return False
+        if len(self.variable_names) != len(other.variable_names):
+            return False
+
+        # Convert to dictionaries as want comparison regardless of variable order
+        self_lin_term = {var: coef for var, coef in zip(self.variable_names, self.variable_coefficients)}
+        other_lin_term = {var: coef for var, coef in zip(other.variable_names, other.variable_coefficients)} 
+
+        return self_lin_term == other_lin_term
+
+
+@dataclass
+class Congruence:
+    """A congruence a_1 * c_1 ... = rhs (mod modulus)"""
+    vars: List[str]
+    coefs: List[int]
+    rhs: int
+    modulus: int
+
+
+@dataclass
+class BoolLiteral:
+    """True or False formula"""
+    value: bool
