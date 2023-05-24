@@ -6,8 +6,12 @@ from enum import Enum
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from amaya import logger
-from amaya.ast_definitions import AST_NaryNode
-from amaya.relations_structures import BoolLiteral, Congruence, DivTerm, ModuloTerm, Relation
+from amaya.relations_structures import (
+    AST_NaryNode,
+    BoolLiteral,
+    Congruence,
+    Relation,
+)
 
 
 class NonlinTermType(Enum):

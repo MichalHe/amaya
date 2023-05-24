@@ -15,8 +15,12 @@ from typing import (
     Union,
 )
 
-from amaya.ast_definitions import AST_NaryNode,  AST_Node
-from amaya.relations_structures import ModuloTerm, Relation
+from amaya.relations_structures import (
+    AST_NaryNode,
+    AST_Node,
+    ModuloTerm,
+    Relation,
+)
 
 
 @dataclass

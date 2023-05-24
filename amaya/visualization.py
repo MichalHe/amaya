@@ -24,8 +24,7 @@ from amaya.alphabet import (
     LSBF_AlphabetSymbol,
     uncompress_transition_symbol,
 )
-from amaya.ast_definitions import AST_Node
-from amaya.relations_structures import Relation
+from amaya.relations_structures import AST_Node, Relation
 import amaya.semantics_tracking as state_semantics_lib
 from amaya.semantics_tracking import AH_Node
 from amaya.utils import (

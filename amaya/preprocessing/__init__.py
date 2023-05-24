@@ -14,21 +14,15 @@ from typing import (
     Union,
 )
 
-from amaya.ast_definitions import (
+import amaya.ast_relations as relations
+from amaya.relations_structures import (
     AST_Leaf,
     AST_NaryNode,
     AST_Node,
     FunctionSymbol,
     NodeEncounteredHandler,
     NodeEncounteredHandlerStatus,
-)
-import amaya.ast_relations as relations
-from amaya.relations_structures import (
-    DivTerm,
-    ModuloTerm,
     Relation,
-    RewritableTerm,
-    TermRewrites,
 )
 from amaya.preprocessing.ite_preprocessing import (
     rewrite_ite_expressions,
@@ -68,187 +62,7 @@ def is_ast_bool_equavalence(ast: AST_Node, bool_fn_symbols: Set[str]):
     )
 
 
-def generate_atomic_constraints_for_replaced_terms(rewrites: Dict[RewritableTerm, str]) -> List[Relation]:
-    """
-    Generate the atomic constraints to semantically bind the introduced variable with the original term.
-
-    The returned constraints are sorted according to the predicted size of their automata in an ascending order.
-
-    :param rewrites: Information about what term was replaced by what variable.
-    """
-    constraints: List[Relation] = []
-    for term, variable in rewrites.items():
-        if isinstance(term, ModuloTerm):
-            reminder_lower_bound = Relation.new_lin_relation(variable_names=[variable],
-                                                             variable_coefficients=[-1], absolute_part=0, predicate_symbol='<=')
-
-            reminder_upper_bound = Relation.new_lin_relation(variable_names=[variable],
-                                                             variable_coefficients=[1], predicate_symbol='<=',
-                                                             absolute_part=term.modulo - 1)
-
-            # The difference of the original variables and the rewrite variable should be congruent to 0
-            modulo_term = ModuloTerm(variables=term.variables + (variable,),
-                                     variable_coefficients=term.variable_coefficients + (-1,),
-                                     constant=term.constant, modulo=term.modulo)
-
-            modulo_term = modulo_term.into_sorted()
-            congruence = Relation.new_congruence_relation(modulo_terms=[modulo_term], modulo_term_coefficients=[1])
-
-            constraints.extend((reminder_lower_bound, reminder_upper_bound, congruence))
-        else:
-            _vars = term.variables + (variable,)
-            _var_coefs = term.variable_coefficients + (-term.divisor,)
-
-            # Sort the variables and their coefficients according to their names
-            _vars, _var_coefs = zip(*sorted(zip(_vars, _var_coefs), key=lambda pair: pair[0]))
-
-            # Create bounds limiting the divisor so that the original_expr - divisor*var gives a reminder as
-            # when performing integer division
-            reminder_lower_bound = Relation.new_lin_relation(variable_names=list(_vars),
-                                                             variable_coefficients=[-coef for coef in _var_coefs],
-                                                             absolute_part=0, predicate_symbol='<=')
-
-            reminder_upper_bound = Relation.new_lin_relation(variable_names=list(_vars),
-                                                             variable_coefficients=list(_var_coefs),
-                                                             absolute_part=term.divisor - 1,
-                                                             predicate_symbol='<=')
-            constraints.extend((reminder_lower_bound, reminder_upper_bound))
-
-    return sorted(constraints, key=lambda constraint: constraint.calc_approximate_automaton_size())
-
-
-def condense_relation_asts_to_relations(ast: AST_NaryNode, bool_fn_symbols: Set[str]) -> AST_Node:
-    """Walks the AST and replaces subtrees representing atoms with Relation instances."""
-    if not isinstance(ast, list):
-        return ast
-
-    node_type = ast[0]
-
-    if node_type in ['<', '>', '<=', '>=', '=']:
-        # The = symbol can stand for either equivalence of two formulae, or Presbuger equality
-        if not (node_type == '=' and is_ast_bool_equavalence(ast, bool_fn_symbols)):
-            relation = relations.extract_relation(ast)
-            relation.ensure_canoical_form_if_equation()
-            return relation
-
-    reduced_subtrees = (
-        condense_relation_asts_to_relations(subtree, bool_fn_symbols) for subtree in ast[1:]
-    )
-    return [node_type, *reduced_subtrees]
-
-
 BindingList = List[List[str]]
-
-
-def _rewrite_terms_in_relations(relations: List[Relation],
-                                rewrite_info: TermRewrites,
-                                vars_in_rewritten_terms: Optional[Set[str]] = None) -> Tuple[List[Relation], BindingList, List[Relation]]:
-    # We don't want to rewrite modulo terms if they occur only once and that is in the form of congruence
-    mod_term_uses: Dict[RewritableTerm, List[Relation]] = collections.defaultdict(list)
-    for relation in relations:
-        for term in relation.modulo_terms:
-            mod_term_uses[term].append(relation)
-
-    def is_only_in_congruence(term_relations: List[Relation]) -> bool:
-        return len(term_relations) == 1 and term_relations[0].is_congruence_equality()
-
-    congruence_relations = [
-        term_relations[0] for term, term_relations in mod_term_uses.items() if is_only_in_congruence(term_relations)
-    ]
-
-    vars_rewriting_terms: Dict[RewritableTerm, str] = {}
-    relations_to_propagate: List[Relation] = []
-    for relation in relations:
-
-        # @Optimize: This performs a linear search in the list of relations, but there should not be many of them
-        if relation in congruence_relations:
-            continue
-
-        relation.replace_chosen_nonlinear_terms_with_variables(vars_in_rewritten_terms, vars_rewriting_terms, rewrite_info)
-        if relation.modulo_terms or relation.div_terms:
-            relations_to_propagate.append(relation)
-    binding_list = [[var, 'Int'] for var in vars_rewriting_terms.values()]
-
-    atoms = generate_atomic_constraints_for_replaced_terms(vars_rewriting_terms)
-    return relations_to_propagate, binding_list, atoms
-
-
-def convert_ast_to_evaluable_form(ast: AST_NaryNode):
-    """
-    Implementation notes:
-        - a table of all so-far seen term bodies has to be kept so we use the same TermRef for same terms
-        - a function to make make the exprs inside the term canoical is required for the same reasons
-
-    Example:
-        Input: ['<=', ['mod', ['mod', 'x', 3], 4], ['mod', 'x', 3]]
-        Output:
-            [TermInfo(id=1, body=('mod', 'x', 3), supports=[2]), TermInfo(id=2, body=['mod', TermRef(id=1), 4], supports=[])]
-            [Relation(Term(id=2) - Term(id=1) <= 0)]
-        Further evaluation:
-            The relation is kept in position. The term info table (id -> term_info) is propagated upwards, until an existential
-            quantifier binding a variable in one of the *leaves* is found, triggerring the drop of some of the terms. The dropped
-            stuff should likely be only an instruction for a second pass that removes TermRefs and adds actual variables instead.
-    """
-
-
-def _rewrite_nonlinear_terms(ast: AST_NaryNode, rewrite_info: TermRewrites) -> Tuple[List[Relation], AST_NaryNode]:
-    if isinstance(ast, Relation):
-        relation: Relation = ast
-
-        rewrite_candidate = [relation] if relation.modulo_terms or relation.div_terms else []
-        return (rewrite_candidate, relation)
-
-    if isinstance(ast, str):
-        return ([], ast)
-
-    node_type = ast[0]
-
-    if node_type in ('or', 'and', 'not', '='):
-        rewrite_results = (_rewrite_nonlinear_terms(subtree, rewrite_info) for subtree in ast[1:])
-
-        subtree_relations, subtrees = zip(*rewrite_results)
-        subtree_relations = itertools.chain(*subtree_relations)
-
-        return (list(subtree_relations), [node_type, *subtrees])
-    elif node_type == 'exists':
-        subtree = ast[2]
-        quantified_vars = set(var for var, _type in ast[1])
-
-        relations, rewritten_subtree = _rewrite_nonlinear_terms(subtree, rewrite_info)
-
-        relations_to_propagate, binding_list, new_atoms = _rewrite_terms_in_relations(relations, rewrite_info, quantified_vars)
-
-        if new_atoms:
-            term_vars_limits = ['and', *new_atoms]
-            if isinstance(rewritten_subtree, list) and rewritten_subtree[0] == 'and':
-                term_vars_limits += rewritten_subtree[1:]
-            else:
-                term_vars_limits.append(rewritten_subtree)
-            rewritten_subtree = term_vars_limits
-
-        extended_binding_list = ast[1] + binding_list
-        return (relations_to_propagate, ['exists', extended_binding_list, rewritten_subtree])
-
-    raise ValueError(f'Unknown node: {node_type=} {ast=}')
-
-
-def rewrite_nonlinear_terms(ast: AST_NaryNode) -> AST_NaryNode:
-    """
-    Rewrite mod and div terms using existential quantifier.
-
-    The non-linear terms that have to be rewritten are propagated up the AST tree,
-    until an existential quantifier that bounds a variable inside the term is found.
-    The term is then rewritten at the same level as the existential quantifier.
-    """
-    rewrite_info = TermRewrites(count=0)
-    relations_with_nonlinear_terms, rewritten_formula = _rewrite_nonlinear_terms(ast, rewrite_info)
-
-    # Some relations might contain terms consisting entirely of free variables
-    if relations_with_nonlinear_terms:
-        reminding_relations, binding_list, new_atoms = _rewrite_terms_in_relations(relations_with_nonlinear_terms, rewrite_info, vars_in_rewritten_terms=None)  # Rewrite all
-        return ['exists', binding_list, ['and', *new_atoms, rewritten_formula]]
-
-    return rewritten_formula
 
 
 def ast_iter_subtrees(root_node: AST_Node) -> Generator[Tuple[AST_Node, Tuple[AST_NaryNode, int]], None, None]:
@@ -357,8 +171,7 @@ def copy_ast(ast: Arbitrary_AST) -> Arbitrary_AST:
     return [copy_ast(item) for item in ast]
 
 
-def expand_let_macros(ast: AST_Node,
-                         macro_def_scopes: List[Dict[str, AST_Node]]):
+def expand_let_macros(ast: AST_Node, macro_def_scopes: List[Dict[str, AST_Node]]):
     """Perform let macro expansion."""
     if not isinstance(ast, list):
         # We've encountered a string leaf, check if it is bound to something, if yes, expand it.

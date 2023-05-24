@@ -5,8 +5,10 @@ from typing import (
     Tuple,
 )
 
-from amaya.ast_definitions import AST_Node
-from amaya.relations_structures import Relation
+from amaya.relations_structures import (
+    AST_Node,
+    Relation,
+)
 
 
 @dataclass

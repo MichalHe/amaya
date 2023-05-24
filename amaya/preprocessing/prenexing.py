@@ -9,8 +9,11 @@ from typing import (
     Tuple,
 )
 
-from amaya.ast_definitions import AST_Node, AST_NaryNode
-from amaya.relations_structures import Relation
+from amaya.relations_structures import (
+    AST_Node,
+    AST_NaryNode,
+    Relation,
+)
 
 class QuantifierPolarity(IntEnum):
     EXISTS = 0

@@ -15,19 +15,6 @@ from typing import (
     Sequence,
 )
 
-from amaya.ast_definitions import (
-    AST_NaryNode,
-    AST_Node,
-    FunctionSymbol,
-    NodeEncounteredHandlerStatus,
-    VariableType,
-)
-from amaya.ast_relations import (
-    ModuloTerm,
-    Relation,
-    expand_relation_on_ite,
-    try_retrieve_variable_if_literal,
-)
 from amaya.automatons import (
     AutomatonType,
     LSBF_Alphabet,
@@ -43,14 +30,22 @@ from amaya.config import (
 import amaya.presburger.constructions.naturals as relations_to_dfa
 import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
-
 from amaya.preprocessing import (
     antiprenexing,
     eval as ast_eval_lib,
     prenexing,
 )
 import amaya.preprocessing.unbound_vars as var_bounds_lib
-from amaya.relations_structures import BoolLiteral, Congruence
+from amaya.relations_structures import (
+    AST_NaryNode,
+    AST_Node,
+    BoolLiteral,
+    Congruence,
+    FunctionSymbol,
+    NodeEncounteredHandlerStatus,
+    Relation,
+    VariableType,
+)
 from amaya.tokenize import tokenize
 from amaya.semantics_tracking import (
     AH_Atom,
@@ -523,8 +518,6 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             }
             formula_to_evaluate, _ = ast_eval_lib.convert_ast_into_evaluable_form(formula_to_evaluate, bool_symbols)
             logger.info('Created following evaluable AST: %s', formula_to_evaluate)
-
-            # formula_to_evaluate = preprocessing.rewrite_nonlinear_terms(formula_to_evaluate)
 
             if solver_config.preprocessing.simplify_variable_bounds:
                 logger.info(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)

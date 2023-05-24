@@ -9,13 +9,13 @@ from typing import (
     Tuple,
 )
 
-from amaya.ast_definitions import (
+from amaya.relations_structures import (
     AST_Leaf,
     AST_NaryNode,
     AST_Node,
     NodeEncounteredHandlerStatus,
+    Relation,
 )
-from amaya.relations_structures import Relation
 from amaya.utils import number_to_bit_tuple
 
 
