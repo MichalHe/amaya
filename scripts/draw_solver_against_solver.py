@@ -7,6 +7,7 @@ import math
 import pprint
 from typing import (
     Dict,
+    List,
     Tuple,
 )
 
@@ -23,7 +24,7 @@ def draw_single_plot(solver_pair: Tuple[str, str], data: Dict[str, np.array], ta
     x_solver_data = data[solver_pair[0]]
     y_solver_data = data[solver_pair[1]]
 
-    target_axis.scatter(x_solver_data, y_solver_data, marker='x')
+    target_axis.scatter(x_solver_data, y_solver_data, marker='1', color='red', s=40)
 
     def calc_limit(bound_val, margin_growth_fun, margin_rounding_fun):
         if bound_val < 0.005:
@@ -67,6 +68,7 @@ def draw_single_plot(solver_pair: Tuple[str, str], data: Dict[str, np.array], ta
 def make_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('results_csv')
+    parser.add_argument('-t', '--title')
     return parser
 
 
@@ -94,12 +96,19 @@ if __name__ == '__main__':
     args = parser.parse_args()
     data = load_data_from_csv(args.results_csv)
 
-    solver_pairs = list(itertools.combinations(data, 2))
-    fig, axs = plt.subplots(nrows=len(solver_pairs), figsize=(5, 14))
+    solver_pairs: List[Tuple[str, str]] = list(itertools.combinations(data, 2))
+    fig, axs = plt.subplots(nrows=len(solver_pairs), figsize=(5, 5))
+
+    if not isinstance(axs, tuple):
+        axs = (axs,)
+
+    if args.title:
+        fig.suptitle(args.title)
+
     fig.tight_layout()
-    fig.subplots_adjust(hspace=0.2, bottom=0.05)
+    fig.subplots_adjust(hspace=0.2, left=0.15, bottom=0.1)
 
     for solver_pair, ax in zip(solver_pairs, axs):
-        draw_single_plot(sorted(solver_pair), data, ax)
+        draw_single_plot(tuple(sorted(solver_pair)), data, ax)
     plt.savefig('output.pdf', dpi=600)
 
