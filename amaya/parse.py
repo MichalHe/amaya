@@ -50,6 +50,7 @@ from amaya.preprocessing import (
     prenexing,
 )
 import amaya.preprocessing.unbound_vars as var_bounds_lib
+from amaya.relations_structures import BoolLiteral
 from amaya.tokenize import tokenize
 from amaya.semantics_tracking import (
     AH_Atom,
@@ -345,6 +346,8 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
     """
 
     if not isinstance(tree, list):
+        if isinstance(tree, BoolLiteral):
+            return set()
         if isinstance(tree, Relation):
             # Register all the variables located in the Presburger formula
             variables_used: Set[Tuple[str, int, VariableType]] = set()
@@ -539,7 +542,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             # formula does not talk about these variables, they are not needed during the procedure and they would only
             # slow down the procedure. At the moment we don't generate values for these variables in a model.
             # @Note: Not sure whether they need to be a part of the generated model, check with Z3
-            unused_global_function_constant_offset = min(var_info[1] for var_info in all_vars) - 1
+            unused_global_function_constant_offset = min((var_info[1] for var_info in all_vars), default=1) - 1
             vars_with_ids = [
                 (var_name, (var_id - unused_global_function_constant_offset)) for var_name, var_id, _ in all_vars
             ]
@@ -926,6 +929,8 @@ def run_evaluation_procedure(ast: AST_Node,
     """
 
     if not isinstance(ast, list):
+        if isinstance(ast, BoolLiteral):
+            return NFA.trivial_accepting(ctx.get_alphabet()) if ast.value else NFA.trivial_nonaccepting(ctx.get_alphabet())
         if isinstance(ast, Relation):
             return build_automaton_from_presburger_relation_ast(ast, ctx, _debug_recursion_depth)
 

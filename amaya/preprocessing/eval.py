@@ -277,6 +277,8 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
 
     if node_type == 'not':
         child, child_ast_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars)
+        if isinstance(child, BoolLiteral):
+            return BoolLiteral(value=not child.value), child_ast_info
         return ['not', child], child_ast_info
 
     if node_type == 'exists':
@@ -286,11 +288,19 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
         child, child_ast_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars)
 
         binding_list = [[var, type] for var, type in ast[1] if var in child_ast_info.used_vars]
+        if not binding_list:
+            # The underlying AST could be x = x, which would be reduced to BoolLiteral(True). Remove the quantifier
+            # all together
+            return child, child_ast_info
+
         new_node.append(binding_list)  # type: ignore
+
+        # Child's AST Info will represent this node - remove all currently bound variables
         for var in bound_vars:
             if var in child_ast_info.used_vars:  # A variable might be not be used e.g when x + y = x
                 child_ast_info.used_vars.remove(var)
 
+        # Try dropping any of the bound vars - collect nonlinear terms (graph nodes) that have to be instantiated
         dropped_nodes = []
         for var in bound_vars:
             dropped_nodes += dep_graph.drop_nodes_for_var(var)
@@ -306,7 +316,6 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
                 child = ['and', child] + new_atoms
             new_node[1] += [[term_node.var, 'Int'] for term_node in dropped_nodes]  # type: ignore
 
-        assert isinstance(new_node, list)
         new_node.append(child)
 
         return new_node, child_ast_info
