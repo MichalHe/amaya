@@ -1,8 +1,10 @@
 from __future__ import annotations
 import math
 from typing import (
+    Dict,
     List,
     Optional,
+    Set,
     Tuple,
     Type,
 )
@@ -16,11 +18,10 @@ from amaya import logger
 from amaya.presburger.definitions import (
     AliasStore,
     AutomatonConstructor,
-    can_build_modulo_automaton,
     DFA_AutomatonStateType,
     ModuloTermStateComponent,
 )
-from amaya.relations_structures import Relation
+from amaya.relations_structures import Congruence, Relation
 from amaya.semantics_tracking import (
     AH_Atom,
     AH_AtomType,
@@ -167,18 +168,15 @@ def build_dfa_from_linear_equality(nfa_type: Type[NFA],
     return dfa
 
 
-def build_presburger_modulo_dfa(nfa_type: Type[NFA],
-                                alphabet: LSBF_Alphabet,
-                                congruence: Relation,
-                                eq_var_id_pairs: List[Tuple[str, int]]) -> DFA:
+def build_presburger_congruence_dfa(nfa_type: Type[NFA],
+                                    alphabet: LSBF_Alphabet,
+                                    congruence: Congruence,
+                                    eq_var_id_pairs: List[Tuple[str, int]]) -> DFA:
     """
     Construct a DFA acception the solutions (natural numbers) of the given congruence of the form `(a.x mod C) = K`.
     """
 
-    logger.info('Building modulo-DFA for provided relation: %s', congruence)
-
-    can_construct_automaton = can_build_modulo_automaton(congruence)
-    assert can_construct_automaton is True, f'Cannot construct automaton for {equality}: {can_construct_automaton}'
+    logger.info('Building DFA for provided congruence: %s', congruence)
 
     state_semantics = AH_Atom(atom_type=AH_AtomType.PRESBURGER_CONGRUENCE, atom=congruence)
     dfa: DFA = nfa_type(alphabet=alphabet, automaton_type=AutomatonType.DFA, state_semantics=state_semantics)
@@ -191,13 +189,11 @@ def build_presburger_modulo_dfa(nfa_type: Type[NFA],
         (var_id_pair[0], i) for i, var_id_pair in enumerate(eq_var_id_pairs)
     )
 
-    modulo_term = congruence.modulo_terms[0]
-
-    vars_with_coefs = zip(modulo_term.variables, modulo_term.variable_coefficients)
+    vars_with_coefs = zip(congruence.vars, congruence.coefs)
     variable_coefs_ord_by_track = sorted(vars_with_coefs, key=lambda vc: variable_name_to_track_index[vc[0]])
 
-    initial_state = ModuloTermStateComponent(value=congruence.absolute_part,
-                                             modulo=modulo_term.modulo,
+    initial_state = ModuloTermStateComponent(value=congruence.rhs,
+                                             modulo=congruence.modulus,
                                              variable_coefficients=tuple(vc[1] for vc in variable_coefs_ord_by_track))
 
     print(f'{initial_state.variable_coefficients=}')

@@ -8,6 +8,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Type,
     Union,
 )
 
@@ -20,11 +21,10 @@ from amaya import logger
 from amaya.presburger.definitions import(
     AliasStore,
     AutomatonConstructor,
-    can_build_modulo_automaton,
     NFA_AutomatonStateType,
     ModuloTermStateComponent,
 )
-from amaya.relations_structures import Relation
+from amaya.relations_structures import Congruence, Relation
 from amaya.utils import vector_dot
 from amaya.semantics_tracking import (
     AH_Atom,
@@ -199,10 +199,10 @@ def build_nfa_from_linear_equality(nfa_type: Type[NFA],
     return nfa
 
 
-def build_presburger_modulo_nfa(nfa_type: Type[NFA],
-                                alphabet: LSBF_Alphabet,
-                                relation: Relation,
-                                relation_variables_with_ids: List[Tuple[str, int]]) -> NFA:
+def build_presburger_congruence_nfa(nfa_type: Type[NFA],
+                                    alphabet: LSBF_Alphabet,
+                                    congruence: Congruence,
+                                    relation_variables_with_ids: List[Tuple[str, int]]) -> NFA:
     """
     Builds an NFA encoding the solutions to given congurence relation.
 
@@ -212,13 +212,11 @@ def build_presburger_modulo_nfa(nfa_type: Type[NFA],
                                         Required so we know which tracks of the overall alphabet are used.
     """
 
-    logger.info('Building modulo-NFA for provided relation: %s', relation)
+    logger.info('Building NFA for provided congruence: %s', congruence)
 
     nfa = nfa_type(automaton_type=AutomatonType.NFA,
                    alphabet=alphabet,
-                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_CONGRUENCE, atom=relation))
-
-    assert can_build_modulo_automaton(relation)
+                   state_semantics=AH_Atom(atom_type=AH_AtomType.PRESBURGER_CONGRUENCE, atom=congruence))
 
     variable_name_to_id: Dict[str, int] = dict(relation_variables_with_ids)
     variable_ids = sorted(variable_name_to_id.values())
@@ -228,10 +226,9 @@ def build_presburger_modulo_nfa(nfa_type: Type[NFA],
     for i, variable_id_pair in enumerate(relation_variables_with_ids):
         variable_name_to_track_index[variable_id_pair[0]] = i
 
-    modulo_term = relation.modulo_terms[0]
-    initial_state = ModuloTermStateComponent(value=relation.absolute_part,
-                                             modulo=modulo_term.modulo,
-                                             variable_coefficients=tuple(modulo_term.variable_coefficients))
+    initial_state = ModuloTermStateComponent(value=congruence.rhs,
+                                             modulo=congruence.modulus,
+                                             variable_coefficients=tuple(congruence.coefs))
 
     alias_store = AliasStore()
     work_list: List[ModuloTermStateComponent] = [initial_state]
@@ -267,7 +264,7 @@ def build_presburger_modulo_nfa(nfa_type: Type[NFA],
             nfa.update_transition_fn(current_state_alias, cylindrified_symbol, destination_state_alias)
 
             # Make nondeterministic guess that the current symbol is the last on the input tape.
-            value_with_symbol_interp_as_sign = current_state.value + vector_dot(symbol, modulo_term.variable_coefficients)
+            value_with_symbol_interp_as_sign = current_state.value + vector_dot(symbol, congruence.coefs)
             if (value_with_symbol_interp_as_sign % current_state.modulo) == 0:
                 partial_transition_to_final_state = (current_state_alias, cylindrified_symbol)
                 transitions_to_final_state.append(partial_transition_to_final_state)

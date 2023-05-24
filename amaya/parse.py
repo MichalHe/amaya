@@ -50,7 +50,7 @@ from amaya.preprocessing import (
     prenexing,
 )
 import amaya.preprocessing.unbound_vars as var_bounds_lib
-from amaya.relations_structures import BoolLiteral
+from amaya.relations_structures import BoolLiteral, Congruence
 from amaya.tokenize import tokenize
 from amaya.semantics_tracking import (
     AH_Atom,
@@ -348,22 +348,27 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
     if not isinstance(tree, list):
         if isinstance(tree, BoolLiteral):
             return set()
+
         if isinstance(tree, Relation):
             # Register all the variables located in the Presburger formula
             variables_used: Set[Tuple[str, int, VariableType]] = set()
             for variable_name in tree.variable_names:
                 var_info = ctx.get_variable_info(variable_name)
-                var_info.usage_count += 1  # The variable was used somewhere
+                var_info.usage_count += 1
                 variables_used.add((var_info.name, var_info.id, var_info.type))
 
-            for modulo_term in tree.modulo_terms:
-                for variable_name in modulo_term.variables:
-                    var_info = ctx.get_variable_info(variable_name)
-                    var_info.usage_count += 1  # The variable was used somewhere
-                    variables_used.add((var_info.name, var_info.id, var_info.type))
-
-            # @Broken: This does not consider div terms, however, it should.
+            assert not tree.modulo_terms
+            assert not tree.div_terms
             return variables_used
+
+        if isinstance(tree, Congruence):
+            vars_used = set()
+            for var in tree.vars:
+                var_info = ctx.get_variable_info(var)
+                var_info.usage_count += 1
+                vars_used.add((var_info.name, var_info.id, var_info.type))
+            return vars_used
+
 
         # Tree is a reference to a normal variable, consult with context whether this is the first encounter
         # @FIXME: We should not declare a new variable on the spot as it has not been declared - we don't know its type.
@@ -559,6 +564,27 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     return (nfa, smt_info)
 
 
+def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> NFA:
+    """ Construct an automaton accepting the solutions of the given congruence """
+    var_id_pairs = sorted(ctx.get_multiple_variable_ids(congruence.vars), key=lambda pair: pair[1])
+    vars, coefs = utils.reorder_variables_according_to_ids(var_id_pairs, (congruence.vars, congruence.coefs))
+
+    ordered_congruence = Congruence(vars=vars, coefs=coefs, rhs=congruence.rhs, modulus=congruence.modulus)
+
+    logger.debug(f'Reordered congruence from: %s to %s', congruence, ordered_congruence)
+
+    # The alphabet might have only variable IDs but no names assigned to them yet, bind the variable names to IDs
+    # so that we can do vizualization properly
+    assert ctx.alphabet
+    ctx.alphabet.assert_variable_names_to_ids_match(var_id_pairs)
+
+    constr = ctx.get_automaton_class_for_current_backend()
+    nfa = relations_to_nfa.build_presburger_congruence_nfa(constr, ctx.alphabet, congruence, var_id_pairs)
+
+    ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.BUILD_NFA_FROM_CONGRUENCE)
+    return nfa
+
+
 def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: EvaluationContext, depth: int) -> NFA:
     """
     Construct an automaton corresponding to the given relation.
@@ -584,8 +610,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
     logger.debug('Building an automaton for: %s', relation)
     if relation.is_always_satisfied():
-        logger.info(f'Encountered relation that is always true: {relation}, returning trivial accepting automaton.')
-        return automaton_constr.trivial_accepting(ctx.alphabet)
+        raise ValueError(f'Found {relation} that is trivially always SAT, but preprocessing did not produce BoolLiteral.')
 
     # We should never encounter the '<' inequality as we are always converting it to the <=
     assert relation.predicate_symbol in ('<=', '=')
@@ -593,6 +618,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
     # Congruence relations of the form a.x ~ k must be handled differently - it is necessary to reorder
     # the modulo term inside, not the nonmodular variables
+
     if relation.is_congruence_equality():
         logger.debug(f'Given relation: %s is congruence equivalence. Reordering variables.', relation)
         modulo_term = relation.modulo_terms[0]
@@ -931,6 +957,10 @@ def run_evaluation_procedure(ast: AST_Node,
     if not isinstance(ast, list):
         if isinstance(ast, BoolLiteral):
             return NFA.trivial_accepting(ctx.get_alphabet()) if ast.value else NFA.trivial_nonaccepting(ctx.get_alphabet())
+
+        if isinstance(ast, Congruence):
+            return make_nfa_for_congruence(ast, ctx)
+
         if isinstance(ast, Relation):
             return build_automaton_from_presburger_relation_ast(ast, ctx, _debug_recursion_depth)
 

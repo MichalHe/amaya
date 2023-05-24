@@ -26,30 +26,6 @@ NFA_AutomatonStateType = int
 AutomatonConstructor = Callable[[LSBF_Alphabet, AutomatonType], NFA]
 
 
-def can_build_modulo_automaton(relation: Relation) -> Union[bool, str]:
-    """
-    Asserts that the relation has `(a.x mod C) = K` form, and thus, a modulo automaton can be constructed for it.
-
-    The equality must contain only 1 modulo term and no other freestanding variable terms.
-
-    :param relation: Relation for which a modulo automaton wants to be constructed.
-    :returns: True if the relation has correct form, otherwise a string containing information about what is wrong with its structure.
-    """
-    
-    correct_form_conditions_with_reasons = (
-        ('The relation contains wrong number of modulo terms', len(relation.modulo_terms) == 1),
-        ('The relation contains wrong number of modulo terms', len(relation.modulo_term_coefficients) == 1),
-        ('The relation contains other than modulo terms', not relation.variable_names),
-        ('The relation contains other than modulo terms', not relation.variable_coefficients),
-        ('The relation does not check for equality of reminders', relation.predicate_symbol == '='),
-    )
-
-    for reason, condition in correct_form_conditions_with_reasons:
-        if not condition:
-            return reason
-    return True
-
-
 @dataclass(frozen=True)
 class ModuloTermStateComponent(object):
     value: int

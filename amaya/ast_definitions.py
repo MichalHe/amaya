@@ -5,13 +5,15 @@ from typing import (
     Callable,
     Dict,
     List,
+    Tuple,
     Union,
 )
 
 from amaya.ast_relations import Relation
+from amaya.relations_structures import Congruence
 
 
-AST_Leaf = Union[str, Relation]
+AST_Leaf = Union[str, Congruence, Relation]
 AST_NaryNode = List[Union[AST_Leaf, 'AST_NaryNode']]
 AST_Node = Union[AST_Leaf, AST_NaryNode]
 

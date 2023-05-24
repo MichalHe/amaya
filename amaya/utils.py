@@ -43,7 +43,7 @@ COLOR_PALETTE = [  # Node (bg, fg)
 ]
 
 
-def vector_dot(vec1: Sequence[Union[int, str]], vec2: Union[int, str]) -> int:
+def vector_dot(vec1: Sequence[Union[int, str]], vec2: Sequence[Union[int, str]]) -> int:
     assert len(vec1) == len(vec2), 'Cannot take dot product of vectors with different length.'
     return sum(0 if '*' in c_pair else c_pair[0] * c_pair[1] for c_pair in zip(vec1, vec2))
 
