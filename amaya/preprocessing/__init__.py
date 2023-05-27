@@ -14,7 +14,6 @@ from typing import (
     Union,
 )
 
-import amaya.ast_relations as relations
 from amaya.relations_structures import (
     AST_Leaf,
     AST_NaryNode,
