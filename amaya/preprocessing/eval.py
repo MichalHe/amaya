@@ -371,5 +371,5 @@ def convert_ast_into_evaluable_form(ast: Raw_AST, bool_vars: Set[str]) -> Tuple[
     for dropped_node in dropped_nodes:
         new_atoms += generate_atoms_for_term(dropped_node)
 
-    new_ast = ['exists', binding_list, ['and', new_ast, new_atoms]]  # type: ignore
+    new_ast = ['exists', binding_list, ['and', new_ast, *new_atoms]]  # type: ignore
     return new_ast, ASTInfo()
