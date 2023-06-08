@@ -527,6 +527,7 @@ class BoolLiteral:
     value: bool
 
 
+Atom = Union[Congruence, Relation]
 AST_Leaf = Union[str, Congruence, Relation]
 AST_NaryNode = List[Union[AST_Leaf, 'AST_NaryNode']]
 AST_Node = Union[AST_Leaf, AST_NaryNode]

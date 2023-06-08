@@ -23,7 +23,7 @@ import sys
 from amaya import logger
 from amaya.alphabet import LSBF_Alphabet, LSBF_AlphabetSymbol
 from amaya.automatons import AutomatonType
-from amaya.relations_structures import ModuloTerm, Relation
+from amaya.relations_structures import Atom, Congruence, ModuloTerm, Relation
 
 if TYPE_CHECKING:
     from amaya.mtbdd_automatons import MTBDD_NFA
@@ -910,37 +910,70 @@ class MTBDDTransitionFn():
         return minimized_dfa
 
     @staticmethod
-    def construct_dfa_for_atom_conjunction(conjunction: List[Relation], quantified_vars: List[str], alphabet: LSBF_Alphabet, var_name_to_id: Callable[[str], int]) -> MTBDD_NFA:
+    def construct_dfa_for_atom_conjunction(conjunction: List[Atom], quantified_vars: List[str], alphabet: LSBF_Alphabet, var_name_to_id: Callable[[str], int]) -> MTBDD_NFA:
         serialized_atoms = (Serialized_Atom * len(conjunction))()
         atom_type_map = {
             '=': Serialized_Atom_Type.EQ,
             '<=': Serialized_Atom_Type.INEQ,
         }
 
-        all_vars = sorted(functools.reduce(set.union, map(set, (atom.variable_names for atom in conjunction))))
-        var_to_idx_map = dict((var, i) for i, var in enumerate(all_vars))
+        all_vars = set()
+        linear_atoms: List[Relation] = []
+        congruences: List[Congruence] = []
+        for atom in conjunction:
+            if isinstance(atom, Congruence):
+                congruences.append(atom)
+                all_vars.update(atom.vars)
+            else:
+                linear_atoms.append(atom)
+                all_vars.update(atom.variable_names)
 
-        for atom_idx, atom in enumerate(conjunction):
-            atom_type = Serialized_Atom_Type.CONGRUENCE if atom.is_congruence_equality() else atom_type_map[atom.predicate_symbol]
-            dense_coefs = [0] * len(all_vars)
+        solver_var_ids = sorted(var_name_to_id(var) for var in all_vars)
+        var_id_to_local_track = dict((var_id, i) for i, var_id in enumerate(solver_var_ids))
+
+        atom_idx = 0
+        for atom in linear_atoms:
+            atom_type = atom_type_map[atom.predicate_symbol]
+
+            dense_coefs: List[int] = [0] * len(all_vars)
             for i, var in enumerate(atom.variable_names):
-                dense_coefs[var_to_idx_map[var]] = atom.variable_coefficients[i]
+                var_id = var_name_to_id(var)
+                local_track = var_id_to_local_track[var_id]
+                dense_coefs[local_track] = atom.variable_coefficients[i]
             coefs = (ct.c_int64 * len(all_vars))(*dense_coefs)
-            modulus = atom.modulo_terms[0].modulo if atom_type == Serialized_Atom_Type.CONGRUENCE else 0
+
             serialized_atoms[atom_idx] = Serialized_Atom(type=atom_type,
                                                          coefs=coefs,
                                                          coef_cnt=len(all_vars),
-                                                         modulus=modulus)
-        initial_state = (ct.c_int64 * len(conjunction))(*tuple(atom.absolute_part for atom in conjunction))
+                                                         modulus=0)
+            atom_idx += 1
+
+        for atom in congruences:
+            dense_coefs: List[int] = [0] * len(all_vars)
+            for i, var in enumerate(atom.vars):
+                var_id = var_name_to_id(var)
+                local_track = var_id_to_local_track[var_id]
+                dense_coefs[local_track] = atom.coefs[i]
+            coefs = (ct.c_int64 * len(all_vars))(*dense_coefs)
+
+            serialized_atoms[atom_idx] = Serialized_Atom(type=Serialized_Atom_Type.CONGRUENCE,
+                                                         coefs=coefs,
+                                                         coef_cnt=len(all_vars),
+                                                         modulus=atom.modulus)
+            atom_idx += 1
+
+        initial_state_nums = [a.absolute_part for a in linear_atoms] + [a.rhs for a in congruences]
+        initial_state = (ct.c_int64 * len(conjunction))(*tuple(initial_state_nums))
 
         # Construct an array with variable IDs as the solver recognizes them
-        var_ids = (ct.c_uint64 * len(all_vars))()
-        for i, var in enumerate(all_vars):
-            var_ids[i] = var_name_to_id(var)
+        var_ids = (ct.c_uint64 * len(solver_var_ids))()
+        for i, var in enumerate(solver_var_ids):
+            var_ids[i] = var
 
         serialized_quantified_vars = (ct.c_uint64 * len(quantified_vars))()
-        for i, var in enumerate(quantified_vars):
-            serialized_quantified_vars[i] = var_name_to_id(var)
+        for i, var in enumerate(sorted(quantified_vars)):
+            var_id = var_name_to_id(var)
+            serialized_quantified_vars[i] = var_id_to_local_track[var_id]
 
         serialized_conjunction = Serialized_Quantified_Atom_Conjunction(
             atoms=serialized_atoms,
@@ -951,6 +984,9 @@ class MTBDDTransitionFn():
             quantified_vars=serialized_quantified_vars,
             quantified_var_cnt=len(quantified_vars)
         )
+
+        logger.info('Lazy constructing automaton for conjunction: %s', linear_atoms + congruences)
+        logger.info('Variables to IDs: %s', var_id_to_local_track)
 
         result_ptr = mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction(serialized_conjunction)
         nfa = deserialize_nfa(result_ptr.contents, alphabet)

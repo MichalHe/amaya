@@ -54,6 +54,9 @@ class NonlinTermGraph:
         return node
 
     def make_node_root(self, node: NonlinTermNode):
+        if node in self.graph_roots:
+            return
+
         self.graph_roots.add(node)
         for var, _ in node.body.lin_terms:
             self.index[var].append(node)

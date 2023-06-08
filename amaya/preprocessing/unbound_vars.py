@@ -18,6 +18,7 @@ from typing import (
 from amaya.relations_structures import (
     AST_NaryNode,
     AST_Node,
+    Congruence,
     ModuloTerm,
     Relation,
 )
@@ -51,7 +52,7 @@ class AST_Quantifier_Node_With_Bounds_Info:
 
 @dataclass
 class AST_Leaf_Node_With_Bounds_Info:
-    contents: Union[Relation, str]
+    contents: Union[Relation, str, Congruence]
     var_values: Dict[str, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
@@ -182,7 +183,7 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
                 bounds_info.var_values[var_name] = [value_interval]
         return bounds_info
 
-    elif isinstance(ast, str):
+    elif isinstance(ast, (str, Congruence)):
         return AST_Leaf_Node_With_Bounds_Info(contents=ast)  # A Boolean variable does not tell us anything about bounds
 
     node_type = ast[0]
@@ -363,7 +364,7 @@ def remove_existential_quantification_of_unbound_vars(ast: AST_Node_With_Bounds_
 
 def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[str]) -> Optional[AST_Node]:
     if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
-        if isinstance(ast.contents, str):
+        if isinstance(ast.contents, (Congruence, str)):
             return ast.contents
 
         relation: Relation = ast.contents
@@ -391,7 +392,7 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
                 var_bounds = ast.var_values[var_to_rewrite_bounds][0]
                 if var_bounds.lower_limit is not None:
                     lower_bound = Relation.new_lin_relation(variable_names=[var_to_rewrite_bounds], variable_coefficients=[-1],
-                                                            predicate_symbol='<=', absolute_part=var_bounds.lower_limit)
+                                                            predicate_symbol='<=', absolute_part=-var_bounds.lower_limit)
                     new_ast_node.append(lower_bound)
                 if var_bounds.upper_limit is not None:
                     upper_bound = Relation.new_lin_relation(variable_names=[var_to_rewrite_bounds], variable_coefficients=[1],
