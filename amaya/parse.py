@@ -1,6 +1,6 @@
 from __future__ import annotations
 from enum import IntEnum, Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from logging import INFO
 import time
 from typing import (
@@ -78,12 +78,18 @@ class ParsingOperation(Enum):
 
 
 @dataclass
-class EvaluationStat():
+class StatPoint:
     operation: ParsingOperation
     input1_size: int
     input2_size: Optional[int]
     output_size: Optional[int]
     runtime_ns: int
+
+
+@dataclass
+class RunStats:
+    max_automaton_size: int = 0
+    trace: List[StatPoint] = field(default_factory=list)
 
 
 IntrospectHandle = Callable[[NFA, ParsingOperation], None]
@@ -103,7 +109,7 @@ class EvaluationContext:
 
         # Evaluation stats
         self.collect_stats = True
-        self.stats: List[EvaluationStat] = []
+        self.stats = RunStats()
         self.pending_operations_stack: List[Any] = []
 
         self.next_available_variable_id = 1  # Number them from 1, MTBDDs require
@@ -124,6 +130,7 @@ class EvaluationContext:
         return self.alphabet
 
     def emit_evaluation_introspection_info(self, nfa: NFA, operation: ParsingOperation):
+        self.stats.max_automaton_size = max(self.stats.max_automaton_size, len(nfa.states))
         self.introspect_handle(nfa, operation)
 
     def stats_operation_starts(self, operation: ParsingOperation, input1: Optional[NFA], input2: Optional[NFA]):
@@ -150,9 +157,9 @@ class EvaluationContext:
 
         runtime = time.time_ns() - start_ns
 
-        stat = EvaluationStat(op, size1, size2, len(output.states), runtime)
+        stat = StatPoint(op, size1, size2, len(output.states), runtime)
         logger.info(f"Operation finished: {stat}")
-        self.stats.append(stat)
+        self.stats.trace.append(stat)
 
     def _generate_new_variable_id(self) -> int:
         variable_id = self.next_available_variable_id
@@ -439,7 +446,7 @@ def add_only_used_function_constants_to_context(ctx: EvaluationContext,
 # @Cleanup: This should be renamed to something like evaluate_smt2
 def perform_whole_evaluation_on_source_text(source_text: str,
                                             emit_introspect: IntrospectHandle = lambda nfa, op: None
-                                            ) -> Tuple[NFA, Dict[str, str]]:
+                                            ) -> Tuple[NFA, Dict[str, str], RunStats]:
     """
     Parses the given SMT2 source code and runs the evaluation procedure.
 
@@ -553,10 +560,11 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
             nfa = run_evaluation_procedure(formula_to_evaluate, eval_ctx)
+            print(f'{eval_ctx.stats=}')
             eval_result = nfa
         elif statement_root == 'exit':
-            return (nfa, smt_info)
-    return (nfa, smt_info)
+            return (nfa, smt_info, eval_ctx.stats)
+    return (nfa, smt_info, eval_ctx.stats)
 
 
 def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> NFA:

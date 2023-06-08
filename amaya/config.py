@@ -45,6 +45,9 @@ class SolverConfig(object):
     vis_display_only_free_vars: bool = False
     """Export transition symbols with bits only for the free variables in the corresponding automaton."""
 
+    print_stats: bool = False
+    """Print execution statistics"""
+
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     """Preprocessing configuration options."""
 

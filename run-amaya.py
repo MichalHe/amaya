@@ -167,6 +167,14 @@ get_sat_subparser.add_argument('--colorize-dot',
                                help='Colorize the SCCs with more than 1 node in the exported automata if the output'
                                     ' format is dot.')
 
+get_sat_subparser.add_argument('-s',
+                               '--print-stats',
+                               action='store_true',
+                               dest='print_stats',
+                               default=False,
+                               help='Print execution statistics.')
+
+
 benchmark_subparser = subparsers.add_parser('benchmark')
 benchmark_subparser.add_argument('--add-file',
                                  metavar='FILE',
@@ -267,6 +275,7 @@ else:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
 solver_config.allow_lazy_evaluation = args.allow_lazy_evaluation
+solver_config.print_stats = args.print_stats
 
 
 def ensure_output_destination_valid(output_destination: str):
@@ -302,7 +311,7 @@ def run_in_getsat_mode(args) -> bool:
     assert os.path.exists(args.input_file), 'The SMT2 supplied file containing input formula does not exists!'
     assert os.path.isfile(args.input_file), 'The supplied file must not be a directory.'
 
-    solver_config.print_operation_runtime = args.should_print_operations_runtime
+    solver_config.track_operation_runtime = args.should_print_operations_runtime
     solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
 
     # Wrap in a dictionary so we can modify it from nested functions
@@ -337,8 +346,8 @@ def run_in_getsat_mode(args) -> bool:
     with open(args.input_file) as input_file:
         input_text = input_file.read()
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
-        nfa, smt_info = parse.perform_whole_evaluation_on_source_text(input_text,
-                                                                      handle_automaton_created_fn)
+        nfa, smt_info, stats = parse.perform_whole_evaluation_on_source_text(input_text,
+                                                                             handle_automaton_created_fn)
 
         expected_sat = smt_info.get(':status', 'sat')
         if ':status' not in smt_info:
@@ -361,6 +370,8 @@ def run_in_getsat_mode(args) -> bool:
         print(computed_sat)
         if args.should_print_model:
             print('Model:', model)
+        if solver_config.print_stats:
+            print(stats)
         return True
 
 
@@ -432,7 +443,7 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                 text = benchmark_input_file.read()
 
                 benchmark_start = time.time_ns()
-                nfa, smt_info = parse.perform_whole_evaluation_on_source_text(text)
+                nfa, smt_info, stats = parse.perform_whole_evaluation_on_source_text(text)
                 benchmark_end = time.time_ns()
                 runtime_ns = benchmark_end - benchmark_start
 
