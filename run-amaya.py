@@ -224,6 +224,7 @@ if 'specified_files' in args:
     runner_mode = RunnerMode.BENCHMARK
 elif 'input_file' in args:
     runner_mode = RunnerMode.GET_SAT
+    solver_config.print_stats = args.print_stats
 else:
     print('No execution mode specified. See run-amaya.py --help for more information.', file=sys.stderr)
     sys.exit(1)
@@ -275,7 +276,6 @@ else:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
 solver_config.allow_lazy_evaluation = args.allow_lazy_evaluation
-solver_config.print_stats = args.print_stats
 
 
 def ensure_output_destination_valid(output_destination: str):
