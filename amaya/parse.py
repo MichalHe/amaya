@@ -963,7 +963,8 @@ def run_evaluation_procedure(ast: AST_Node,
 
     if not isinstance(ast, list):
         if isinstance(ast, BoolLiteral):
-            return NFA.trivial_accepting(ctx.get_alphabet()) if ast.value else NFA.trivial_nonaccepting(ctx.get_alphabet())
+            automaton_cls = ctx.get_automaton_class_for_current_backend()
+            return automaton_cls.trivial_accepting(ctx.get_alphabet()) if ast.value else automaton_cls.trivial_nonaccepting(ctx.get_alphabet())
 
         if isinstance(ast, Congruence):
             return make_nfa_for_congruence(ast, ctx)

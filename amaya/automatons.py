@@ -454,23 +454,31 @@ class NFA:
         assert state in self.states, f'Cannot retrieve post of non automaton state: {state}'
         return self.transition_fn.get_state_post(state)
 
-    @staticmethod
-    def trivial_accepting(alphabet: LSBF_Alphabet) -> NFA:
-        nfa = NFA.trivial_nonaccepting(alphabet)
-        nfa.add_final_state(0)
-        return nfa
-
-    @staticmethod
-    def trivial_nonaccepting(alphabet: LSBF_Alphabet) -> NFA:
-        nfa = NFA(alphabet=alphabet, automaton_type=(AutomatonType.DFA | AutomatonType.TRIVIAL),
+    @classmethod
+    def trivial_accepting(cls, alphabet: LSBF_Alphabet) -> NFA:
+        nfa = cls(alphabet=alphabet, automaton_type=(AutomatonType.DFA | AutomatonType.TRIVIAL),
                   state_semantics=AH_Atom(atom_type=AH_AtomType.TRIVIAL, atom=None))
 
-        state = 0
-        nfa.add_state(state)
-        nfa.add_initial_state(state)
+        nfa.states = {0, 1}  # There must be two states to not accepts the empty word
+        nfa.initial_states = {0}
+        nfa.final_states = {1}
 
         self_loop_symbol = tuple('*' for vn in alphabet.variable_numbers)
-        nfa.update_transition_fn(state, self_loop_symbol, state)
+        nfa.update_transition_fn(0, self_loop_symbol, 1)
+        nfa.update_transition_fn(1, self_loop_symbol, 1)
+
+        return nfa
+
+    @classmethod
+    def trivial_nonaccepting(cls, alphabet: LSBF_Alphabet) -> NFA:
+        nfa = cls(alphabet=alphabet, automaton_type=(AutomatonType.DFA | AutomatonType.TRIVIAL),
+                  state_semantics=AH_Atom(atom_type=AH_AtomType.TRIVIAL, atom=None))
+
+        nfa.states = {0}
+        nfa.initial_states = {0}
+
+        self_loop_symbol = tuple('*' for vn in alphabet.variable_numbers)
+        nfa.update_transition_fn(0, self_loop_symbol, 0)
 
         return nfa
 
@@ -483,10 +491,12 @@ class NFA:
         the variable being False.
         The resulting autmaton is not complete (must be completed before complement).
         """
-
         automaton_type = AutomatonType.DFA | AutomatonType.BOOL
 
-        nfa = cls(overall_alphabet, automaton_type, used_variables=[var_id])
+        nfa = cls(alphabet=overall_alphabet,
+                  automaton_type=automaton_type,
+                  used_variables=[var_id],
+                  state_semantics=AH_Atom(atom_type=AH_AtomType.BOOL, atom=[]))
         nfa.states = {0, 1}
         nfa.initial_states = {0}
         nfa.final_states = {1}

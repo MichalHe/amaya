@@ -83,6 +83,7 @@ def free_serialized_nfa(serialized_nfa):
 
 
 def serialize_nfa(nfa: MTBDD_NFA) -> Serialized_NFA:
+    logger.debug('Serializing nfa (var_count=%d, vars=%s)', len(nfa.used_variables), nfa.used_variables)
     _states = tuple(nfa.states)
     _mtbdds = tuple(nfa.transition_fn.mtbdds.get(s, mtbdd_false) for s in _states)
     mtbdds = (ct.c_ulong * len(nfa.states))(*_mtbdds)
@@ -901,7 +902,10 @@ class MTBDDTransitionFn():
         logger.info('[MTBDD Hopcroft minimization] Entering minimization routine - serializing data.')
 
         serialized_dfa = serialize_nfa(dfa)
+        logger.info('[MTBDD Hopcroft minimization] Serialisation done.')
+        logger.info('[MTBDD Hopcroft minimization] Minimizing.')
         minimized_serialized_dfa_ptr = mtbdd_wrapper.amaya_minimize_hopcroft(serialized_dfa)
+        logger.info('[MTBDD Hopcroft minimization] Done.')
         minimized_serialized_dfa = minimized_serialized_dfa_ptr.contents
 
         minimized_dfa = deserialize_nfa(minimized_serialized_dfa, dfa.alphabet)
