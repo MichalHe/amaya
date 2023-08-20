@@ -20,7 +20,8 @@ from typing import (
 from amaya import logger
 from amaya.alphabet import (
     LSBF_Alphabet,
-    LSBF_AlphabetSymbol
+    LSBF_AlphabetSymbol,
+    uncompress_transition_symbol
 )
 from amaya.config import (
     solver_config,
@@ -690,6 +691,15 @@ class NFA:
             minimized_dfa.state_semantics.state_labels = partition_id_to_partition
 
         return minimized_dfa
+
+    def check_nondeterminism(self) -> bool:
+        dest_per_symbol_table: Dict[int, Dict[LSBF_AlphabetSymbol, int]] = defaultdict(lambda: defaultdict(int))
+        for source, compressed_symbol, dest in self.transition_fn.iter():
+            for symbol in uncompress_transition_symbol(compressed_symbol):
+                dest_per_symbol_table[source][symbol] += 1
+                if dest_per_symbol_table[source][symbol] > 1:
+                    return True
+        return False
 
 
 @dataclass

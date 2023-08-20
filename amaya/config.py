@@ -3,6 +3,7 @@ from dataclasses import (
     field,
 )
 from enum import IntEnum
+from typing import Optional
 
 
 class SolutionDomain(IntEnum):
@@ -50,6 +51,12 @@ class SolverConfig(object):
 
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     """Preprocessing configuration options."""
+
+    current_formula_path: Optional[str] = None
+    """Path to the input formula, if provided."""
+
+    export_counter: int = 0
+    """(Experimental) An execution-local repurposable counter."""
 
 
 solver_config = SolverConfig()

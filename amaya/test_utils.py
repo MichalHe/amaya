@@ -9,8 +9,8 @@ from amaya.automatons import NFA
 
 def assert_dfas_isomorphic(actual: NFA, expected: NFA):
     assert len(actual.initial_states) == 1
-    assert len(actual.initial_states) == len(expected.initial_states)
-    assert len(actual.final_states) == len(expected.final_states)
+    assert len(actual.initial_states) == len(expected.initial_states), f'{len(actual.initial_states)=} {len(actual.initial_states)=}'
+    assert len(actual.final_states) == len(expected.final_states), f'{len(actual.final_states)=} {len(expected.final_states)=}'
     assert len(actual.states) == len(expected.states), f'{len(actual.states)=} {len(expected.states)=}'
     assert set(actual.used_variables) == set(expected.used_variables), f'{actual.used_variables=} {expected.used_variables}'
 

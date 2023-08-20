@@ -313,6 +313,7 @@ def run_in_getsat_mode(args) -> bool:
 
     solver_config.track_operation_runtime = args.should_print_operations_runtime
     solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
+    solver_config.current_formula_path = os.path.abspath(args.input_file)
 
     # Wrap in a dictionary so we can modify it from nested functions
     _enclosing_ctx = {
@@ -324,6 +325,7 @@ def run_in_getsat_mode(args) -> bool:
                                 f'{_enclosing_ctx["automatons_written_counter"]}-{op.value}.{args.output_format}')
         with open(filename, 'w') as output_file:
             vis_representation = nfa.get_visualization_representation().compress_symbols()
+            output_contents = ''
             if args.output_format == 'dot':
                 output_contents = str(vis_representation.into_graphviz(highlight_sccs=args.colorize_dot))
             elif args.output_format == 'vtf':
@@ -415,7 +417,7 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
         benchmark_files += search_directory_nonrecursive(nonrecursive_search_directory)
 
     for recursive_search_directory in args.recursive_search_directories:
-        benchmark_files += search_directory_recursive(nonrecursive_search_directory)
+        benchmark_files += search_directory_recursive(recursive_search_directory)
 
     print('Executing benchmark with the following files:', file=sys.stderr)
     for f in benchmark_files:
@@ -440,6 +442,8 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                     MTBDDTransitionFn.call_sylvan_gc()
 
                 print('Running', benchmark_file, file=sys.stderr)
+                solver_config.export_counter = 0
+                solver_config.current_formula_path = os.path.abspath(benchmark_file)
                 text = benchmark_input_file.read()
 
                 benchmark_start = time.time_ns()
