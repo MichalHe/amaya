@@ -3,9 +3,10 @@ from dataclasses import (
     dataclass,
     field,
 )
-from enum import IntEnum
+from enum import Enum, IntEnum
 import functools
 from typing import (
+    Any,
     Callable,
     List,
     Dict,
@@ -507,7 +508,7 @@ class Relation(object):
 
         # Convert to dictionaries as want comparison regardless of variable order
         self_lin_term = {var: coef for var, coef in zip(self.variable_names, self.variable_coefficients)}
-        other_lin_term = {var: coef for var, coef in zip(other.variable_names, other.variable_coefficients)} 
+        other_lin_term = {var: coef for var, coef in zip(other.variable_names, other.variable_coefficients)}
 
         return self_lin_term == other_lin_term
 
@@ -520,6 +521,10 @@ class Congruence:
     rhs: int
     modulus: int
 
+    def rename_vars(self, namer: Callable[[str], str]) -> Congruence:
+        new_vars = [namer(var) for var in self.vars]
+        return Congruence(vars=new_vars, coefs=list(self.coefs), rhs=self.rhs, modulus=self.modulus)
+
 
 @dataclass
 class BoolLiteral:
@@ -527,10 +532,39 @@ class BoolLiteral:
     value: bool
 
 
-Atom = Union[Congruence, Relation]
-AST_Leaf = Union[str, Congruence, Relation]
-AST_NaryNode = List[Union[AST_Leaf, 'AST_NaryNode']]
-AST_Node = Union[AST_Leaf, AST_NaryNode]
+Raw_AST = Union[int, str, List['Raw_AST']]
+AST_Atom = Union[str, Congruence, Relation, BoolLiteral]
+AST_NaryNode = List[Union[AST_Atom, 'AST_NaryNode']]
+AST_Node = Union[AST_Atom, AST_NaryNode]
+
+
+class AST_Node_Names(Enum):
+    DECLARE_FUN = 'declare-fun'
+    ASSERT = 'assert'
+    CHECK_SAT = 'check-sat'
+    EXISTS = 'exists'
+    AND = 'and'
+    OR = 'or'
+    NOT = 'not'
+
+
+def make_exists_node(binding_list: List[Tuple[str, str]], subformula: AST_Node) -> AST_Node:
+    # @Note: We convert the tuples into lists because the rest of the solver might expect so
+    # #      however we should have a more proper types for the entire AST
+    _binding_list = [list(binding) for binding in binding_list]
+    return [AST_Node_Names.EXISTS.value, _binding_list, subformula]  # type: ignore
+
+
+def make_and_node(subformulae: List[AST_Node]) -> AST_Node:
+    return [AST_Node_Names.AND.value, *subformulae]
+
+
+def make_or_node(subformulae: List[AST_Node]) -> AST_Node:
+    return [AST_Node_Names.OR.value, *subformulae]
+
+
+def make_not_node(subformula: AST_Node) -> AST_Node:
+    return [AST_Node_Names.NOT.value, subformula]
 
 
 @dataclass

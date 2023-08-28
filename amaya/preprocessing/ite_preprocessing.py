@@ -10,10 +10,10 @@ from typing import (
 )
 
 from amaya.relations_structures import (
-    AST_Leaf,
     AST_NaryNode,
     AST_Node,
     NodeEncounteredHandlerStatus,
+    Raw_AST,
     Relation,
 )
 from amaya.utils import number_to_bit_tuple
@@ -30,13 +30,13 @@ class ConditionCounter:
         return ret
 
 
-AST_With_Placeholders = Union[AST_Node, List['AST_With_Placeholders'], int]
+AST_With_Placeholders = Raw_AST
 
 PlaceholderInfo = Tuple[int, AST_With_Placeholders]
 """Information about what a placeholder (int) stands for (node)"""
 
 
-def mark_and_collect_ite_conditions(ast: AST_Node, counter: ConditionCounter) -> Tuple[AST_With_Placeholders, List[PlaceholderInfo]]:
+def mark_and_collect_ite_conditions(ast: Raw_AST, counter: ConditionCounter) -> Tuple[AST_With_Placeholders, List[PlaceholderInfo]]:
     """Return a list of ite conditions found in the given tree. All conditions founnd in the tree are assigned a unique integer. """
     if not isinstance(ast, list):
         return (ast, [])
@@ -106,15 +106,13 @@ def mark_and_collect_ite_conditions(ast: AST_Node, counter: ConditionCounter) ->
 def copy_ast(ast: AST_With_Placeholders) -> AST_With_Placeholders:
     if isinstance(ast, str) or isinstance(ast, int):
         return ast
-    elif isinstance(ast, Relation):
-        return Relation.copy_of(ast)
 
     assert isinstance(ast, list)
 
     return [copy_ast(item) for item in ast]
 
 
-def instantiate_condition_handles(ast: AST_With_Placeholders, conditions: Dict[int, AST_With_Placeholders], valuation_bits: int) -> AST_Node:
+def instantiate_condition_handles(ast: AST_With_Placeholders, conditions: Dict[int, AST_With_Placeholders], valuation_bits: int) -> Raw_AST:
     if not isinstance(ast, list):
         return ast  # type: ignore
     node_type: str = ast[0]  # type: ignore
@@ -132,7 +130,7 @@ def instantiate_condition_handles(ast: AST_With_Placeholders, conditions: Dict[i
         return [node_type, *inst_subtrees]
 
 
-def rewrite_ite_expressions(ast: AST_Node) -> AST_Node:
+def rewrite_ite_expressions(ast: Raw_AST) -> Raw_AST:
     if not isinstance(ast, list):
         return ast
 
@@ -161,7 +159,7 @@ def rewrite_ite_expressions(ast: AST_Node) -> AST_Node:
 
         # We must be careful with nested conditions as when we instantiate a condition we have to also instantiate
         # the conditions inside it.
-        def put_condition_with_positiveness(cond_with_id: Tuple[int, AST_With_Placeholders], conditions: Dict[int, AST_With_Placeholders], valuation_bits: int):
+        def put_condition_with_positiveness(cond_with_id: Tuple[int, AST_With_Placeholders], conditions: Dict[int, AST_With_Placeholders], valuation_bits: int) -> Raw_AST:
             cond_id, cond = cond_with_id
             is_positive = (valuation_bits >> cond_id) % 2
             cond = copy_ast(cond)
@@ -170,7 +168,7 @@ def rewrite_ite_expressions(ast: AST_Node) -> AST_Node:
 
         handle_to_condition_map = dict(conditions)
 
-        result_ast: AST_Node = ['or']
+        result_ast: Raw_AST = ['or']
 
         # Generate boolean combinations of all conditions and rewrite the relation accordingly
         for cond_valuation_vector in range(2**len(conditions)):

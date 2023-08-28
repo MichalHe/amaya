@@ -283,6 +283,41 @@ class AutomatonVisRepresentation:
 
         return vtf
 
+    def symbol_into_bitstring(self, symbol: Iterable[IntOrStr]) -> str:
+        def bit_formater(bit):
+            result = 'x' if bit == '*' else str(bit)
+            return result
+
+        return ''.join(bit_formater(bit) for bit in symbol)
+
+    def into_mata(self, uncompress_symbols=False) -> str:
+        """
+        Converts the automaton into the MATA format.
+
+        MATA format:
+            https://github.com/VeriFIT/mata/blob/devel/AUTOMATAFORMAT.md
+        """
+        def fmt_state_set(field_label, state_set):
+            states = ' '.join(f'q{state}' for state in state_set)
+            return f'%{field_label} {states}'
+
+        lines = []
+        lines.append('@NFA-explicit')  # Header
+        lines.append('@Alphabet-auto')
+        lines.append(fmt_state_set('Initial', self.initial_states))
+        lines.append(fmt_state_set('Final', self.final_states))
+
+        for source, symbols, destination in self.transitions:
+            for compressed_symbol in symbols:
+                for symbol in uncompress_transition_symbol(compressed_symbol):
+                    symbol = self.symbol_into_bitstring(symbol)
+                    lines.append(f'q{source} {symbol} q{destination}')
+
+        text = '\n'.join(lines)
+        text += '\n'
+        return text
+
+
     def compress_symbols(self):
         """Peforms transition sets compression using plain BDDs."""
         from dd.autoref import BDD

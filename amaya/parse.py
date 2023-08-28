@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from logging import INFO
 import time
 from typing import (
+    Iterable,
     List,
     Set,
     Tuple,
@@ -37,7 +38,8 @@ from amaya.preprocessing import (
 )
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
-    Atom,
+    AST_Atom,
+    AST_Node_Names,
     AST_NaryNode,
     AST_Node,
     BoolLiteral,
@@ -412,7 +414,7 @@ def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[
         raise ValueError(f'Unhandled branch when exploring the SMT tree. Tree: {tree}')
 
 
-def build_syntax_tree(tokens: List[str]):
+def build_syntax_tree(tokens: Iterable[str]):
     stack: List[Any] = []
     depth = -1
     for token in tokens:
@@ -441,6 +443,35 @@ def add_only_used_function_constants_to_context(ctx: EvaluationContext,
         variable_id = i + starting_id
         if variable_id in used_variable_ids:
             ctx.add_global_variable(var_name=function_symb.name, var_type=function_symb.return_type)
+
+
+def parse_function_symbol_declaration(decl_ast: AST_NaryNode) -> FunctionSymbol:
+    # Example: (declare-fun W_S1_V1 () Bool)
+    if len(decl_ast) != 4:
+        raise ValueError(f'Invalid syntax: declare-fun has invalid form: {decl_ast}')
+    if not isinstance(decl_ast[1], str):
+        raise ValueError(f'Invalid syntax: declare-fun expects a string literal on 1st place: {decl_ast}')
+    if not isinstance(decl_ast[2], list) or not all(isinstance(fun_sort, str) for fun_sort in decl_ast[2]):
+        raise ValueError(f'Invalid syntax: declare-fun expects a list of function '
+                         f'sorts on 2nd place: {decl_ast}')
+    if not isinstance(decl_ast[3], str):
+        raise ValueError(f'Invalid syntax: declare-fun expects function\'s return sort'
+                         f'on 3nd place: {decl_ast}')
+
+    assert isinstance(decl_ast[1], str)
+    assert isinstance(decl_ast[2], list)
+    assert isinstance(decl_ast[3], str)
+    input_sorts: List[str] = decl_ast[2]  # type: ignore
+
+    sym_name: str = decl_ast[1]
+    sym_args = [
+        (arg_name, VariableType.from_smt_type_string(arg_type_raw)) for arg_name, arg_type_raw in input_sorts
+    ]
+    sym_ret_type = VariableType.from_smt_type_string(decl_ast[3])
+
+    function_symbol = FunctionSymbol(name=sym_name, arity=len(sym_args), args=sym_args,
+                                     return_type=sym_ret_type)
+    return function_symbol
 
 
 # @Cleanup: This should be renamed to something like evaluate_smt2
@@ -487,21 +518,10 @@ def perform_whole_evaluation_on_source_text(source_text: str,
                 raise ValueError(f'Invalid syntax for the assert S-expression. Expresssion: {top_level_statement}')
             formulae_to_assert.append(top_level_statement[1])
 
-        elif statement_root == 'declare-fun':
-            if len(top_level_statement) != 4:
-                raise ValueError(f'Invalid syntax: declare-fun has invalid form: {top_level_statement}')
-            decl_fun = top_level_statement
-
-            sym_name: str = decl_fun[1]
-            sym_args = [
-                (arg_name, VariableType.from_smt_type_string(arg_type)) for arg_name, arg_type_raw in decl_fun[2]
-            ]
-            sym_ret_type = VariableType.from_smt_type_string(decl_fun[3])
-
-            function_symbol_to_info_map[sym_name] = FunctionSymbol(name=sym_name, arity=len(sym_args), args=sym_args,
-                                                                   return_type=sym_ret_type)
-
-        elif statement_root == 'check-sat':
+        elif statement_root == AST_Node_Names.DECLARE_FUN.value:
+            function_symbol = parse_function_symbol_declaration(top_level_statement)
+            function_symbol_to_info_map[function_symbol.name] = function_symbol
+        elif statement_root == AST_Node_Names.CHECK_SAT.value:
             if eval_result:
                 raise ValueError('Multiple check-sat commands are not supported!')
 
@@ -516,17 +536,16 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             formula_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
 
             # @Note: Preprocessing will modify the given list
-            function_symbols, formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate,
-                                                                                 constant_function_symbols=function_symbols)
-
-            for fun_symbol in function_symbols:
-                ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
-
             bool_symbols = {
                 var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL
             }
-            formula_to_evaluate, _ = ast_eval_lib.convert_ast_into_evaluable_form(formula_to_evaluate, bool_symbols)
-            logger.info('Created following evaluable AST: %s', formula_to_evaluate)
+            function_symbols, formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate,  # type: ignore
+                                                                                 constant_function_symbols=function_symbols,
+                                                                                 bool_vars=bool_symbols)
+            logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
+
+            for fun_symbol in function_symbols:
+                ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
 
             if solver_config.preprocessing.simplify_variable_bounds:
                 logger.info(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)
@@ -839,6 +858,22 @@ def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: in
         return result
 
     if (operand.automaton_type & AutomatonType.NFA):
+        if False:
+            import os
+            output_folder = '/tmp/ondra-nfas-mata/UltimateAutomizer'
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
+            if operand.check_nondeterminism():
+                assert solver_config.current_formula_path
+                formula_basename = os.path.basename(solver_config.current_formula_path)
+                formula_basename = formula_basename.rsplit('.', 1)[0]
+                formula_basename = f'{formula_basename}.{solver_config.export_counter}.mata'
+                output_filepath = os.path.join(output_folder, formula_basename)
+                solver_config.export_counter += 1
+                with open(output_filepath, 'w') as output_file:
+                    mata_text = operand.get_visualization_representation().into_mata()
+                    output_file.write(mata_text)
+
         ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
         operand = operand.determinize()
         ctx.stats_operation_ends(operand)
@@ -875,7 +910,7 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
             conjunction = exists_expr[2]
             if all(isinstance(child, (Relation, Congruence)) for child in conjunction[1:]):
                 logger.info('Lazy constructing %s', conjunction)
-                atoms: List[Atom] = conjunction[1:]  # type: ignore
+                atoms: List[AST_Atom] = conjunction[1:]  # type: ignore
                 from amaya.mtbdd_transitions import MTBDDTransitionFn
                 quantified_vars: List[str] = [var for var in variable_bindings]
                 nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, quantified_vars, ctx.get_alphabet(), ctx.get_variable_id)

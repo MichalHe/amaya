@@ -24,7 +24,7 @@ import sys
 from amaya import logger
 from amaya.alphabet import LSBF_Alphabet, LSBF_AlphabetSymbol
 from amaya.automatons import AutomatonType
-from amaya.relations_structures import Atom, Congruence, ModuloTerm, Relation
+from amaya.relations_structures import Congruence, ModuloTerm, Relation
 
 if TYPE_CHECKING:
     from amaya.mtbdd_automatons import MTBDD_NFA

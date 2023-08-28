@@ -3,13 +3,18 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
+import itertools
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from amaya import logger
+from amaya.config import solver_config
 from amaya.relations_structures import (
+    AST_Atom,
     AST_NaryNode,
+    AST_Node,
     BoolLiteral,
     Congruence,
+    Raw_AST,
     Relation,
 )
 
@@ -28,13 +33,105 @@ class NonlinTerm:
     lin_term_constant: int = 0
 
 
+@dataclass(frozen=True)
+class LinTerm:
+    coef: int
+    var: str
+
+
+class RelationType(Enum):
+    EQ = '='
+    INEQ = '<='
+    CONGRUENCE = '~'
+
+
+@dataclass(frozen=True)
+class FrozenRelation:
+    lhs: Tuple[LinTerm, ...]
+    rhs: int
+    type: RelationType
+    modulus: int = 0  # Only when type = congruence
+
+
 @dataclass(unsafe_hash=True)
 class NonlinTermNode:
     """A node in the term dependency graph"""
-    var: str = field(hash=True)
+
+    introduced_vars: Tuple[str, ...] = field(hash=True)
+    """ Variables used to express the term that need to be quantified. """
+
+    equivalent_lin_expression: Tuple[LinTerm, ...] = field(hash=True)
+
+    atoms_relating_introduced_vars: Tuple[FrozenRelation, ...] = field(hash=True)
+    """ If multiple variables are introduced, they need to be related via extra atoms. """
+
     body: NonlinTerm = field(hash=True)
+
     was_dropped: bool = field(hash=False, default=False)
+
     dependent_terms: Set[NonlinTermNode] = field(default_factory=set, hash=False)
+
+
+def make_node_for_two_variable_rewrite(term: NonlinTerm, rewrite_id: int) -> NonlinTermNode:
+    """
+    Create a node describing rewrite of the given term using two new variables (quotient and reminder).
+
+    Div term is rewritten as:
+        x - (y div D) = 0   --->   x - <QUOTIENT> && 0 <= <REMINDER> && <REMINDER> <= M-1 && y - D*<QUOTIENT> = <REMINDER>
+    Mod term is rewritten as:
+        x - (y mod D) = 0   --->   x - <REMINDER> && 0 <= <REMINDER> && <REMINDER> <= M-1 && y - D*<QUOTIENT> = <REMINDER>
+    """
+    quotient = f'D{rewrite_id}'
+    reminder = f'M{rewrite_id}'
+    introduced_vars = (quotient, reminder)
+    if term.type == NonlinTermType.MOD:
+        equiv_expr = (LinTerm(coef=1, var=reminder),)
+    else:
+        equiv_expr = (LinTerm(coef=1, var=quotient),)
+
+    larger_than_zero = FrozenRelation(lhs=(LinTerm(coef=-1, var=reminder),), rhs=0, type=RelationType.INEQ)
+    smaller_than_modulus = FrozenRelation(lhs=(LinTerm(coef=1, var=reminder),), rhs=term.nonlin_constant-1, type=RelationType.INEQ)
+
+    divisor_reminder_terms = [LinTerm(var=var, coef=coef) for var, coef in term.lin_terms]
+    divisor_reminder_terms.extend([LinTerm(coef=-term.nonlin_constant, var=quotient), LinTerm(coef=-1, var=reminder)])
+    divisor_reminder_terms = sorted(divisor_reminder_terms, key=lambda term: term.var)
+
+    divisor_reminder_atom = FrozenRelation(lhs=tuple(divisor_reminder_terms), rhs=0, type=RelationType.EQ)
+
+    relating_atoms = (larger_than_zero, smaller_than_modulus, divisor_reminder_atom)
+    node = NonlinTermNode(introduced_vars=introduced_vars, equivalent_lin_expression=equiv_expr,
+                          atoms_relating_introduced_vars=relating_atoms, body=term)
+    return node
+
+
+def make_node_for_single_variable_rewrite(term: NonlinTerm, rewrite_id: int) -> NonlinTermNode:
+    """
+    Create a node describing rewrite of the given term using a single new variable (quotient).
+
+    Div term is rewritten as:
+        x - (y div M) = 0   --->   x - <QUOTIENT> && 0 <= (y - M*<QUOTIENT>) && (y - M*<QUOTIENT>) <= M-1
+    Mod term is rewritten as:
+        x - (y mod M) = 0   --->   x - (y - M*<QUOTIENT>) && 0 <= (y - M*<QUOTIENT>) && (y - M*<QUOTIENT>) <= M-1
+    """
+    quotient = f'D{rewrite_id}'
+    introduced_vars = (quotient, )
+
+    # (y - M*<QUOTIENT>)
+    _reminder_expr = [LinTerm(coef=coef, var=var) for var, coef in term.lin_terms] + [LinTerm(coef=-term.nonlin_constant, var=quotient)]
+    _reminder_expr = sorted(_reminder_expr, key=lambda lin_term: lin_term.var)
+    reminder_expr = tuple(_reminder_expr)
+
+    negated_equiv_expr = tuple(LinTerm(coef=-term.coef, var=term.var) for term in reminder_expr)
+    larger_than_zero = FrozenRelation(lhs=negated_equiv_expr, rhs=0, type=RelationType.INEQ)
+
+    smaller_than_modulus = FrozenRelation(lhs=reminder_expr, rhs=term.nonlin_constant-1, type=RelationType.INEQ)
+
+    equiv_expr = reminder_expr if term.type == NonlinTermType.MOD else (LinTerm(coef=1, var=quotient),)
+
+    relating_atoms = (larger_than_zero, smaller_than_modulus)
+    node = NonlinTermNode(introduced_vars=introduced_vars, equivalent_lin_expression=equiv_expr,
+                          atoms_relating_introduced_vars=relating_atoms, body=term)
+    return node
 
 
 @dataclass
@@ -47,9 +144,32 @@ class NonlinTermGraph:
         if term in self.term_nodes:
             return self.term_nodes[term]
 
-        var_prefix = 'M' if term.type == NonlinTermType.MOD else 'D'
-        var = f'{var_prefix}{len(self.term_nodes)}'
-        node = NonlinTermNode(var=var, body=term)
+        var_id = len(self.term_nodes)
+
+        if term.type == NonlinTermType.MOD and solver_config.preprocessing.use_congruences_when_rewriting_modulo:
+            reminder = f'M{var_id}'
+            introduced_vars = (reminder,)
+
+            equiv_expr = (LinTerm(coef=1, var=reminder),)
+
+            larger_than_zero = FrozenRelation(lhs=(LinTerm(coef=-1, var=reminder),), rhs=0, type=RelationType.INEQ)
+            smaller_than_modulus = FrozenRelation(lhs=(LinTerm(coef=1, var=reminder),), rhs=term.nonlin_constant-1, type=RelationType.INEQ)
+
+            congruence_terms = [LinTerm(var=var, coef=coef) for var, coef in term.lin_terms]
+            congruence_terms.append(LinTerm(coef=-1, var=reminder))
+            congruence_terms = sorted(congruence_terms, key=lambda term: term.var)  # sort to have a canonical representation
+
+            congruence = FrozenRelation(lhs=tuple(congruence_terms), rhs=term.nonlin_constant-1, modulus=term.nonlin_constant, type=RelationType.CONGRUENCE)
+
+            relating_atoms = (larger_than_zero, smaller_than_modulus, congruence)
+            node = NonlinTermNode(introduced_vars=introduced_vars, equivalent_lin_expression=equiv_expr,
+                                  atoms_relating_introduced_vars=relating_atoms, body=term)
+        else:
+            if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
+                node = make_node_for_two_variable_rewrite(term, rewrite_id=len(self.term_nodes))
+            else:
+                node = make_node_for_single_variable_rewrite(term, rewrite_id=len(self.term_nodes))
+
         self.term_nodes[term] = node
         return node
 
@@ -67,6 +187,12 @@ class NonlinTermGraph:
         dropped_nodes = []
         while work_list:
             node = work_list.pop(-1)
+
+            if node.was_dropped:
+                # In case the root node is dependent on multiple variables quantified on the same level
+                # the node might already be dropped
+                continue
+
             dropped_nodes.append(node)
 
             node.was_dropped = True
@@ -74,6 +200,7 @@ class NonlinTermGraph:
                 if not dependent_node.was_dropped:
                     dependent_node.was_dropped = True
                     work_list.append(dependent_node)
+
         return dropped_nodes
 
 
@@ -120,10 +247,6 @@ class ASTInfo:
     used_vars: Set[str] = field(default_factory=set)
 
 
-Atom = Union[Relation, Congruence, BoolLiteral]
-Raw_AST = Union[str, List['Raw_AST']]
-Evaluable_AST = Union[str, Atom, List['Evaluable_AST']]
-
 
 def normalize_expr(ast: Raw_AST, nonlinear_term_graph: NonlinTermGraph) -> Tuple[Expr, Set[NonlinTermNode], Set[str]]:
     if isinstance(ast, str):
@@ -133,6 +256,7 @@ def normalize_expr(ast: Raw_AST, nonlinear_term_graph: NonlinTermGraph) -> Tuple
         except ValueError:
             return Expr(linear_terms={ast: 1}), set(), {ast}
 
+    assert isinstance(ast, list)
     node_type = ast[0]
 
     expr_reductions = {'*': Expr.__mul__, '-': Expr.__sub__, '+': Expr.__add__}  # all are left-associative
@@ -161,23 +285,24 @@ def normalize_expr(ast: Raw_AST, nonlinear_term_graph: NonlinTermGraph) -> Tuple
         for dep_term in dependent_terms:
             dep_term.dependent_terms.add(term_node)
 
-        expr = Expr(linear_terms={term_node.var: 1})
+        expr = Expr(linear_terms={term.var: term.coef for term in term_node.equivalent_lin_expression})
 
         if not dependent_terms:
             nonlinear_term_graph.make_node_root(term_node)
 
-        support.add(term_node.var)
+        support.update(term_node.introduced_vars)
         return expr, {term_node}, support
 
     raise ValueError(f'Cannot reduce unknown expression to evaluable form. {ast=}')
 
 
 def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph) -> Tuple[Union[Relation, BoolLiteral], ASTInfo]:
+    assert isinstance(ast, list)
     predicate_symbol = ast[0]
     if not isinstance(predicate_symbol, str):
         raise ValueError(f'Cannot construct equation for predicate symbol that is not a string: {predicate_symbol=}')
 
-    lhs, _, lhs_support = normalize_expr(ast[1], dep_graph)
+    lhs, _, lhs_support = normalize_expr(ast[1], dep_graph)  # Will remove nonlinear terms and replace them with new variables
     rhs, _, rhs_support = normalize_expr(ast[2], dep_graph)
     support = lhs_support.union(rhs_support)
     top_level_support = set(lhs.linear_terms.keys()) | set(rhs.linear_terms.keys())
@@ -216,49 +341,30 @@ def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph)
     return relation, ast_info
 
 
-def generate_atoms_for_term(node: NonlinTermNode) -> List[Atom]:
-    term = node.body
+def split_lin_terms_into_vars_and_coefs(terms: Iterable[LinTerm]) -> Tuple[List[str], List[int]]:
+    vars, coefs = [], []
+    for term in terms:
+        coefs.append(term.coef)
+        vars.append(term.var)
+    return vars, coefs
 
-    def split_lin_terms_into_vars_and_coefs(terms: Iterable[Tuple[str, int]]) -> Tuple[List[str], List[int]]:
-        vars, coefs = [], []
-        for var, coef in terms:
-            vars.append(var)
-            coefs.append(coef)
-        return vars, coefs
 
-    if term.type == NonlinTermType.MOD:
-        lower_bound = Relation.new_lin_relation(variable_names=[node.var], variable_coefficients=[-1],
-                                                absolute_part=0, predicate_symbol='<=')
-        upper_bound = Relation.new_lin_relation(variable_names=[node.var], variable_coefficients=[1],
-                                                absolute_part=term.nonlin_constant-1, predicate_symbol='<=')
-
-        rhs = (-term.lin_term_constant) % term.nonlin_constant
-        if rhs < 0:
-            rhs += term.nonlin_constant
-
-        # Make a congruence as <original_term> - reminder = <-original_term_abs> (mod modulus)
-        lin_terms = list(term.lin_terms) + [(node.var, -1)]
-        lin_terms = sorted(lin_terms, key=lambda item: item[0])
-        vars, coefs = split_lin_terms_into_vars_and_coefs(lin_terms)
-        congruence = Congruence(vars=vars, coefs=coefs, rhs=rhs, modulus=term.nonlin_constant)
-
-        return [lower_bound, upper_bound, congruence]
-
-    # The new variable is used to express the properties of difference: <original_term> - existential_var * divisor
-    var_coefs = list(term.lin_terms) + [(node.var, -term.nonlin_constant)]
-    var_ceofs = sorted(var_coefs, key=lambda item: item[0])
-    vars, coefs = split_lin_terms_into_vars_and_coefs(var_coefs)
-
-    neg_coefs = [-coef for coef in coefs]
-    lower_bound = Relation.new_lin_relation(variable_names=vars, variable_coefficients=neg_coefs,
-                                            absolute_part=0, predicate_symbol='<=')
-    upper_bound = Relation.new_lin_relation(variable_names=vars, variable_coefficients=coefs,
-                                            absolute_part=term.nonlin_constant - 1, predicate_symbol='<=')
-    return [lower_bound, upper_bound]
+def generate_atoms_for_term(node: NonlinTermNode) -> List[AST_Atom]:
+    atoms = []
+    for frozen_atom in node.atoms_relating_introduced_vars:
+        vars, coefs = split_lin_terms_into_vars_and_coefs(frozen_atom.lhs)
+        if frozen_atom.type == RelationType.EQ or frozen_atom.type == RelationType.INEQ:
+            atom = Relation.new_lin_relation(variable_names=vars, variable_coefficients=coefs,
+                                             absolute_part=frozen_atom.rhs, predicate_symbol=frozen_atom.type.value)
+        else:
+            atom = Congruence(vars=vars, coefs=coefs, rhs=frozen_atom.rhs, modulus=frozen_atom.modulus)
+        atoms.append(atom)
+    return atoms
 
 
 def is_any_member_if_str(container, elem1, elem2):
     return (isinstance(elem1, str) and elem1 in container) or (isinstance(elem2, str) and elem2 in container)
+
 
 def is_any_node_of_type(types: Iterable[str], node1, node2):
     is_node1 = isinstance(node1, list) and node1[0] in types
@@ -266,15 +372,16 @@ def is_any_node_of_type(types: Iterable[str], node1, node2):
     return is_node1 or is_node2
 
 
-def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, bool_vars: Set[str]) -> Tuple[Evaluable_AST, ASTInfo]:
+def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, bool_vars: Set[str]) -> Tuple[AST_Node, ASTInfo]:
     if isinstance(ast, str):
         return ast, ASTInfo(used_vars={ast})
 
+    assert isinstance(ast, list), f'Freestanding integer found - not a part of any atom: {ast}'
     node_type = ast[0]
     assert isinstance(node_type, str)
 
     if node_type in {'and', 'or'}:
-        new_node: Evaluable_AST = [node_type]
+        new_node: AST_Node = [node_type]
         tree_info = ASTInfo()
         for child in ast[1:]:
             new_child, child_tree_info = _convert_ast_into_evaluable_form(child, dep_graph, bool_vars)
@@ -289,7 +396,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
         return ['not', child], child_ast_info
 
     if node_type == 'exists':
-        new_node: Evaluable_AST = [node_type]
+        new_node: AST_Node = [node_type]
         bound_vars: List[str] = [var for var, dummy_type in ast[1]]  # type: ignore
 
         child, child_ast_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars)
@@ -308,7 +415,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
                 child_ast_info.used_vars.remove(var)
 
         # Try dropping any of the bound vars - collect nonlinear terms (graph nodes) that have to be instantiated
-        dropped_nodes = []
+        dropped_nodes: List[NonlinTermNode] = []
         for var in bound_vars:
             dropped_nodes += dep_graph.drop_nodes_for_var(var)
 
@@ -321,8 +428,9 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
                 child += new_atoms
             else:
                 child = ['and', child] + new_atoms
-            new_node[1] += [[term_node.var, 'Int'] for term_node in dropped_nodes]  # type: ignore
 
+            new_binders_in_node = [[introduced_var, 'Int'] for term_node in dropped_nodes for introduced_var in term_node.introduced_vars]
+            new_node[1] += new_binders_in_node  # type: ignore
         new_node.append(child)
 
         return new_node, child_ast_info
@@ -347,7 +455,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
     raise ValueError(f'Cannot traverse trough {node_type=} while converting AST into evaluable form. {ast=}')
 
 
-def convert_ast_into_evaluable_form(ast: Raw_AST, bool_vars: Set[str]) -> Tuple[Evaluable_AST, ASTInfo]:
+def convert_ast_into_evaluable_form(ast: Raw_AST, bool_vars: Set[str]) -> Tuple[AST_Node, ASTInfo]:
     dep_graph = NonlinTermGraph()
     new_ast, new_ast_info = _convert_ast_into_evaluable_form(ast, dep_graph, bool_vars)
 
@@ -366,7 +474,8 @@ def convert_ast_into_evaluable_form(ast: Raw_AST, bool_vars: Set[str]) -> Tuple[
 
     assert dropped_nodes
 
-    binding_list = [[node.var, 'Int'] for node in dropped_nodes]
+    introduced_vars = itertools.chain(*(node.introduced_vars for node in dropped_nodes))
+    binding_list = [[var, 'Int'] for var in introduced_vars]
     new_atoms = []
     for dropped_node in dropped_nodes:
         new_atoms += generate_atoms_for_term(dropped_node)

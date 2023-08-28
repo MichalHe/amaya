@@ -27,7 +27,15 @@ class PreprocessingConfig:
     perform_prenexing: bool = False
     perform_antiprenexing: bool = False
     disambiguate_variables: bool = True
+    assign_new_variable_names: bool = False
+    """ Completely drop the variable names found in the AST and assign new ones. Implies disambiguation."""
     simplify_variable_bounds: bool = False
+
+    use_congruences_when_rewriting_modulo: bool = True
+    """Use the congruence atom types to rewrite modulo terms."""
+
+    use_two_vars_when_rewriting_nonlin_terms : bool = False
+    """Use two variables <d> and <m> as in `K*<d> + <m> = y` when rewriting nonlinear terms."""
 
 
 @dataclass
@@ -57,6 +65,9 @@ class SolverConfig(object):
 
     export_counter: int = 0
     """(Experimental) An execution-local repurposable counter."""
+
+    disambiguation_scope_separator: str = '_'
+    """String to use when disambiguating quantified variables, producing new var names of the form {old_name}{separator}{scope_id}."""
 
 
 solver_config = SolverConfig()
