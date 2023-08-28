@@ -4,40 +4,41 @@
   <img src="https://github.com/MichalHe/amaya/blob/b14829f48011e50b0c73f98fa06c53adfd9242b8/extras/amaya_logo.png?raw=true" />
 </p>
 
-This is an experimental, automata-based linear integer arithmetic (LIA) SMT solver. 
+Amaya is an experimental, automata-based linear integer arithmetic (LIA) SMT solver.
 
-Amaya supports two execution backends: 
-- a native backend representing transition symbols explicitly. Slow, but great for experimentation,
+Amaya supports two execution backends:
+- a native backend representing transition symbols explicitly. Slow, but offers more experimentation-oriented features such as tracking the semantics of automaton states.
 - a high-performance MTBDD-based backend representing transition symbols symbolically using MTBDDs.
 
 ## Installing
-All required dependencies can be found in `requirements.txt` and a virtual environment with these dependencies is all that 
+All required dependencies can be found in `requirements.txt` and a virtual environment with these dependencies is all that
 is needed to run Amaya using the native (default) backend.
 
 ### Building the high-performance MTBDD backend
-Amaya relies on [sylvan](https://github.com/trolando/sylvan) providing efficient MTBDD implementation. This is achieved by
-implementing a C++ library with custom MTBDD leaves utilized by Amaya, and then implementing a Python `ctypes` wrapper around
-this library.
+Amaya relies on [sylvan](https://github.com/trolando/sylvan) providing efficient MTBDD implementation. In order to utilize Sylvan, Amaya
+implements a C++ library with custom MTBDD leaves and automata algorithms. The python frontend then relies on Python's `ctypes` module
+to call Amaya's C++ library.
 
-The following steps should be performed in order to use the MTBDD-backend:
-1) Compile and install the _sylvan_ library 
-2) Compile the Amaya's C++ library according to the given instructions [amaya-sylvan](https://github.com/MichalHe/learning-sylvan). 
-3) Make sure the resulting shared object is present (a symlink is sufficient) in `amaya/` folder, so that the `ctypes` wrapper will be able to find it.
+The following steps need to be performed in order to use the MTBDD-backend:
+1) Compile and install [sylvan](https://github.com/trolando/sylvan)
+2) Compile [Amaya's C++ library](https://github.com/MichalHe/learning-sylvan).
+3) Make sure the resulting shared object is present in `amaya/` folder, so that the `ctypes` wrapper will be able to find it.
 
 ## Running
-The `run-amaya.py` script provides a user interface to Amaya. This script is current capable of running Amaya in two modes:
-- `get-sat` - single execution of the decision procedure, outputting the SAT value
+The `run-amaya.py` script provides a user interface to Amaya. This script is current capable of running Amaya in three modes:
+- `get-sat`   - single execution of the solver, outputting the SAT value (sat/unsat) of the formula
 - `benchmark` - executes and measures the decision procedure runtime (hot-start).
-The `run-amaya.py` script also provides options that can tweak the decision procedure regardless of the execution mode 
-(e.g. enable eager minimization). See `python3 run-amaya.py --help`. 
+- `convert`   - Run Amaya's preprocessor and output the result in different formats.
+The `run-amaya.py` script also provides options that can tweak the decision procedure regardless of the execution mode
+(e.g. enable eager minimization). See `./run-amaya.py --help`.
 
-### Get-Sat 
+### Get-Sat
 ```bash
 python3 run-amaya.py get-sat FILE
 ```
-The get-sat command evaluates the given SMT2 lib file and reports the results (sat/unsat). This command supports various
+The get-sat command evaluates the given SMTLIB2 file and reports the results (sat/unsat). This command supports various
 flags for inspecting the evaluation process such as the export of the automatons created during the evaluation, or
-writing out the runtime for the individual operations performed during the evaluation etc. 
+writing out the runtime for the individual operations performed during the evaluation etc.
 
 To see a full list of supported switches, see:
 ```bash
@@ -52,7 +53,7 @@ python3 run-amaya.py --backend MTBDD get-sat --output-created-automata smt-files
 ```
 
 ### Benchmarks
-Run Amaya in the benchmarking mode. This mode requires a set of input files to be specified. See `python3 run-amaya.py 
+Run Amaya in the benchmarking mode. This mode requires a set of input files to be specified. See `python3 run-amaya.py
 benchmark --help` for information about how to specify the input files.
 
 If the benchmarking runner encounters a file for which the evaluation procedure did yield different results as expected
@@ -65,25 +66,27 @@ python3 run-amaya.py benchmark --help
 ```
 
 #### Example - Running the TPTP benchmark
-The following command benchmarks Amaya to be run for all SMT2 files present in the `smt-files/tptp` folder (will not be
-searched recursively). The option `--backend naive` specifies that the slower, native backend should be used. The 
+The following command benchmarks Amaya to be run for all SMTLIB2 files present in the `smt-files/tptp` folder (will not be
+searched recursively). The option `--backend naive` specifies that the slower, native backend should be used. The
 option `--execute-times 10` specifies that every benchmark file should be run 10 times and the average runtime will be
 returned.
 ```bash
 python3 run-amaya.py --backend naive benchmark --add-directory smt-files/tptp/ --execute-times 10
 ```
 
-## Known bugs
-Some of the harder problems consume more than 10g of RAM (e.g. Psyco).
+### Convert
+Convert formula from SMTLIB2 into various output formats.
 
-## Benchmark tests
-The following table gives serves to reflect the current capabilities of the Amaya solver. 
+#### Example - Convert SMTLIB2 to the LASH format
+The following example converts an SMTLIB2 formula into the LASH format and outputs the result to the stdout.
+```bash
+./run-amaya.py -p no-congruences -p assign-new-var-names -p nonlinear-term-use-two-vars \
+    benchmarks/formulae/20190429-UltimateAutomizerSvcomp2019/jain_7_true-unreach-call_true-no-overflow_false-termination.i_10.smt2
+```
 
-|Benchmark name | MTBDD TFN Status | Naive TFN Status |Notes |
---- | --- | --- | ---
-| TPTP | Passing | Passing | |
-| UltimateAutomizer | Passing | Passing | |
-| Psyco | Not passing | Unknown | The naive TFN runtime is enormous |
-
-## Implementation backlog
-- [ ] Unify the `ast_relations` and `relations_structures` modules into `relations` module with `data` and `algorithm` submodules
+Since LASH does not support congruences atoms, Amaya's preprocessor must be instructed to not introduce congruences (`-p no-congruences`)
+and rather use inequations. Amaya uses congruences by default, as they offer better runtime characteristics when the moduli in formulae
+are powers of 2. Furthermore, as some benchmarks might use symbols that cannot be part of variable identifiers in the LASH format, the
+preprocessor is instructed to drop all of the variable names and introduce new ones (`-p assign-new-var-names`). Finally,
+the `-p nonlinear-term-use-two-vars` causes Amaya's preprocessor to use two fresh quantified variables instead of one, causing the automata
+manipulated by LASH to be smaller at the cost of having more variables.
