@@ -93,6 +93,11 @@ argparser.add_argument('--debug',
                        default=False,
                        help='Enables debug output  (logging level >= DEBUG).')
 
+argparser.add_argument('--fast',
+                       action='store_true',
+                       default=False,
+                       help='Enable MTBDD backend and Hopcroft\'s minimization.')
+
 argparser.add_argument('-q', '--quiet',
                        action='store_true',
                        default=False,
@@ -132,11 +137,13 @@ argparser.add_argument('-p',
                                 'nonlinear-term-use-two-vars',
                                 'no-congruences',
                                 'assign-new-var-names',
+                                'auto-infer',
                        ],
                        help=('Controls preprocessing transformations applied on input the formula. Options:\n'
-                             '- no-congruences: Do not use Congruence atoms when rewriting modulo terms\n'
-                             '- assign-new-var-names: Give all variables a new name, dropping identifies symbols that might be unsupported in some output format\n'
-                             '- nonlinear-term-use-two-vars: Always use two variables (quotient, reminder) when rewriting a non-linear term'))
+                             '- no-congruences             : Do not use Congruence atoms when rewriting modulo terms\n'
+                             '- assign-new-var-names       : Give all variables a new name, dropping identifies symbols that might be unsupported in some output format\n'
+                             '- nonlinear-term-use-two-vars: Always use two variables (quotient, reminder) when rewriting a non-linear term\n'
+                             '- auto-infer                 : Convert-mode specific - infer preprocessing options from output format.'))
 
 subparsers = argparser.add_subparsers(help='Runner operation')
 get_sat_subparser = subparsers.add_parser('get-sat')
@@ -249,6 +256,11 @@ elif 'input_file' in args:
     solver_config.print_stats = args.print_stats
 elif 'file_to_convert' in args:
     runner_mode = RunnerMode.CONVERT_FORMULA
+    if 'auto-infer' in args.preprocessing_switches:
+       if args.output_format == 'lash':
+            solver_config.preprocessing.use_congruences_when_rewriting_modulo = False
+            solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms = True
+            solver_config.preprocessing.assign_new_variable_names = True
 else:
     print('No execution mode specified. See run-amaya.py --help for more information.', file=sys.stderr)
     sys.exit(1)
@@ -264,11 +276,15 @@ else:
     logger.setLevel(logging.WARNING)
 
 # Initialize the solver configuration
-backend_str_to_type = {
-    'native': BackendType.NATIVE,
-    'MTBDD': BackendType.MTBDD,
-}
-solver_config.backend_type = backend_str_to_type[args.backend]
+if 'fast' in args:
+    solver_config.backend_type = BackendType.MTBDD
+    solver_config.minimization_method = MinimizationAlgorithms.HOPCROFT
+else:
+    backend_str_to_type = {
+        'native': BackendType.NATIVE,
+        'MTBDD': BackendType.MTBDD,
+    }
+    solver_config.backend_type = backend_str_to_type[args.backend]
 
 solution_domain_str_to_type = {
     'naturals': SolutionDomain.NATURALS,
@@ -303,7 +319,7 @@ elif args.minimization_method == 'brzozowski':
     if solver_config.backend_type == BackendType.MTBDD:
         print('Brzozowski minimization is not supported with the MTBDD backend.', file=sys.stderr)
         sys.exit(1)
-else:
+elif 'fast' not in args:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
 solver_config.allow_lazy_evaluation = args.allow_lazy_evaluation

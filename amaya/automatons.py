@@ -99,11 +99,14 @@ class NFA:
         # TODO: Rename this function to be get post or similar
         return self.transition_fn.get_transition_target(origin, via_symbol)
 
-    def intersection(self, other: NFA, remove_nonfinishing_states: bool = True):
+    def intersection(self, other: NFA, remove_nonfinishing_states: bool = True) -> NFA:
         """
         Construct automaton accepting the intersection of the languages of this and the other automaton.
         """
         assert self.alphabet == other.alphabet
+
+        if not self.final_states or not other.final_states:
+            return self.trivial_nonaccepting(self.alphabet)
 
         logger.info('Performing automaton intesection. Input automaton sizes: {0} states other {1} states'.format(
             len(self.states), len(other.states)))

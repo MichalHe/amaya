@@ -566,8 +566,8 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
                     yield (origin, sym, dest)
 
     def remove_nonfinishing_states(self, states: Set, final_states: Set) -> Set:
-        '''BFS on rotated transitions'''
-        logger.info('Removing nonfinishing states (#states=%d).', len(states))
+        """Remove states with an empty language."""
+        logger.info('Removing nonfinishing states (#states=%d, final_states=%d).', len(states), len(final_states))
         logger.info('Rotating transition function.')
         rotated_transitions = make_rotate_transition_function(self.data)
 
