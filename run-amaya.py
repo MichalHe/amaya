@@ -276,7 +276,7 @@ else:
     logger.setLevel(logging.WARNING)
 
 # Initialize the solver configuration
-if 'fast' in args:
+if args.fast:
     solver_config.backend_type = BackendType.MTBDD
     solver_config.minimization_method = MinimizationAlgorithms.HOPCROFT
 else:
