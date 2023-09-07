@@ -555,6 +555,8 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
 
+            formula_to_evaluate = var_bounds_lib.simplify_unbounded_equations(formula_to_evaluate)
+
             if solver_config.preprocessing.simplify_variable_bounds:
                 logger.info(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)
                 formula_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)

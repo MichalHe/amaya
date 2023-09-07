@@ -6,6 +6,7 @@ from dataclasses import (
 )
 import functools
 import itertools
+from math import gcd
 from typing import (
     Dict,
     List,
@@ -18,6 +19,7 @@ from typing import (
 from amaya.relations_structures import (
     AST_NaryNode,
     AST_Node,
+    BoolLiteral,
     Congruence,
     ModuloTerm,
     Relation,
@@ -446,3 +448,48 @@ def simplify_bounded_atoms(ast: AST_Node) -> Optional[AST_Node]:
     ast_with_bounds = perform_variable_bounds_analysis_on_ast(ast)
     simplified_tree = _simplify_bounded_atoms(ast_with_bounds, set())
     return simplified_tree
+
+
+def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
+    if isinstance(ast, str) or isinstance(ast, Relation) or isinstance(ast, Congruence):
+        return ast
+    if isinstance(ast, BoolLiteral):
+        return ast
+
+    assert isinstance(ast, list)
+    node_type = ast[0]
+
+    if node_type == 'exists':
+        if isinstance(ast[2], Relation) and ast[2].predicate_symbol == '=':
+            bound_vars: List[str] = [var for var, type in ast[1]]  # type: ignore
+            rel: Relation = ast[2]
+
+            bound_var_coefs: List[int] = []
+            remaining_lin_terms: List[Tuple[str, int]] = []
+            for var, coef in zip(rel.variable_names, rel.variable_coefficients):
+                if var in bound_vars:
+                    bound_var_coefs.append(coef)
+                    continue
+                remaining_lin_terms.append((var, coef))
+            remaining_lin_terms = sorted(remaining_lin_terms, key = lambda var_coef_pair: var_coef_pair[0])
+
+            vars, coefs = [], []
+            for var, coef in remaining_lin_terms:
+                vars.append(var)
+                coefs.append(coef)
+
+            if sum(coef > 0 for coef in coefs):
+                coefs = [-1 * coef for coef in coefs]
+
+            modulus = gcd(*bound_var_coefs)
+            congruence = Congruence(vars=list(vars), coefs=list(coefs), rhs=rel.absolute_part, modulus=modulus)
+            return congruence
+        return [node_type, _simplify_unbounded_equations(ast[2])]
+    else:
+        children = (_simplify_unbounded_equations(child) for child in ast[1:])
+        ret: AST_Node = [node_type, *children]
+        return ret
+
+
+def simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
+    return _simplify_unbounded_equations(ast)
