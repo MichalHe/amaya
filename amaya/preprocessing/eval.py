@@ -437,6 +437,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
 
     if node_type == '=':
         connectives = {'and', 'or', 'not', 'exists', 'forall'}
+
         if is_any_member_if_str(bool_vars, ast[1], ast[2]) or is_any_node_of_type(connectives, ast[1], ast[2]):
             lhs, lhs_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars)
             rhs, rhs_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars)

@@ -352,7 +352,7 @@ def _disambiguate_vars(ast: TreeType, var_scope_info: Dict[str, Var_Scope_Info],
     raise NotImplementedError(f'[Variable name disambiguation] Unhandled {node_type=} while traversing ast.')
 
 
-def disambiguate_variables(ast: TreeType, constant_function_symbols: Iterable[FunctionSymbol]) -> Tuple[Iterable[FunctionSymbol], TreeType]:
+def disambiguate_variables(ast: TreeType, constant_function_symbols: Iterable[FunctionSymbol]) -> Tuple[Iterable[Tuple[FunctionSymbol, FunctionSymbol]], TreeType]:
     """Modifies the AST so that all variables have unique names."""
     global_scope_info: Dict[str, Var_Scope_Info] = {}
     var_scope_cnt: Dict[str, int] = {}
@@ -368,7 +368,7 @@ def disambiguate_variables(ast: TreeType, constant_function_symbols: Iterable[Fu
     for symbol in constant_function_symbols:
         new_symbol = FunctionSymbol(name=global_scope_info[symbol.name].put_scope_id_into_name(symbol.name),
                                     arity=symbol.arity, args=symbol.args, return_type=symbol.return_type)
-        disambiguated_global_symbols.append(new_symbol)
+        disambiguated_global_symbols.append((symbol, new_symbol))
 
     return (disambiguated_global_symbols, disambiguated_tree)
 
@@ -451,7 +451,7 @@ def assign_fresh_names_to_all_vars_weak(ast: AST_Node, fn_symbols: Iterable[Func
 def preprocess_ast(ast: Raw_AST,
                    constant_function_symbols: Iterable[FunctionSymbol],
                    bool_vars: Set[str],
-                   solver_config: SolverConfig = solver_config) -> Tuple[Iterable[FunctionSymbol], AST_Node]:
+                   solver_config: SolverConfig = solver_config) -> Tuple[Iterable[Tuple[FunctionSymbol, FunctionSymbol]], AST_Node]:
     """
     Peforms preprocessing on the given AST. The following proprocessing operations are performed:
         - universal quantifiers are replaced with existential quantifiers,
@@ -500,11 +500,22 @@ def preprocess_ast(ast: Raw_AST,
     transform_ast(ast, third_pass_context, third_pass_transformations)
     logger.info('Removed %d negation pairs.', third_pass_context["negation_pairs_removed_cnt"])
 
+    fn_symbols = constant_function_symbols
     disambiguated_vars = False
     if solver_config.preprocessing.disambiguate_variables:
         logger.info('Disambiguating variables.')
-        fn_symbols, ast = disambiguate_variables(ast, constant_function_symbols)
+        fn_symbol_changes, ast = disambiguate_variables(ast, constant_function_symbols)
+        fn_symbols = [new_sym for old_sym, new_sym in fn_symbol_changes]
+
+        new_bool_vars = set()
+        for old_sym, new_sym in fn_symbol_changes:
+            if old_sym.name in bool_vars:
+                new_bool_vars.add(new_sym.name)
+
+        bool_vars = new_bool_vars
         disambiguated_vars = True
+    else:
+        fn_symbol_changes = [(sym, sym) for sym in fn_symbols]
 
     logger.info('Condensing atomic relation ASTs into AST leaves.')
     evaluable_ast, _ = convert_ast_into_evaluable_form(ast, bool_vars)
@@ -514,4 +525,4 @@ def preprocess_ast(ast: Raw_AST,
     else:
         fn_symbols = constant_function_symbols
 
-    return fn_symbols, evaluable_ast
+    return fn_symbol_changes, evaluable_ast

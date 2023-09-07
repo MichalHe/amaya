@@ -532,6 +532,8 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             ctx = EvaluationContext()
             function_symbols = sorted(function_symbol_to_info_map.values(), key=lambda symbol: symbol.name)
+            for fun_symbol in function_symbols:
+                ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
 
             # If there are multiple assert statements, evaluate their conjunction
             formula_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
@@ -540,13 +542,18 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             bool_symbols = {
                 var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL
             }
-            function_symbols, formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate,  # type: ignore
-                                                                                 constant_function_symbols=function_symbols,
-                                                                                 bool_vars=bool_symbols)
-            logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
 
-            for fun_symbol in function_symbols:
-                ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
+            fn_symbol_changes, formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate,  # type: ignore
+                                                                                  constant_function_symbols=function_symbols,
+                                                                                  bool_vars=bool_symbols)
+
+            for old_sym, new_sym in fn_symbol_changes:
+                if old_sym.name in ctx.global_variables:
+                    ctx.global_variables[new_sym.name] = ctx.global_variables[old_sym.name]
+                    ctx.global_variables[new_sym.name].name = new_sym.name
+                    del ctx.global_variables[old_sym.name]
+
+            logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
 
             if solver_config.preprocessing.simplify_variable_bounds:
                 logger.info(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)
@@ -575,7 +582,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             ]
             alphabet = LSBF_Alphabet.from_variable_id_pairs(vars_with_ids)
 
-            eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet)
+            eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet, global_scope=ctx.global_variables)
             add_only_used_function_constants_to_context(eval_ctx, all_vars, function_symbols)
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
@@ -788,7 +795,10 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
     assert type(expr) == list
 
     if len(expr) == 2:
-        expr = expr[1]  # type: ignore
+        # There might be situation when we simplify variable bounds that we lift some atoms all the way to the root of the formula
+        # while keeping their connectives intact - for example, a [and, <atom>] might come to exist in the formula
+        return get_automaton_for_operand(expr[1], ctx, _depth)
+
 
     first_operand = expr[1]
 
