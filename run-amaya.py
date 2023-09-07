@@ -155,7 +155,7 @@ get_sat_subparser.add_argument('input_file',
 
 get_sat_subparser.add_argument('--output-format',
                                metavar='format',
-                               choices=['dot', 'vtf'],
+                               choices=['dot', 'vtf', 'mata'],
                                default='dot',
                                dest='output_format',
                                help='Specify the format of the exported automata.')
@@ -375,6 +375,8 @@ def run_in_getsat_mode(args) -> bool:
                 output_contents = str(vis_representation.into_graphviz(highlight_sccs=args.colorize_dot))
             elif args.output_format == 'vtf':
                 output_contents = vis_representation.into_vtf()
+            elif args.output_format == 'mata':
+                output_contents = vis_representation.into_mata()
             output_file.write(output_contents)
 
     def discard_created_automaton(info: parse.IntrospectionData):
