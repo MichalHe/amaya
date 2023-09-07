@@ -159,7 +159,7 @@ class NonlinTermGraph:
             congruence_terms.append(LinTerm(coef=-1, var=reminder))
             congruence_terms = sorted(congruence_terms, key=lambda term: term.var)  # sort to have a canonical representation
 
-            congruence = FrozenRelation(lhs=tuple(congruence_terms), rhs=term.nonlin_constant-1, modulus=term.nonlin_constant, type=RelationType.CONGRUENCE)
+            congruence = FrozenRelation(lhs=tuple(congruence_terms), rhs=0, modulus=term.nonlin_constant, type=RelationType.CONGRUENCE)
 
             relating_atoms = (larger_than_zero, smaller_than_modulus, congruence)
             node = NonlinTermNode(introduced_vars=introduced_vars, equivalent_lin_expression=equiv_expr,
