@@ -326,6 +326,8 @@ elif 'fast' not in args:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
 solver_config.allow_lazy_evaluation = args.allow_lazy_evaluation
+if solver_config.allow_lazy_evaluation:
+    solver_config.preprocessing.simplify_variable_bounds = True
 
 
 def ensure_output_destination_valid(output_destination: str):
