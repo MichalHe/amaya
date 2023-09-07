@@ -19,6 +19,9 @@ from typing import (
     Union,
 )
 
+from amaya.stats import AutomatonInfo, StatPoint
+from graphviz import Digraph
+
 
 T = TypeVar('T')
 S = TypeVar('S')
@@ -170,8 +173,8 @@ def find_sccs_kosaruju(graph: Dict[T, Iterable[T]]) -> Set[Tuple[T]]:
 def get_color_palette_with_min_size(min_palette_size: int) -> ColorPalette:
     """
     Constructs a color palette with size at least as big as the requirested size.
-    
-    The color palette has the first 14 colors defined by hand. If the requested palette is is greater than 14, 
+
+    The color palette has the first 14 colors defined by hand. If the requested palette is is greater than 14,
     the missing colors are generated randomly.
 
     :param min_palette_size: The minimal number of colors to present in the palette.
@@ -185,3 +188,58 @@ def get_color_palette_with_min_size(min_palette_size: int) -> ColorPalette:
                             (randint(0, 255), randint(0, 255), randint(0, 255)) for i in range(missing_color_cnt)
                         )]
         return list(COLOR_PALETTE) + random_colors
+
+
+def _construct_newick_tree_from_trace(root: StatPoint, output_id_to_op_table: Dict[int, StatPoint]) -> str:
+    # print(root.output.automaton_id)
+    if not root.operand1 and not root.operand2:
+        return f'{root.operation.value}:{root.output.size}'
+
+    if root.operand1 and not root.operand2:
+        op = output_id_to_op_table[root.operand1.automaton_id]
+        operand1_str = _construct_newick_tree_from_trace(op, output_id_to_op_table)
+        return f'({operand1_str},{root.operation.value}:{root.output.size})'
+    if root.operand2 and not root.operand1:
+        op = output_id_to_op_table[root.operand2.automaton_id]
+        operand2_str = _construct_newick_tree_from_trace(op, output_id_to_op_table)
+        return f'({operand2_str},{root.operation.value}:{root.output.size})'
+
+    assert root.operand1 and root.operand2
+
+    op1 = output_id_to_op_table[root.operand1.automaton_id]
+    operand1_str = _construct_newick_tree_from_trace(op1, output_id_to_op_table)
+
+    op2 = output_id_to_op_table[root.operand2.automaton_id]
+    operand2_str = _construct_newick_tree_from_trace(op2, output_id_to_op_table)
+    return f'({operand1_str},{root.operation.value}:{root.output.size},{operand2_str})'
+
+
+def construct_newick_tree_from_trace(trace: List[StatPoint]) -> str:
+    operands = set()
+    for op in trace:
+        if op.operand1:
+            operands.add(op.operand1.automaton_id)
+        if op.operand2:
+            operands.add(op.operand2.automaton_id)
+
+    roots = [op for op in trace if op.output.automaton_id not in operands]
+    if len(roots) > 1:
+        raise ValueError(f'Cannot construct newick tree from given trace - there are multiple root nodes in the tree.')
+    root = roots[0]
+
+    output_id_to_op_table = {op.output.automaton_id: op for op in trace}
+
+    return _construct_newick_tree_from_trace(root, output_id_to_op_table)
+
+
+def construct_dot_tree_from_trace(trace: List[StatPoint]) -> str:
+    graph = Digraph('traceviz', strict=True, graph_attr={'rankdir': 'LR', 'ranksep': '1'})
+    for op in trace:
+        graph.node(str(op.output.automaton_id), f'{op.operation.value}, size={op.output.size}, ID={op.operation_id}')
+    for op in trace:
+        if op.operand1:
+            graph.edge(str(op.output.automaton_id), str(op.operand1.automaton_id))
+        if op.operand2:
+            graph.edge(str(op.output.automaton_id), str(op.operand2.automaton_id))
+
+    return str(graph)

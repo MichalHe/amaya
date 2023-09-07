@@ -55,46 +55,27 @@ from amaya.semantics_tracking import (
     AH_AtomType,
 )
 from amaya import utils
+from amaya.stats import (
+    ParsingOperation,
+    AutomatonInfo,
+    OperationStartEntry,
+    StatPoint,
+    RunStats
+)
 
 PRETTY_PRINT_INDENT = ' ' * 2
 
 logger.setLevel(INFO)
 
 
-class ParsingOperation(Enum):
-    BUILD_NFA_FROM_INEQ = 'build_nfa_from_ineq'
-    BUILD_NFA_FROM_SHARP_INEQ = 'build_nfa_from_sharp_ineq'
-    BUILD_NFA_FROM_EQ = 'build_nfa_from_eq'
-    BUILD_NFA_FROM_CONGRUENCE = 'build_nfa_from_eq'
-    BUILD_NFA_FROM_RELATION = 'build_nfa_from_relation'  # We don't know the relation type, or we do not care.
-    LAZY_CONSTRUCT = 'lazy'
-    NFA_UNION = 'union'
-    NFA_PROJECTION = 'projection'
-    NFA_COMPLEMENT = 'complement'
-    NFA_DETERMINIZE = 'determinize'
-    NFA_INTERSECT = 'intersection'
-    BUILD_DFA_FROM_INEQ = 'build_dfa_from_ineq'
-    BUILD_DFA_FROM_SHARP_INEQ = 'build_dfa_from_ineq'
-    BUILD_DFA_FROM_EQ = 'build_dfa_from_ineq'
-    MINIMIZE = 'minimization'
-
-
 @dataclass
-class StatPoint:
+class IntrospectionData:
+    automaton: NFA
+    operation_id: int
     operation: ParsingOperation
-    input1_size: int
-    input2_size: Optional[int]
-    output_size: Optional[int]
-    runtime_ns: int
 
 
-@dataclass
-class RunStats:
-    max_automaton_size: int = 0
-    trace: List[StatPoint] = field(default_factory=list)
-
-
-IntrospectHandle = Callable[[NFA, ParsingOperation], None]
+IntrospectHandle = Callable[[IntrospectionData], None]
 
 
 @dataclass
@@ -106,13 +87,20 @@ class VariableInfo:
 
 
 class EvaluationContext:
-    def __init__(self, emit_introspect=lambda nfa, operation: None, alphabet: Optional[LSBF_Alphabet] = None, global_scope: Optional[Dict[str, VariableInfo]] = None):
-        self.introspect_handle = emit_introspect
+    def __init__(self,
+                 emit_introspect: Optional[IntrospectHandle] = None,
+                 alphabet: Optional[LSBF_Alphabet] = None,
+                 global_scope: Optional[Dict[str, VariableInfo]] = None):
+        if emit_introspect:
+            self.introspect_handle = emit_introspect
+        else:
+            self.introspect_handle = lambda info: None
 
         # Evaluation stats
         self.collect_stats = True
         self.stats = RunStats()
-        self.pending_operations_stack: List[Any] = []
+        self.pending_operations_stack: List[OperationStartEntry] = []
+        self.operations_performed: int = 0
 
         self.next_available_variable_id = 1  # Number them from 1, MTBDDs require
         self.variables_info_stack: List[Dict[str, VariableInfo]] = []
@@ -131,37 +119,50 @@ class EvaluationContext:
             raise ValueError('Requesting the overall alphabet from the evaluation context when None has been set.')
         return self.alphabet
 
-    def emit_evaluation_introspection_info(self, nfa: NFA, operation: ParsingOperation):
-        self.stats.max_automaton_size = max(self.stats.max_automaton_size, len(nfa.states))
-        self.introspect_handle(nfa, operation)
-
     def stats_operation_starts(self, operation: ParsingOperation, input1: Optional[NFA], input2: Optional[NFA]):
-        """(performance tracking) Note the time at which the given operation with given params starts."""
-        if not solver_config.track_operation_runtime:
-            return
+        """Notify the context that an operation has started (statistics tracking)."""
+        start = 0 if not solver_config.track_operation_runtime else time.time_ns()
 
-        startpoint = [
-            operation,
-            len(input1.states) if input1 is not None else None,
-            len(input2.states) if input2 is not None else None,
-            time.time_ns()
-        ]
+        operand1_info = AutomatonInfo.from_automaton(input1)
+        operand2_info = AutomatonInfo.from_automaton(input2)
+        startpoint = OperationStartEntry(op_type=operation, operand1=operand1_info, operand2=operand2_info, start_ns=start)
 
         self.pending_operations_stack.append(startpoint)
 
-    def stats_operation_ends(self, output: NFA):
-        """(performance tracking) Note the time at which the given operation with given params ends."""
-        if not solver_config.track_operation_runtime:
-            return
+    def stats_operation_ends(self, output: NFA) -> int:
+        """
+        Notify the context that an operation ended an a automaton has been produced.
 
-        op_startpoint = self.pending_operations_stack.pop(-1)  # Operation starting point
-        op, size1, size2, start_ns = op_startpoint
+        Returns:
+            ID of the finished operation.
+        """
 
-        runtime = time.time_ns() - start_ns
+        self.stats.max_automaton_size = max(self.stats.max_automaton_size, len(output.states))
 
-        stat = StatPoint(op, size1, size2, len(output.states), runtime)
+        op_start = self.pending_operations_stack.pop(-1)  # Operation starting point
+
+        operation_id = self.operations_performed
+        output.operation_id = operation_id
+        self.operations_performed += 1
+
+        if self.introspect_handle:
+            introspect_data = IntrospectionData(automaton=output, operation_id=operation_id, operation=op_start.op_type)
+            self.introspect_handle(introspect_data)
+
+
+        runtime = time.time_ns() - op_start.start_ns if solver_config.track_operation_runtime else 0
+        output_info = AutomatonInfo.from_automaton(output)
+        assert output_info
+        stat = StatPoint(operation=op_start.op_type,
+                         operand1=op_start.operand1,
+                         operand2=op_start.operand2,
+                         output=output_info,
+                         operation_id=operation_id,
+                         runtime_ns=runtime)
+
         logger.info(f"Operation finished: {stat}")
         self.stats.trace.append(stat)
+        return operation_id
 
     def _generate_new_variable_id(self) -> int:
         variable_id = self.next_available_variable_id
@@ -476,7 +477,7 @@ def parse_function_symbol_declaration(decl_ast: AST_NaryNode) -> FunctionSymbol:
 
 # @Cleanup: This should be renamed to something like evaluate_smt2
 def perform_whole_evaluation_on_source_text(source_text: str,
-                                            emit_introspect: IntrospectHandle = lambda nfa, op: None
+                                            emit_introspect: Optional[IntrospectHandle] = None
                                             ) -> Tuple[NFA, Dict[str, str], RunStats]:
     """
     Parses the given SMT2 source code and runs the evaluation procedure.
@@ -579,7 +580,6 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
             nfa = run_evaluation_procedure(formula_to_evaluate, eval_ctx)
-            print(f'{eval_ctx.stats=}')
             eval_result = nfa
         elif statement_root == 'exit':
             return (nfa, smt_info, eval_ctx.stats)
@@ -601,9 +601,10 @@ def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> N
     ctx.alphabet.assert_variable_names_to_ids_match(var_id_pairs)
 
     constr = ctx.get_automaton_class_for_current_backend()
+    ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_CONGRUENCE, None, None)
     nfa = relations_to_nfa.build_presburger_congruence_nfa(constr, ctx.alphabet, congruence, var_id_pairs)
+    ctx.stats_operation_ends(nfa)
 
-    ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.BUILD_NFA_FROM_CONGRUENCE)
     return nfa
 
 
@@ -642,6 +643,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
     # the modulo term inside, not the nonmodular variables
 
     if relation.is_congruence_equality():
+        assert False
         logger.debug(f'Given relation: %s is congruence equivalence. Reordering variables.', relation)
         modulo_term = relation.modulo_terms[0]
         variable_id_pairs = sorted(ctx.get_multiple_variable_ids(modulo_term.variables),
@@ -690,8 +692,10 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
                                                        predicate_symbol=relation.predicate_symbol)
 
         assert automaton_building_function
+
+        ctx.stats_operation_starts(operation, None, None)
         nfa = automaton_building_function(automaton_constr, ctx.alphabet, reordered_relation, variable_id_pairs)
-        ctx.emit_evaluation_introspection_info(nfa, operation)
+        ctx.stats_operation_ends(nfa)
 
         emit_evaluation_progress_info(
             f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})',
@@ -760,13 +764,13 @@ def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
         minimized_dfa = nfa.minimize_brzozowski()
     else:
         if nfa.automaton_type != AutomatonType.DFA:
+            ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, nfa, None)
             nfa = nfa.determinize()
-            ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_DETERMINIZE)
+            ctx.stats_operation_ends(nfa)
         minimized_dfa = nfa.minimize_hopcroft()
 
     logger.info('Minimization applied - inputs has %d states, result %d.', len(nfa.states), len(minimized_dfa.states))
     ctx.stats_operation_ends(minimized_dfa)
-    ctx.emit_evaluation_introspection_info(minimized_dfa, ParsingOperation.MINIMIZE)
     return minimized_dfa
 
 
@@ -798,11 +802,7 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
         reduction_result = reduction_fn(reduction_result, next_operand_automaton)
 
         # reduction_result = reduction_result.determinize()
-
         ctx.stats_operation_ends(reduction_result)
-
-        # Emit the evaluation information before minimization
-        ctx.emit_evaluation_introspection_info(reduction_result, reduction_operation)
 
         reduction_result = minimize_automaton_if_configured(reduction_result, ctx)
 
@@ -877,7 +877,6 @@ def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: in
         ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
         operand = operand.determinize()
         ctx.stats_operation_ends(operand)
-        ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_DETERMINIZE)
         emit_evaluation_progress_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
 
     ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
@@ -888,8 +887,6 @@ def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: in
     operand = minimize_automaton_if_configured(operand, ctx)
 
     emit_evaluation_progress_info(f' >> complement(operand) - (result size: {len(operand.states)})', _depth)
-
-    ctx.emit_evaluation_introspection_info(operand, ParsingOperation.NFA_COMPLEMENT)
     return operand
 
 
@@ -913,9 +910,12 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
                 atoms: List[AST_Atom] = conjunction[1:]  # type: ignore
                 from amaya.mtbdd_transitions import MTBDDTransitionFn
                 quantified_vars: List[str] = [var for var in variable_bindings]
+
+                ctx.stats_operation_starts(ParsingOperation.LAZY_CONSTRUCT, None, None)
                 nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, quantified_vars, ctx.get_alphabet(), ctx.get_variable_id)
+                ctx.stats_operation_ends(nfa)
+
                 ctx.pop_variable_frame()
-                ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.LAZY_CONSTRUCT)
                 logger.info("Lazy construnction done, result has %d states", len(nfa.states))
                 nfa = minimize_automaton_if_configured(nfa, ctx)
                 return nfa
@@ -954,8 +954,6 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
         nfa = projection_result
         ctx.stats_operation_ends(nfa)
         logger.debug(f'Variable {var_id} projected away.')
-
-        ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.NFA_PROJECTION)
 
     nfa = minimize_automaton_if_configured(nfa, ctx)
 

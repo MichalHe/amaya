@@ -60,8 +60,8 @@ class AutomatonType(IntFlag):
 
 @dataclass
 class NFA:
-    alphabet:       LSBF_Alphabet
-    state_semantics:   AH_Node
+    alphabet:        LSBF_Alphabet
+    state_semantics: AH_Node
 
     automaton_type: AutomatonType = AutomatonType.NFA
     transition_fn:  SparseSimpleTransitionFunction = field(default_factory=SparseSimpleTransitionFunction)
@@ -69,6 +69,8 @@ class NFA:
     final_states:   Set[int] = field(default_factory=set)
     states:         Set[int] = field(default_factory=set)
     extra_info:     Dict[Any, Any] = field(default_factory=dict)
+
+    operation_id:   int = -1
 
     # Debug handle to listen to any state renaming happening during
     # intersecion/union; takes (automaton_id: int, old_state: int, new_state: int)

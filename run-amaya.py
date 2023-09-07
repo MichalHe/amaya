@@ -45,6 +45,7 @@ from amaya.preprocessing import preprocess_ast
 from amaya.preprocessing.eval import convert_ast_into_evaluable_form
 from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, FunctionSymbol
 from amaya.tokenize import tokenize
+import amaya.utils as utils
 
 
 class RunnerMode(Enum):
@@ -159,13 +160,15 @@ get_sat_subparser.add_argument('--output-format',
                                dest='output_format',
                                help='Specify the format of the exported automata.')
 
-get_sat_subparser.add_argument('--output-created-automata',
+get_sat_subparser.add_argument('-o'
+                               '--output-created-automata',
                                metavar='destination',
                                dest='output_destination',
                                help='Causes the intermediate automata manipulated throughout the decision procedure'
                                     ' to be exported to the given location.')
 
-get_sat_subparser.add_argument('--print-operations-runtime',
+get_sat_subparser.add_argument('-t',
+                               '--print-operations-runtime',
                                action='store_true',
                                dest='should_print_operations_runtime',
                                default=False,
@@ -362,31 +365,24 @@ def run_in_getsat_mode(args) -> bool:
     solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
     solver_config.current_formula_path = os.path.abspath(args.input_file)
 
-    # Wrap in a dictionary so we can modify it from nested functions
-    _enclosing_ctx = {
-        'automatons_written_counter': 0
-    }
-
-    def write_created_automaton_to_folder(nfa: automatons.NFA, op: parse.ParsingOperation):
-        filename = os.path.join(args.output_destination,
-                                f'{_enclosing_ctx["automatons_written_counter"]}-{op.value}.{args.output_format}')
-        with open(filename, 'w') as output_file:
-            vis_representation = nfa.get_visualization_representation().compress_symbols()
+    def write_created_automaton_to_folder(introspection_info: parse.IntrospectionData):
+        filename = f'{introspection_info.operation_id}-{introspection_info.operation.value}.{args.output_format}'
+        output_path = os.path.join(args.output_destination, filename)
+        with open(output_path, 'w') as output_file:
+            vis_representation = introspection_info.automaton.get_visualization_representation().compress_symbols()
             output_contents = ''
             if args.output_format == 'dot':
                 output_contents = str(vis_representation.into_graphviz(highlight_sccs=args.colorize_dot))
             elif args.output_format == 'vtf':
                 output_contents = vis_representation.into_vtf()
             output_file.write(output_contents)
-        _enclosing_ctx['automatons_written_counter'] += 1
 
-    def print_created_automaton_to_stdout(nfa: automatons.NFA, op: parse.ParsingOperation):
-        print(nfa.get_visualization_representation().into_graphviz())
-
-    def discard_created_automaton(nfa: automatons.NFA, op: parse.ParsingOperation):
+    def discard_created_automaton(info: parse.IntrospectionData):
         pass
 
-    if args.output_destination:
+    should_output_created_automata = bool(args.output_destination)
+
+    if should_output_created_automata:
         ensure_output_destination_valid(args.output_destination)
         handle_automaton_created_fn = write_created_automaton_to_folder
     else:
@@ -419,8 +415,21 @@ def run_in_getsat_mode(args) -> bool:
         print(computed_sat)
         if args.should_print_model:
             print('Model:', model)
+
         if solver_config.print_stats:
-            print(stats)
+            print(f'------------- STATISTICS -------------')
+            print(f'Max automaton size: {stats.max_automaton_size}')
+            for i, op in enumerate(stats.trace):
+                print(f'{i}  {op.operation.value} input1={op.operand1} input2={op.operand2} output={op.output} runtime={op.runtime_ns} (ns)')
+
+        if should_output_created_automata:
+            # Dump tracefile
+            trace_file = 'trace-info.dot'
+            trace_path = os.path.join(args.output_destination, trace_file)
+            with open(trace_path, 'w') as trace_out_file:
+                trace_graph = utils.construct_dot_tree_from_trace(stats.trace)
+                trace_out_file.write(trace_graph)
+
         return True
 
 
