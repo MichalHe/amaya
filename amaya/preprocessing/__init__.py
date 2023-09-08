@@ -526,3 +526,40 @@ def preprocess_ast(ast: Raw_AST,
         fn_symbols = constant_function_symbols
 
     return fn_symbol_changes, evaluable_ast
+
+
+def _flatten_bool_nary_connectives(ast: AST_Node) -> AST_Node:
+    if not isinstance(ast, list):
+        return ast
+
+    parent_type: str = ast[0]  # type: ignore
+
+    connectives_to_flatten = (AST_Node_Names.AND.value, AST_Node_Names.OR.value)
+    if parent_type in connectives_to_flatten:
+
+        new_node: AST_Node = [parent_type]
+
+        for child in ast[1:]:
+            flattened_child = _flatten_bool_nary_connectives(child)
+            is_nary_node = isinstance(flattened_child , list)
+            if is_nary_node and flattened_child[0] == parent_type:
+                new_node.extend(flattened_child[1:])
+            else:
+                new_node.append(flattened_child)
+
+        return new_node
+
+    if parent_type == AST_Node_Names.EXISTS.value:
+        new_child = _flatten_bool_nary_connectives(ast[2])
+        return [parent_type, ast[1], new_child]
+
+    if parent_type == AST_Node_Names.NOT.value:
+        new_child = _flatten_bool_nary_connectives(ast[1])
+        return [parent_type, new_child]
+
+    logger.warning(f'Node {parent_type} is not explicitly handled when flattening bool connectives.')
+    return [parent_type, *(_flatten_bool_nary_connectives(child) for child in ast[1:])]
+
+
+def flatten_bool_nary_connectives(ast: AST_Node) -> AST_Node:
+    return _flatten_bool_nary_connectives(ast)
