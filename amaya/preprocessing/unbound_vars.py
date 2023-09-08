@@ -19,6 +19,7 @@ from typing import (
 from amaya.relations_structures import (
     AST_NaryNode,
     AST_Node,
+    AST_Node_Names,
     BoolLiteral,
     Congruence,
     ModuloTerm,
@@ -493,3 +494,56 @@ def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
 
 def simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
     return _simplify_unbounded_equations(ast)
+
+
+def drop_negation_if_holding(ast: AST_Node, holding_negation: bool) -> AST_Node:
+    return [AST_Node_Names.NOT.value, ast] if holding_negation else ast
+
+
+def _push_negations_towards_atoms(ast: AST_Node, holding_negation) -> AST_Node:
+    if isinstance(ast, str):
+        return drop_negation_if_holding(ast, holding_negation)
+
+    if isinstance(ast, Relation):
+        rel: Relation = ast
+        if rel.predicate_symbol == '=':
+            return drop_negation_if_holding(rel, holding_negation)
+        assert rel.predicate_symbol == '<='
+        negated_coefs = [-coef for coef in rel.variable_coefficients]
+        return Relation.new_lin_relation(variable_names=rel.variable_names, variable_coefficients=negated_coefs,
+                                         absolute_part=rel.absolute_part, predicate_symbol='<=')
+
+    if isinstance(ast, Congruence):
+        return drop_negation_if_holding(ast, holding_negation)
+
+    if isinstance(ast, BoolLiteral):
+        return BoolLiteral(value = not ast.value) if holding_negation else ast
+
+    assert isinstance(ast, list)
+
+    node_type: str = ast[0]  # type: ignore
+    if node_type == AST_Node_Names.EXISTS.value:
+        return drop_negation_if_holding(ast, holding_negation)
+
+    if node_type == AST_Node_Names.AND.value:
+        return [AST_Node_Names.OR.value, *(_push_negations_towards_atoms(child, holding_negation) for child in ast[1:])]
+
+    if node_type == AST_Node_Names.OR.value:
+        return [AST_Node_Names.AND.value, *(_push_negations_towards_atoms(child, holding_negation) for child in ast[1:])]
+
+    if node_type == AST_Node_Names.NOT.value:
+        holding_negation = not holding_negation
+        return _push_negations_towards_atoms(ast[1], holding_negation=holding_negation)
+
+    raise ValueError(f'Unhandled node type while pushing negation towards atoms: {ast=}')
+
+
+
+def push_negations_towards_atoms(ast: AST_Node) -> AST_Node:
+    """
+    Push negations towards atom.
+
+    Example:
+        (not (and X (exists Z (Y (Z)))))   --->    (or (not X) (not (exists Z (Y (Z)))))
+    """
+    return _push_negations_towards_atoms(ast, holding_negation=False)
