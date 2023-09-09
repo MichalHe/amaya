@@ -8,7 +8,9 @@ import functools
 import itertools
 from math import gcd
 from typing import (
+    Any,
     Dict,
+    Iterable,
     List,
     Optional,
     Set,
@@ -17,6 +19,7 @@ from typing import (
 )
 
 from amaya.relations_structures import (
+    AST_Atom,
     AST_NaryNode,
     AST_Node,
     AST_Node_Names,
@@ -25,6 +28,8 @@ from amaya.relations_structures import (
     ModuloTerm,
     Relation,
 )
+
+from amaya import logger
 
 
 @dataclass
@@ -189,6 +194,9 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
     elif isinstance(ast, (str, Congruence)):
         return AST_Leaf_Node_With_Bounds_Info(contents=ast)  # A Boolean variable does not tell us anything about bounds
 
+    elif isinstance(ast, BoolLiteral) or isinstance(ast, str):
+        return AST_Leaf_Node_With_Bounds_Info(contents=ast)  # A Boolean variable does not tell us anything about bounds
+
     node_type = ast[0]
 
     assert isinstance(node_type, str)
@@ -238,6 +246,11 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
         return AST_Internal_Node_With_Bounds_Info(node_type=node_type,
                                                   children=[subtree_bounds_info],
                                                   var_values=negated_var_values)
+
+    elif node_type == '=':  # Bool equivalence
+        subtree_bounds_info = [perform_variable_bounds_analysis_on_ast(child) for child in ast[1:]]
+        return AST_Internal_Node_With_Bounds_Info(node_type=node_type,
+                                                  children=subtree_bounds_info)
 
     raise ValueError(f'[Variable bounds analysis] Cannot descend into AST - unknown node: {node_type=}, {ast=}')
 
@@ -367,7 +380,7 @@ def remove_existential_quantification_of_unbound_vars(ast: AST_Node_With_Bounds_
 
 def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[str]) -> Optional[AST_Node]:
     if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
-        if isinstance(ast.contents, (Congruence, str)):
+        if isinstance(ast.contents, (Congruence, str, BoolLiteral)):
             return ast.contents
 
         relation: Relation = ast.contents
@@ -474,6 +487,9 @@ def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
                 remaining_lin_terms.append((var, coef))
             remaining_lin_terms = sorted(remaining_lin_terms, key = lambda var_coef_pair: var_coef_pair[0])
 
+            if not remaining_lin_terms:
+                return BoolLiteral(value=True)
+
             vars, coefs = [], []
             for var, coef in remaining_lin_terms:
                 vars.append(var)
@@ -485,7 +501,7 @@ def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
             modulus = gcd(*bound_var_coefs)
             congruence = Congruence(vars=list(vars), coefs=list(coefs), rhs=rel.absolute_part, modulus=modulus)
             return congruence
-        return [node_type, _simplify_unbounded_equations(ast[2])]
+        return [node_type, ast[1], _simplify_unbounded_equations(ast[2])]
     else:
         children = (_simplify_unbounded_equations(child) for child in ast[1:])
         ret: AST_Node = [node_type, *children]
@@ -508,10 +524,13 @@ def _push_negations_towards_atoms(ast: AST_Node, holding_negation) -> AST_Node:
         rel: Relation = ast
         if rel.predicate_symbol == '=':
             return drop_negation_if_holding(rel, holding_negation)
+        if not holding_negation:
+            return rel
         assert rel.predicate_symbol == '<='
         negated_coefs = [-coef for coef in rel.variable_coefficients]
+        rhs = -(rel.absolute_part + 1)
         return Relation.new_lin_relation(variable_names=rel.variable_names, variable_coefficients=negated_coefs,
-                                         absolute_part=rel.absolute_part, predicate_symbol='<=')
+                                         absolute_part=rhs, predicate_symbol='<=')
 
     if isinstance(ast, Congruence):
         return drop_negation_if_holding(ast, holding_negation)
@@ -526,14 +545,19 @@ def _push_negations_towards_atoms(ast: AST_Node, holding_negation) -> AST_Node:
         return drop_negation_if_holding(ast, holding_negation)
 
     if node_type == AST_Node_Names.AND.value:
-        return [AST_Node_Names.OR.value, *(_push_negations_towards_atoms(child, holding_negation) for child in ast[1:])]
+        res_node_type = AST_Node_Names.OR.value if holding_negation else AST_Node_Names.AND.value
+        return [res_node_type, *(_push_negations_towards_atoms(child, holding_negation) for child in ast[1:])]
 
     if node_type == AST_Node_Names.OR.value:
-        return [AST_Node_Names.AND.value, *(_push_negations_towards_atoms(child, holding_negation) for child in ast[1:])]
+        res_node_type = AST_Node_Names.AND.value if holding_negation else AST_Node_Names.OR.value
+        return [res_node_type, *(_push_negations_towards_atoms(child, holding_negation) for child in ast[1:])]
 
     if node_type == AST_Node_Names.NOT.value:
         holding_negation = not holding_negation
         return _push_negations_towards_atoms(ast[1], holding_negation=holding_negation)
+
+    if node_type == AST_Node_Names.BOOL_EQUIV.value:
+        return drop_negation_if_holding(ast, holding_negation)
 
     raise ValueError(f'Unhandled node type while pushing negation towards atoms: {ast=}')
 
@@ -547,3 +571,209 @@ def push_negations_towards_atoms(ast: AST_Node) -> AST_Node:
         (not (and X (exists Z (Y (Z)))))   --->    (or (not X) (not (exists Z (Y (Z)))))
     """
     return _push_negations_towards_atoms(ast, holding_negation=False)
+
+
+@dataclass(frozen=True)
+class FrozenLinAtom:
+    coefs: Tuple[int, ...]
+    vars: Tuple[str, ...]
+    predicate_sym: str
+    rhs: int
+
+    @staticmethod
+    def from_relation(rel: Relation) -> FrozenLinAtom:
+        return FrozenLinAtom(coefs=tuple(rel.variable_coefficients), vars=tuple(rel.variable_names),
+                             predicate_sym=rel.predicate_symbol, rhs=rel.absolute_part)
+
+@dataclass(frozen=True)
+class FrozenCongruence:
+    coefs: Tuple[int, ...]
+    vars: Tuple[str, ...]
+    modulus: int
+    rhs: int
+
+    @staticmethod
+    def from_congruence(congruence: Congruence) -> FrozenCongruence:
+        return FrozenCongruence(coefs=tuple(congruence.coefs), vars=tuple(congruence.vars), modulus=congruence.modulus, rhs=congruence.rhs)
+
+
+@dataclass
+class Literal:
+    positive: bool = field(hash=False)
+    id: int = field(hash=True)
+
+
+def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal_decoding_table: Dict[int, AST_Atom]) -> AST_Node:
+    produced_clauses: List[Tuple[Literal, ...]] = []
+    for or_literal in or_literals:
+        produced_clauses.append((or_literal, *and_literals))
+
+    # Detect contradictions
+    # @Performance: This implementation is simply terrible; definitely needs improvements
+    simplified_clauses: List[List[Literal]] = []
+    for clause in produced_clauses:
+        simplified_clause: List[Literal] = []
+        seen_literals: Dict[int, Literal] = {}
+
+        is_clause_contradiction = False
+        for literal in clause:
+            if literal.id not in seen_literals:
+                seen_literals[literal.id] = literal
+                simplified_clause.append(literal)
+            else:
+                if seen_literals[literal.id].positive != literal.positive:
+                    is_clause_contradiction = True
+                    break
+                else:
+                    pass  # Do not include the same literal multiple times in the same clause
+
+        if not is_clause_contradiction:
+            simplified_clauses.append(simplified_clause)
+
+    if not simplified_clauses:
+        return BoolLiteral(value=False)
+
+
+    def decode_literal(literal: Literal) -> AST_Node:
+        atom = literal_decoding_table[literal.id]
+        return atom if literal.positive else [AST_Node_Names.NOT.value, atom]
+
+    def decode_clause(clause: Iterable[Literal]) -> AST_Node:
+        return [AST_Node_Names.AND.name, *(decode_literal(literal) for literal in clause)]
+
+    if len(simplified_clauses) == 1:  # Do not introduce an extra OR node
+        clause = simplified_clauses[0]
+        if len(clause) == 1:
+            return decode_literal(clause[0])
+        return decode_clause(clause)
+
+    return [AST_Node_Names.OR.name, *(decode_clause(clause) for clause in simplified_clauses)]
+
+
+def is_atom(ast: AST_Node) -> bool:
+    atom_types = (str, BoolLiteral, Relation, Congruence)
+    return any(isinstance(ast, atom_type) for atom_type in atom_types)
+
+
+def is_literal(ast: AST_Node) -> bool:
+    if is_atom(ast):
+        return True
+
+    assert isinstance(ast, list)
+    return ast[0] == AST_Node_Names.NOT.value and is_atom(ast[1])
+
+
+
+LiteralIds = Tuple[int, ...]
+LiteralIdDecodingTable = Dict[int, Literal]
+FrozenAtom = Union[str, BoolLiteral, FrozenLinAtom, FrozenCongruence]
+
+def do_and_or_tree_lookahead_and_produce_dnf(ast: AST_Node) -> Optional[AST_Node]:
+    if not isinstance(ast, list):
+        return None
+
+    node_type: str = ast[0]  # type: ignore
+    if node_type != AST_Node_Names.AND.value:
+        return None
+
+    children = ast[1:]
+    and_literals = [child for child in children if is_literal(child)]
+    or_nodes = [child for child in children if isinstance(child, list) and child[0] == AST_Node_Names.OR.value]
+
+    flattening_happened = len(or_nodes) == 1
+    if not flattening_happened:
+        return None
+
+    if len(or_nodes) + len(and_literals) != len(children):
+        return None
+
+    or_node = or_nodes[0]
+    if not all(is_literal(or_child) for or_child in or_node[1:]):
+        return None
+
+    def freeze_atom(atom: AST_Atom) -> FrozenAtom:
+        if isinstance(atom, Relation):
+            return FrozenLinAtom.from_relation(atom)
+        elif isinstance(atom, Congruence):
+            return FrozenCongruence.from_congruence(atom)
+        else:
+            assert isinstance(atom, str) or isinstance(atom, BoolLiteral), atom
+            return atom
+
+    # We have a valid AND-OR tree
+
+    literal_decoding_table: Dict[int, AST_Atom] = {}
+    literal_table: Dict[Union[FrozenLinAtom, FrozenCongruence, str, BoolLiteral], int] = {}
+
+    def make_atoms_into_literals(ast: AST_NaryNode) -> List[Literal]:
+        literals: List[Literal] = []
+        for _child in ast:
+            child: AST_Atom = _child  # type: ignore
+
+            is_positive = True
+            if isinstance(child, list) and child[0] == AST_Node_Names.NOT.value:
+                child = child[1]
+                is_positive = False
+
+            frozen_atom = freeze_atom(child)
+            if frozen_atom in literal_table:
+                literal_id = literal_table[frozen_atom]
+            else:
+                literal_id = len(literal_table)
+                literal_table[frozen_atom] = literal_id
+                literal_decoding_table[literal_id] = child
+            literals.append(Literal(positive=is_positive, id=literal_id))
+        return literals
+
+    or_literals = make_atoms_into_literals(or_node[1:])
+    and_literals = make_atoms_into_literals(and_literals)
+
+    if not set(lit.id for lit in or_literals).issubset(lit.id for lit in and_literals):
+        return None
+
+    dnf = produce_dnf(and_literals, or_literals, literal_decoding_table)
+    return dnf
+
+
+def _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) -> AST_Node:
+    """
+    Convert 2-deep AND-OR trees into DNF if they are talking about similar atoms.
+
+    Conversion is performed if the subordinate tree is talking about a subset of parent atoms.
+    """
+
+    if is_atom(ast):
+        return ast
+
+    assert isinstance(ast, list)
+    node_type: str = ast[0]  # type: ignore
+
+    if node_type == AST_Node_Names.AND.value:
+        children = ast[1:]
+        atoms = [child for child in children if is_atom(child)]
+        or_nodes = [child for child in children if isinstance(child, list) and child[0] == AST_Node_Names.OR.value]
+
+        # Are we dealing with an AND-OR tree?
+        dnf = do_and_or_tree_lookahead_and_produce_dnf(ast)
+        if dnf:
+            return dnf
+
+        return [AST_Node_Names.AND.value, *(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in children)]
+
+    if node_type == AST_Node_Names.EXISTS.value:
+        return [AST_Node_Names.EXISTS.value, ast[1], _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast[2])]
+
+    if node_type == AST_Node_Names.NOT.value:
+        return [AST_Node_Names.NOT.value, _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast[1])]
+
+    if node_type == AST_Node_Names.OR.value:
+        children =  ast[1:]
+        return [AST_Node_Names.OR.value, *(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in children)]
+
+    logger.warning(f'Unhandled node while converting tree into DNF: %s', ast)
+    return [node_type, *(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in ast[1:])]
+
+
+def convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) -> AST_Node:
+    result = _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast)
+    return result

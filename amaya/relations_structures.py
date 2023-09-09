@@ -543,6 +543,7 @@ class AST_Node_Names(Enum):
     ASSERT = 'assert'
     CHECK_SAT = 'check-sat'
     EXISTS = 'exists'
+    BOOL_EQUIV = '='
     AND = 'and'
     OR = 'or'
     NOT = 'not'

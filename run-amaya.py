@@ -111,13 +111,6 @@ argparser.add_argument('--domain',
                              'from atomic presburger formulae. NATURALS support'
                              'is very questionable currently.'))
 
-argparser.add_argument('-l', '--lazy',
-                       action='store_true',
-                       dest='allow_lazy_evaluation',
-                       default=False,
-                       help=('Enable experimental lazy evaluation of subformulae of the form '
-                             ' (exists (..) (and atom1 atom2 ...))'))
-
 argparser.add_argument('-m',
                        '--minimize',
                        choices=('hopcroft', 'brzozowski'),
@@ -130,10 +123,7 @@ argparser.add_argument('-p',
                        action='append',
                        dest='preprocessing_switches',
                        default=[],
-                       choices=['prenexing',
-                                'antiprenexing',
-                                'no-var-disambiguation',
-                                'simplify-var-bounds',
+                       choices=['no-var-disambiguation',
                                 'assign-new-var-names',
                                 'nonlinear-term-use-two-vars',
                                 'no-congruences',
@@ -145,6 +135,28 @@ argparser.add_argument('-p',
                              '- assign-new-var-names       : Give all variables a new name, dropping identifies symbols that might be unsupported in some output format\n'
                              '- nonlinear-term-use-two-vars: Always use two variables (quotient, reminder) when rewriting a non-linear term\n'
                              '- auto-infer                 : Convert-mode specific - infer preprocessing options from output format.'))
+
+
+argparser.add_argument('-O',
+                       '--optimize',
+                       action='append',
+                       dest='optimizations',
+                       default=[],
+                       choices=['gcd-rewrite',
+                                'var-bounds',
+                                'stomp-negations',
+                                'light-sat',
+                                'lazy',
+                                'all',
+                       ],
+                       help=('Controls preprocessing transformations applied on input the formula. Options:\n'
+                             '- gdc-rewrite    : Rewrite existentially quantified equations using GCD rewrite\n'
+                             '- var-bounds     : Simplify (hard) variable bounds if possible\n'
+                             '- stomp-negations: Push negation as close to atoms as possible\n'
+                             '- light-sat      : Perform light SAT reasoning on AND-OR trees\n'
+                             '- lazy           : Allow lazy evaluation of conjunctions. Requires -m MTBDD.'
+                             '- all            : Enable all above optimizations'))
+
 
 subparsers = argparser.add_subparsers(help='Runner operation')
 get_sat_subparser = subparsers.add_parser('get-sat')
@@ -296,14 +308,8 @@ solution_domain_str_to_type = {
 solver_config.solution_domain = solution_domain_str_to_type[args.domain]
 
 # Read supplied preprocessing switches and convert them into cfg
-if 'prenexing' in args.preprocessing_switches:
-    solver_config.preprocessing.perform_prenexing = True
-if 'antiprenexing' in args.preprocessing_switches:
-    solver_config.preprocessing.perform_antiprenexing = True
 if 'no-var-disambiguation' in args.preprocessing_switches:
     solver_config.preprocessing.disambiguate_variables = False
-if 'simplify-var-bounds' in args.preprocessing_switches:
-    solver_config.preprocessing.simplify_variable_bounds = True
 if 'assign-new-var-names' in args.preprocessing_switches:
     solver_config.preprocessing.disambiguate_variables = True
     solver_config.preprocessing.assign_new_variable_names = True
@@ -311,9 +317,6 @@ if 'no-congruences' in args.preprocessing_switches:
     solver_config.preprocessing.use_congruences_when_rewriting_modulo = False
 if 'nonlinear-term-use-two-vars' in args.preprocessing_switches:
     solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms = True
-
-if solver_config.preprocessing.perform_antiprenexing and solver_config.preprocessing.perform_prenexing:
-    print('Configuration error: Cannot apply prenexing and antiprenexing simultaneously.', file=sys.stderr)
 
 if args.minimization_method == 'hopcroft':
     solver_config.minimization_method = MinimizationAlgorithms.HOPCROFT
@@ -325,10 +328,23 @@ elif args.minimization_method == 'brzozowski':
 elif 'fast' not in args:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
-solver_config.allow_lazy_evaluation = args.allow_lazy_evaluation
-if solver_config.allow_lazy_evaluation:
-    solver_config.preprocessing.simplify_variable_bounds = True
-
+for opt in args.optimizations:
+    if opt == 'all':
+        solver_config.optimizations.simplify_variable_bounds = True
+        solver_config.optimizations.rewrite_existential_equations_via_gcd = True
+        solver_config.optimizations.push_negation_towards_atoms = True
+        solver_config.optimizations.do_light_sat_reasoning = True
+        solver_config.optimizations.do_lazy_evaluation = True
+    if opt == 'gcd-rewrite':
+        solver_config.optimizations.rewrite_existential_equations_via_gcd = True
+    if opt == 'var-bounds':
+        solver_config.optimizations.simplify_variable_bounds = True
+    if opt == 'stomp-negations':
+        solver_config.optimizations.push_negation_towards_atoms = True
+    if opt == 'light-sat':
+        solver_config.optimizations.do_light_sat_reasoning = True
+    if opt == 'lazy':
+        solver_config.optimizations.do_lazy_evaluation = True
 
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""

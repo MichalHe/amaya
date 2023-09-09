@@ -23,18 +23,35 @@ class MinimizationAlgorithms(IntEnum):
 
 
 @dataclass
+class OptimizationsConfig:
+    simplify_variable_bounds: bool = False
+    """Simplify hard variable bounds, e.g, x >= 0 && x != 0 ---> x >= 1."""
+
+    rewrite_existential_equations_via_gcd: bool = False
+    """Rewrite (exists x (= k*x y)) into (y mod k) = 0."""
+
+    push_negation_towards_atoms: bool = False
+    """Push negations as close to atoms as possible."""
+
+    do_light_sat_reasoning: bool = False
+    """Detect AND-OR trees and convert them into DNF form and detect contradictions."""
+
+    do_lazy_evaluation: bool = False
+    """Enable lazy evaluation of subformulae of the form `(exists (..) (and atom1 atom2 ...))`"""
+
+
+@dataclass
 class PreprocessingConfig:
     perform_prenexing: bool = False
     perform_antiprenexing: bool = False
     disambiguate_variables: bool = True
     assign_new_variable_names: bool = False
     """ Completely drop the variable names found in the AST and assign new ones. Implies disambiguation."""
-    simplify_variable_bounds: bool = False
 
     use_congruences_when_rewriting_modulo: bool = True
     """Use the congruence atom types to rewrite modulo terms."""
 
-    use_two_vars_when_rewriting_nonlin_terms : bool = False
+    use_two_vars_when_rewriting_nonlin_terms: bool = False
     """Use two variables <d> and <m> as in `K*<d> + <m> = y` when rewriting nonlinear terms."""
 
 
@@ -48,8 +65,7 @@ class SolverConfig(object):
     track_operation_runtime: bool = False
     track_state_semantics: bool = False
 
-    allow_lazy_evaluation: bool = False
-    """Enable lazy evaluation of subformulae of the form `(exists (..) (and atom1 atom2 ...))`"""
+    optimizations: OptimizationsConfig = field(default_factory=OptimizationsConfig)
 
     vis_display_only_free_vars: bool = False
     """Export transition symbols with bits only for the free variables in the corresponding automaton."""

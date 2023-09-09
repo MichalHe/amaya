@@ -446,6 +446,29 @@ def add_only_used_function_constants_to_context(ctx: EvaluationContext,
             ctx.add_global_variable(var_name=function_symb.name, var_type=function_symb.return_type)
 
 
+def optimize_formula_structure(formula_to_evaluate: AST_Node) -> AST_Node:
+    if solver_config.optimizations.simplify_variable_bounds:
+        logger.debug(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)
+        formula_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
+        logger.debug(f'Simplified formula: %s', formula_to_evaluate)
+
+    if solver_config.optimizations.rewrite_existential_equations_via_gcd:
+        logger.debug(f'Rewriting a: %s', formula_to_evaluate)
+        formula_to_evaluate = var_bounds_lib.simplify_unbounded_equations(formula_to_evaluate)
+        logger.debug(f'Simplified formula: %s', formula_to_evaluate)
+
+    formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
+
+    if solver_config.optimizations.push_negation_towards_atoms:
+        formula_to_evaluate = var_bounds_lib.push_negations_towards_atoms(formula_to_evaluate)
+
+    if solver_config.optimizations.do_light_sat_reasoning:
+        formula_to_evaluate = var_bounds_lib.convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(formula_to_evaluate)
+
+    return formula_to_evaluate
+
+
+
 def parse_function_symbol_declaration(decl_ast: AST_NaryNode) -> FunctionSymbol:
     # Example: (declare-fun W_S1_V1 () Bool)
     if len(decl_ast) != 4:
@@ -555,21 +578,8 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
 
-            formula_to_evaluate = var_bounds_lib.simplify_unbounded_equations(formula_to_evaluate)
-
-            if solver_config.preprocessing.simplify_variable_bounds:
-                logger.info(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)
-                formula_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
-                logger.info(f'Simplified formula: %s', formula_to_evaluate)
-
-            if solver_config.preprocessing.perform_antiprenexing:
-                logger.info('Performing antiprenexing of: %s', formula_to_evaluate)
-                formula_to_evaluate = preprocessing.antiprenexing.perform_antiprenexing(formula_to_evaluate)
-                logger.info('Antiprenexing done, Result: %s', formula_to_evaluate)
-            elif solver_config.preprocessing.perform_prenexing:
-                logger.info('Performing prenexing on: %s', formula_to_evaluate)
-                formula_to_evaluate = preprocessing.prenexing.convert_formula_to_pnf(formula_to_evaluate)
-                logger.info('Prenexing performed. Result: %s', formula_to_evaluate)
+            assert formula_to_evaluate
+            formula_to_evaluate = optimize_formula_structure(formula_to_evaluate)
 
             # Count all distinct variables in the formula
             all_vars = get_all_used_variables(formula_to_evaluate, ctx)
@@ -914,7 +924,7 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
     ctx.add_multiple_variables_to_current_frame(variable_bindings)
 
     # Perform a look-ahead to see whether we can construct the NFA for the entire conjunction using a lazy approach
-    if solver_config.backend_type == BackendType.MTBDD and solver_config.allow_lazy_evaluation:
+    if solver_config.backend_type == BackendType.MTBDD and solver_config.optimizations.do_lazy_evaluation:
         if isinstance(exists_expr[2], list) and exists_expr[2][0] == 'and':
             conjunction = exists_expr[2]
             if all(isinstance(child, (Relation, Congruence)) for child in conjunction[1:]):
