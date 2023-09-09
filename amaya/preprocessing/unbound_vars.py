@@ -25,8 +25,8 @@ from amaya.relations_structures import (
     AST_Node_Names,
     BoolLiteral,
     Congruence,
-    ModuloTerm,
     Relation,
+    Var,
 )
 
 from amaya import logger
@@ -47,21 +47,21 @@ class Value_Interval:
 class AST_Internal_Node_With_Bounds_Info:
     node_type: str
     children: List[AST_Node_With_Bounds_Info]
-    var_values: Dict[str, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
+    var_values: Dict[Var, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
 @dataclass
 class AST_Quantifier_Node_With_Bounds_Info:
     node_type: str
     child: AST_Node_With_Bounds_Info
-    bindings: List[List[str]]
-    var_values: Dict[str, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
+    bindings: List[Var]
+    var_values: Dict[Var, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
 @dataclass
 class AST_Leaf_Node_With_Bounds_Info:
-    contents: Union[Relation, str, Congruence]
-    var_values: Dict[str, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
+    contents: Union[Relation, str, Congruence, Var, BoolLiteral]
+    var_values: Dict[Var, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
 AST_Node_With_Bounds_Info = Union[AST_Leaf_Node_With_Bounds_Info, AST_Quantifier_Node_With_Bounds_Info, AST_Internal_Node_With_Bounds_Info]
@@ -177,25 +177,22 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
         relation: Relation = ast
         bounds_info = AST_Leaf_Node_With_Bounds_Info(contents=relation)
 
-        if len(relation.variable_names) == 1:
-            var_name, var_coef = relation.variable_names[0], relation.variable_coefficients[0]
-            bound = relation.absolute_part // var_coef
+        if len(relation.vars) == 1:
+            var, coef = relation.vars[0], relation.coefs[0]
+            bound = relation.rhs // coef
             if relation.predicate_symbol == '=':
-                bounds_info.var_values[var_name] = [Value_Interval(bound, bound)]
+                bounds_info.var_values[var] = [Value_Interval(bound, bound)]
             elif relation.predicate_symbol == '<=':
                 value_interval = Value_Interval()
-                if var_coef > 0:
+                if coef > 0:
                     value_interval.upper_limit = bound
                 else:
                     value_interval.lower_limit = bound
-                bounds_info.var_values[var_name] = [value_interval]
+                bounds_info.var_values[var] = [value_interval]
         return bounds_info
 
-    elif isinstance(ast, (str, Congruence)):
-        return AST_Leaf_Node_With_Bounds_Info(contents=ast)  # A Boolean variable does not tell us anything about bounds
-
-    elif isinstance(ast, BoolLiteral) or isinstance(ast, str):
-        return AST_Leaf_Node_With_Bounds_Info(contents=ast)  # A Boolean variable does not tell us anything about bounds
+    elif isinstance(ast, (str, Congruence, BoolLiteral, Var)):
+        return AST_Leaf_Node_With_Bounds_Info(contents=ast)
 
     node_type = ast[0]
 
@@ -204,8 +201,8 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
     if node_type in ('exists', 'forall'):
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[2])
 
-        quantified_vars: Set[str] = {var_type_pair[0] for var_type_pair in ast[1]}  # type: ignore
-        var_values: Dict[str, List[Value_Interval]] = {}
+        quantified_vars: Set[Var] = set(ast[1])  # type: ignore
+        var_values: Dict[Var, List[Value_Interval]] = {}
         for var, var_value_intervals in subtree_bounds_info.var_values.items():
             new_var_value_intervals = [Value_Interval(None, None)] if var in quantified_vars else var_value_intervals
 
@@ -220,8 +217,8 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
 
         overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type, children=subtrees_with_bounds)
         for subtree_with_bounds in subtrees_with_bounds:
-            for var_name, var_value_intervals in subtree_with_bounds.var_values.items():
-                overall_bounds_info.var_values[var_name] = make_value_interval_intersection(overall_bounds_info.var_values[var_name],
+            for var, var_value_intervals in subtree_with_bounds.var_values.items():
+                overall_bounds_info.var_values[var] = make_value_interval_intersection(overall_bounds_info.var_values[var],
                                                                                             var_value_intervals)
 
         return overall_bounds_info
@@ -231,17 +228,17 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
 
         overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type, children=subtrees_with_bounds)
         for subtree_with_bounds in subtrees_with_bounds:
-            for var_name, bounds_info in subtree_with_bounds.var_values.items():
-                overall_bounds_info.var_values[var_name] = make_value_interval_union(overall_bounds_info.var_values[var_name],
+            for var, bounds_info in subtree_with_bounds.var_values.items():
+                overall_bounds_info.var_values[var] = make_value_interval_union(overall_bounds_info.var_values[var],
                                                                                      bounds_info)
 
         return overall_bounds_info
 
     elif node_type == 'not':
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[1])
-        negated_var_values = {}
-        for var_name, var_values in subtree_bounds_info.var_values.items():
-            negated_var_values[var_name] = make_value_interval_negation(var_values)
+        negated_var_values: Dict[Var, List[Value_Interval]] = {}
+        for var, bounds in subtree_bounds_info.var_values.items():
+            negated_var_values[var] = make_value_interval_negation(bounds)
 
         return AST_Internal_Node_With_Bounds_Info(node_type=node_type,
                                                   children=[subtree_bounds_info],
@@ -263,11 +260,11 @@ def will_relation_be_always_satisfied_due_to_unbound_var(relation: Relation,
     # - it has the form of `ax + by ... >= C`, y has no lower bound and b < 0
     # - it has the form of `ax + by ... <= C`, y has no lower bound and b > 0
     # - it has the form of `ax + by ... <= C`, y has no upper bound and b < 0
-    for i, var_name in enumerate(relation.variable_names):
-        if var_name not in quantified_vars_with_bounds:
+    for i, var in enumerate(relation.vars):
+        if var not in quantified_vars_with_bounds:
             continue
         var_coef = relation.variable_coefficients[i]
-        var_bounds = quantified_vars_with_bounds[var_name]
+        var_bounds = quantified_vars_with_bounds[var]
 
         if relation.predicate_symbol in ('<', '<='):
             can_var_term_be_arbitrarly_small = (
@@ -378,24 +375,24 @@ def remove_existential_quantification_of_unbound_vars(ast: AST_Node_With_Bounds_
     assert False
 
 
-def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[str]) -> Optional[AST_Node]:
+def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[Var]) -> Optional[AST_Node]:
     if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
-        if isinstance(ast.contents, (Congruence, str, BoolLiteral)):
+        if isinstance(ast.contents, (Var, Congruence, str, BoolLiteral)):
             return ast.contents
 
         relation: Relation = ast.contents
-        if len(relation.variable_names) == 1 and not relation.modulo_terms and not relation.div_terms:
+        if len(relation.vars) == 1:
             # The current relation represents a bound on a single variable
-            bound_for_var = relation.variable_names[0]
+            bound_for_var = relation.vars[0]
             if bound_for_var in vars_with_rewritten_bounds:
                 return None
         return relation
 
-    if isinstance(ast,  AST_Internal_Node_With_Bounds_Info):
+    if isinstance(ast, AST_Internal_Node_With_Bounds_Info):
         if ast.node_type == 'and':
             # At the current level we want to rewrite bounds only for those variables that will
             # not have their bounds rewritten at some upper level
-            vars_to_rewrite_bounds_at_current_level: Set[str] = set()
+            vars_to_rewrite_bounds_at_current_level: Set[Var] = set()
             for var, bound_info in ast.var_values.items():
                 if len(bound_info) == 1 and var not in vars_with_rewritten_bounds:
                     bound = bound_info[0]
@@ -465,22 +462,20 @@ def simplify_bounded_atoms(ast: AST_Node) -> Optional[AST_Node]:
 
 
 def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
-    if isinstance(ast, str) or isinstance(ast, Relation) or isinstance(ast, Congruence):
-        return ast
-    if isinstance(ast, BoolLiteral):
+    if is_atom(ast):
         return ast
 
-    assert isinstance(ast, list)
+    assert isinstance(ast, list), ast
     node_type = ast[0]
 
     if node_type == 'exists':
         if isinstance(ast[2], Relation) and ast[2].predicate_symbol == '=':
-            bound_vars: List[str] = [var for var, type in ast[1]]  # type: ignore
+            bound_vars: List[Var] = ast[1]  # type: ignore
             rel: Relation = ast[2]
 
             bound_var_coefs: List[int] = []
-            remaining_lin_terms: List[Tuple[str, int]] = []
-            for var, coef in zip(rel.variable_names, rel.variable_coefficients):
+            remaining_lin_terms: List[Tuple[Var, int]] = []
+            for var, coef in zip(rel.vars, rel.coefs):
                 if var in bound_vars:
                     bound_var_coefs.append(coef)
                     continue
@@ -499,7 +494,7 @@ def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
                 coefs = [-1 * coef for coef in coefs]
 
             modulus = gcd(*bound_var_coefs)
-            congruence = Congruence(vars=list(vars), coefs=list(coefs), rhs=rel.absolute_part, modulus=modulus)
+            congruence = Congruence(vars=list(vars), coefs=list(coefs), rhs=rel.rhs, modulus=modulus)
             return congruence
         return [node_type, ast[1], _simplify_unbounded_equations(ast[2])]
     else:
@@ -527,10 +522,9 @@ def _push_negations_towards_atoms(ast: AST_Node, holding_negation) -> AST_Node:
         if not holding_negation:
             return rel
         assert rel.predicate_symbol == '<='
-        negated_coefs = [-coef for coef in rel.variable_coefficients]
-        rhs = -(rel.absolute_part + 1)
-        return Relation.new_lin_relation(variable_names=rel.variable_names, variable_coefficients=negated_coefs,
-                                         absolute_part=rhs, predicate_symbol='<=')
+        negated_coefs = [-coef for coef in rel.coefs]
+        rhs = -(rel.rhs+ 1)
+        return Relation(vars=rel.vars, coefs=negated_coefs, rhs=rhs, predicate_symbol='<=')
 
     if isinstance(ast, Congruence):
         return drop_negation_if_holding(ast, holding_negation)
@@ -651,7 +645,7 @@ def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal
 
 
 def is_atom(ast: AST_Node) -> bool:
-    atom_types = (str, BoolLiteral, Relation, Congruence)
+    atom_types = (str, BoolLiteral, Relation, Congruence, Var)
     return any(isinstance(ast, atom_type) for atom_type in atom_types)
 
 

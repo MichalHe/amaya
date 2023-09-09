@@ -9,49 +9,38 @@ from amaya.automatons import (
     DFA,
     NFA,
 )
-from amaya.presburger.constructions.integers import build_presburger_modulo_nfa
-from amaya.presburger.constructions.naturals import build_presburger_modulo_dfa
-from amaya.relations_structures import ModuloTerm, Relation
+from amaya.presburger.constructions.integers import build_presburger_congruence_nfa
+from amaya.relations_structures import Congruence, Var
 from tests.conftest import ResolutionState
 
 import pytest
 
-RelationSetup = Tuple[List[Tuple[str, int]], LSBF_Alphabet, Relation]
 
+@pytest.fixture
+def congruence0() -> Tuple[LSBF_Alphabet, Congruence]:
+    """Congruence (x mod 3) = 1"""
+
+    relation = Congruence(vars=[Var(id=1)], coefs=[1], rhs=1, modulus=3)
+    alphabet = LSBF_Alphabet.from_vars([Var(id=1)])
+    return (alphabet, relation)
 
 
 @pytest.fixture
-def eq_with_single_mod_term() -> RelationSetup:
-    """Equation (x mod 3) = 1"""
-
-    modulo_term = ModuloTerm(variables=('x', ), variable_coefficients=(1, ),
-                             constant=0, modulo=3)
-    relation = Relation.new_congruence_relation(modulo_terms=[modulo_term], modulo_term_coefficients=[1],
-                                                absolute_part=1)
-    variable_id_pairs = [('x', 1)]
-    alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
-    return (variable_id_pairs, alphabet, relation)
+def congruence_2pow() -> Tuple[LSBF_Alphabet, Congruence]:
+    relation = Congruence(vars=[Var(id=1)], coefs=[1], rhs=0, modulus=4)
+    alphabet = LSBF_Alphabet.from_vars([Var(id=1)])
+    return (alphabet, relation)
 
 
-def assert_state_count(nfa: NFA, state_count: int, initial_state_count: int, final_state_count: int):
-    """Asserts that the automaton has correct number of states and produces a nice message if the assertion fails."""
+def test_nfa_from_congruence_with_mod_3(congruence0: Tuple[LSBF_Alphabet, Congruence]):
+    """Check that the automaton for relation (x mod 3) = 1 has the expected structure."""
+    alphabet, congruence = congruence0
 
-    fail_desc = 'The automaton has wrong number of{0} states - should have {1}, but has {2}.'
+    nfa = build_presburger_congruence_nfa(NFA, alphabet, congruence)
 
-    assert len(nfa.initial_states) == initial_state_count, fail_desc.format(
-            ' initial', initial_state_count, len(nfa.initial_states))
-
-    assert len(nfa.states) == state_count, fail_desc.format('', state_count, len(nfa.states))
-
-    assert len(nfa.final_states) == final_state_count, fail_desc.format(
-            ' final', final_state_count, len(nfa.final_states))
-
-
-def assert_single_mod_term_automaton_structure(nfa: NFA, is_domain_naturals=False):
-    '''Verifies that the automaton for relation (x mod 3) <OP> 1 has the expected structure.'''
-
-    exp_state_count = 3 if is_domain_naturals else 4
-    assert_state_count(nfa, exp_state_count, 1, 1)
+    assert len(nfa.states) == 4
+    assert len(nfa.final_states) == 1
+    assert len(nfa.initial_states) == 1
 
     # States for reminders (rem=reminder)
     rem0 = ResolutionState()
@@ -68,70 +57,39 @@ def assert_single_mod_term_automaton_structure(nfa: NFA, is_domain_naturals=Fals
         (rem2, (0,), rem1),
         (rem2, (1,), rem2),
     ]
-    
+
     final_state = next(iter(nfa.final_states))
     fail_desc = 'The states should have at max 2 transitons (1 to successor, maybe 1 to final state).'
 
     for i, expected_transition in enumerate(expected_transitions):
         source, symbol, expected_destination = expected_transition
 
-        if is_domain_naturals:
-            destination = list(nfa.get_transition_target(source.get(), symbol))
-        else:
-            destination = [
-                state for state in nfa.get_transition_target(source.get(), symbol) if state != final_state
-            ]
+        destination = [
+            state for state in nfa.get_transition_target(source.get(), symbol) if state != final_state
+        ]
 
         assert len(destination) == 1
 
         expected_destination.bind(destination[0])
-    
-    if is_domain_naturals:
-        assert rem0.get() in nfa.final_states
-    else:
-        expected_transitions_to_final_state = [
-            (rem0, (0, )),
-            (rem2, (1, ))
-        ]
-        for source, symbol in expected_transitions_to_final_state:
-            assert final_state in nfa.get_transition_target(source.get(), symbol)
-    assert nfa.used_variables == [1]
-    
 
-@pytest.mark.parametrize('domain', ('naturals', 'integers'))
-def test_equality_with_single_modulo_constaint(domain, eq_with_single_mod_term: RelationSetup):
-    variable_id_pairs, alphabet, equation = eq_with_single_mod_term
-    is_domain_naturals = domain == 'naturals'
-    if is_domain_naturals:
-        nfa = build_presburger_modulo_dfa(DFA, alphabet, equation, variable_id_pairs)
-    else:
-        nfa = build_presburger_modulo_nfa(DFA, alphabet, equation, variable_id_pairs)
-
-    assert_single_mod_term_automaton_structure(nfa, is_domain_naturals=is_domain_naturals)
+    expected_transitions_to_final_state = [
+        (rem0, (0, )),
+        (rem2, (1, ))
+    ]
+    for source, symbol in expected_transitions_to_final_state:
+        assert final_state in nfa.get_transition_target(source.get(), symbol)
+    assert nfa.used_variables == [Var(id=1)]
 
 
-@pytest.mark.parametrize('domain', ('naturals', 'integers'))
-def test_with_power_of_two_modulo(domain):
-    modulo_term = ModuloTerm(variables=['x'], variable_coefficients=(1,),
-                             constant=0, modulo=4)
-    relation = Relation.new_congruence_relation(modulo_terms=[modulo_term],
-                                                modulo_term_coefficients=[1],
-                                                absolute_part=0)
-    variable_id_pairs = [('x', 1)]
-    alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
-    
-    is_domain_naturals = domain == 'naturals'
-    if is_domain_naturals:
-        nfa = build_presburger_modulo_dfa(NFA, alphabet, relation, variable_id_pairs)
-        exp_state_count = 3
-        exp_final_state_count = 3
-    else:
-        nfa = build_presburger_modulo_nfa(NFA, alphabet, relation, variable_id_pairs)
-        exp_state_count = 4
-        exp_final_state_count = 1
+def test_with_power_of_two_modulo(congruence_2pow: Tuple[LSBF_Alphabet, Congruence]):
+    alphabet, congruence = congruence_2pow
 
-    assert_state_count(nfa, exp_state_count, initial_state_count=1, final_state_count=exp_final_state_count)
-        
+    nfa = build_presburger_congruence_nfa(NFA, alphabet, congruence)
+
+    assert len(nfa.states) == 4
+    assert len(nfa.initial_states) == 1
+    assert len(nfa.final_states) == 1
+
     state0_0 = ResolutionState()
     state0_1 = ResolutionState()
     state0_2 = ResolutionState()
@@ -145,23 +103,16 @@ def test_with_power_of_two_modulo(domain):
     ]
 
     final_state = next(iter(nfa.final_states))  # Will be used only to filter out the NFA structure (integer solutions)
-     
+
     for origin, symbol, dest in expected_transitions:
-        if is_domain_naturals:
-            destination_list = list(nfa.get_transition_target(origin.get(), symbol))
-        else:
-            destination_list = [d for d in nfa.get_transition_target(origin.get(), symbol) if d != final_state]
+        destination_list = [d for d in nfa.get_transition_target(origin.get(), symbol) if d != final_state]
         assert len(destination_list) == 1
         dest.bind(destination_list[0])
-    
-    if is_domain_naturals:
-        assert state0_0.get() in nfa.final_states
-        assert state0_1.get() in nfa.final_states
-        assert state0_2.get() in nfa.final_states
-    else:
-        assert final_state in nfa.get_transition_target(state0_0.get(), (0,))
-        assert final_state in nfa.get_transition_target(state0_1.get(), (0,))
-        assert final_state in nfa.get_transition_target(state0_2.get(), (0,))
-        assert final_state in nfa.get_transition_target(state0_2.get(), (1,))
 
-    assert nfa.used_variables == [1]
+
+    assert final_state in nfa.get_transition_target(state0_0.get(), (0,))
+    assert final_state in nfa.get_transition_target(state0_1.get(), (0,))
+    assert final_state in nfa.get_transition_target(state0_2.get(), (0,))
+    assert final_state in nfa.get_transition_target(state0_2.get(), (1,))
+
+    assert nfa.used_variables == [Var(id=1)]

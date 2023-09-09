@@ -36,6 +36,7 @@ from amaya.preprocessing import (
     eval as ast_eval_lib,
     prenexing,
 )
+from amaya.preprocessing.eval import VarInfo
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
     AST_Atom,
@@ -47,6 +48,7 @@ from amaya.relations_structures import (
     FunctionSymbol,
     NodeEncounteredHandlerStatus,
     Relation,
+    Var,
     VariableType,
 )
 from amaya.tokenize import tokenize
@@ -78,19 +80,11 @@ class IntrospectionData:
 IntrospectHandle = Callable[[IntrospectionData], None]
 
 
-@dataclass
-class VariableInfo:
-    id: int
-    name: str
-    type: VariableType = VariableType.UNSET  # variable was found in a Presburger expr, but was not bound via exists
-    usage_count: int = 0
-
-
 class EvaluationContext:
     def __init__(self,
                  emit_introspect: Optional[IntrospectHandle] = None,
                  alphabet: Optional[LSBF_Alphabet] = None,
-                 global_scope: Optional[Dict[str, VariableInfo]] = None):
+                 var_table: Dict[Var, VarInfo] = {}):
         if emit_introspect:
             self.introspect_handle = emit_introspect
         else:
@@ -102,9 +96,7 @@ class EvaluationContext:
         self.pending_operations_stack: List[OperationStartEntry] = []
         self.operations_performed: int = 0
 
-        self.next_available_variable_id = 1  # Number them from 1, MTBDDs require
-        self.variables_info_stack: List[Dict[str, VariableInfo]] = []
-        self.global_variables: Dict[str, VariableInfo] = global_scope if global_scope is not None else {}
+        self.var_table = var_table
 
         # Lazy load MTBDD automata module if needed
         self.automata_cls = NFA
@@ -163,119 +155,6 @@ class EvaluationContext:
         logger.info(f"Operation finished: {stat}")
         self.stats.trace.append(stat)
         return operation_id
-
-    def _generate_new_variable_id(self) -> int:
-        variable_id = self.next_available_variable_id
-        self.next_available_variable_id += 1
-        return variable_id
-
-    def push_new_variable_info_frame(self):
-        logger.debug('Entering a new variable binding frame (\\exists).')
-        self.variables_info_stack.append({})
-
-    def pop_variable_frame(self):
-        popped_frame = self.variables_info_stack.pop(-1)
-        logger.debug(f'Exiting a variable binding frame (\\exists). Contents: {popped_frame}.')
-
-    def add_variable_to_current_frame(self,
-                                      variable_name: str,
-                                      variable_type: VariableType = VariableType.UNSET):
-        """
-        Add a new variable with given name and type to the current variable frame.
-
-        Creates and associates a new variable info entry in the current frame with given name and type.
-        If a variable of the given name already exists in the current frame an exception is raised.
-        """
-        current_frame = self.variables_info_stack[-1]
-        if variable_name not in current_frame:
-            var_id = self._generate_new_variable_id()
-            current_frame[variable_name] = VariableInfo(id=var_id, name=variable_name, type=variable_type)
-        else:
-            err_msg = (f'Attempting to add a variable "{variable_name}" to the current frame, '
-                        'but it is already defined.')
-            raise ValueError(err_msg)
-
-    def get_variable_type_if_defined(self, variable_name: str) -> Optional[VariableType]:
-        """
-        Performs variable lookup in the variable frames (local -> enclosing -> global).
-
-        :returns: the variable type if found, otherwise returns None.
-        """
-        maybe_variable = self.lookup_variable(variable_name)
-        if maybe_variable is None:
-            return None
-        else:
-            return maybe_variable.type
-
-    def get_variables_info_for_current_frame(self) -> Dict[str, VariableInfo]:
-        return self.variables_info_stack[-1]
-
-    def add_multiple_variables_to_current_frame(self, variables: Dict[str, VariableType]):
-        """Add the given variables with their type to the current frame."""
-        for variable_name, variable_type in variables.items():
-            self.add_variable_to_current_frame(variable_name, variable_type=variable_type)
-
-    def get_variable_id(self, variable_name: str, variable_type: VariableType = VariableType.UNSET) -> int:
-        """
-        Get the ID associated with the given variable name.
-
-        If the variable name was not previously bound in any way a new global
-        variable will be associated with the name and its ID will be returned.
-        """
-        return self.get_variable_info(variable_name, variable_type).id
-
-    def get_variable_info(self, variable_name: str,
-                          variable_type: VariableType = VariableType.UNSET) -> VariableInfo:
-        """
-        Locate variable with given name in variable scopes and return its info.
-
-        Searches for variable information associated with the given variable name in variable scopes
-        (local -> enclosing -> global).
-
-        If no entry matching given name is found a new variable entry in the global scope is created
-        (with new id and unset type), and returned.
-        """
-
-        maybe_variable = self.lookup_variable(variable_name)
-        if maybe_variable is not None:
-            return maybe_variable
-
-        variable_id = self._generate_new_variable_id()
-        new_variable_info = VariableInfo(id=variable_id,
-                                         name=variable_name,
-                                         type=variable_type)
-
-        self.global_variables[variable_name] = new_variable_info
-        return new_variable_info
-
-    def lookup_variable(self, variable_name: str) -> Optional[VariableInfo]:
-        for variable_info_frame in reversed(self.variables_info_stack):
-            if variable_name in variable_info_frame:
-                return variable_info_frame[variable_name]
-
-        # If we got here, we did not locate any frame where the pres. variable
-        # is bound to a type -- maybe it is an unbound (global) variable that
-        # was already encounted
-        if variable_name in self.global_variables:
-            return self.global_variables[variable_name]
-        return None
-
-    def get_multiple_variable_ids(self, variable_names: List[str]) -> List[Tuple[str, int]]:
-        """Search variable scopes for given variable names and return their ids (along with their names)."""
-        assigned_ids = []
-        for variable_name in variable_names:
-            assigned_ids.append((variable_name,
-                                 self.get_variable_id(variable_name)))
-        return assigned_ids
-
-    def add_global_variable(self, var_name: str, var_type: VariableType = VariableType.UNSET) -> int:
-        if var_name not in self.global_variables:
-            var_id = self._generate_new_variable_id()
-            self.global_variables[var_name] = VariableInfo(var_id, var_name,  var_type)
-            return var_id
-        else:
-            # @Broken: Report an error about declaring a function symbol multiple times
-            return self.global_variables[var_name].id
 
     def get_automaton_class_for_current_backend(self):
         return self.automata_cls
@@ -342,79 +221,6 @@ def strip_comments(source: str) -> str:
     return new_src
 
 
-def get_all_used_variables(tree: AST_Node, ctx: EvaluationContext) -> Set[Tuple[str, int, VariableType]]:  # NOQA
-    """
-    Traverse the given AST and collect the variables that are referenced.
-
-    The variables are collected in a context sensitive manner, recognizing that equally named variables
-    are not the same when bound by different quantifiers.
-
-    :returns: The set of all identified variables in form of (<variable_name>, <variable_id>, <variable_type>)
-    """
-
-    if not isinstance(tree, list):
-        if isinstance(tree, BoolLiteral):
-            return set()
-
-        if isinstance(tree, Relation):
-            # Register all the variables located in the Presburger formula
-            variables_used: Set[Tuple[str, int, VariableType]] = set()
-            for variable_name in tree.variable_names:
-                var_info = ctx.get_variable_info(variable_name)
-                var_info.usage_count += 1
-                variables_used.add((var_info.name, var_info.id, var_info.type))
-
-            assert not tree.modulo_terms
-            assert not tree.div_terms
-            return variables_used
-
-        if isinstance(tree, Congruence):
-            vars_used = set()
-            for var in tree.vars:
-                var_info = ctx.get_variable_info(var)
-                var_info.usage_count += 1
-                vars_used.add((var_info.name, var_info.id, var_info.type))
-            return vars_used
-
-
-        # Tree is a reference to a normal variable, consult with context whether this is the first encounter
-        # @FIXME: We should not declare a new variable on the spot as it has not been declared - we don't know its type.
-        info = ctx.get_variable_info(tree)
-        return set([(info.name, info.id, info.type)])
-
-    root = tree[0]
-
-    assert_failure_desc = 'Relations should be reduced into direcly evaluable leaves at this point.'
-    assert root not in ['<', '<=', '>=', '>'], assert_failure_desc
-
-    if root == '=':
-        # Relations are preprocessed in a separate pass - this must be a Boolean equivalence
-        return get_all_used_variables(tree[1], ctx).union(get_all_used_variables(tree[2], ctx))
-
-
-    if root in ['exists']:
-        ctx.push_new_variable_info_frame()
-        variable_bindings = parse_variable_bindings_list_to_internal_repr(tree[1])
-        ctx.add_multiple_variables_to_current_frame(variable_bindings)
-        used_variables = get_all_used_variables(tree[2], ctx)
-        ctx.pop_variable_frame()
-        return used_variables
-
-    elif root in ['not', 'assert']:
-        return get_all_used_variables(tree[1], ctx)
-
-    elif root in ['or', 'and']:
-        vars: Set[Tuple[str, int, VariableType]] = set()
-        for conj_term in tree[1:]:
-            term_vars = get_all_used_variables(conj_term, ctx)
-            vars = vars.union(term_vars)
-        return vars
-
-    else:
-        # @Cleanup: This message is very ambiguous
-        raise ValueError(f'Unhandled branch when exploring the SMT tree. Tree: {tree}')
-
-
 def build_syntax_tree(tokens: Iterable[str]):
     stack: List[Any] = []
     depth = -1
@@ -430,20 +236,6 @@ def build_syntax_tree(tokens: Iterable[str]):
         else:
             stack[-1].append(token)
     return stack
-
-
-def add_only_used_function_constants_to_context(ctx: EvaluationContext,
-                                                used_variables: Set[Tuple[str, int, VariableType]],
-                                                declared_function_symbols: Sequence[FunctionSymbol]):
-    """Adds only used declared function constants to ctx."""
-    starting_id = ctx.next_available_variable_id
-    used_variable_ids = set(var_info[1] for var_info in used_variables)
-
-    function_symbol_ids = [i + starting_id for i in range(len(declared_function_symbols))]
-    for i, function_symb in enumerate(declared_function_symbols):
-        variable_id = i + starting_id
-        if variable_id in used_variable_ids:
-            ctx.add_global_variable(var_name=function_symb.name, var_type=function_symb.return_type)
 
 
 def optimize_formula_structure(formula_to_evaluate: AST_Node) -> AST_Node:
@@ -554,27 +346,13 @@ def perform_whole_evaluation_on_source_text(source_text: str,
                 raise ValueError('Cannot check-sat without any asserts.')
 
             ctx = EvaluationContext()
-            function_symbols = sorted(function_symbol_to_info_map.values(), key=lambda symbol: symbol.name)
-            for fun_symbol in function_symbols:
-                ctx.add_global_variable(fun_symbol.name, var_type=fun_symbol.return_type)
 
             # If there are multiple assert statements, evaluate their conjunction
             formula_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
 
-            # @Note: Preprocessing will modify the given list
-            bool_symbols = {
-                var_name for var_name, v_info in ctx.global_variables.items() if v_info.type == VariableType.BOOL
-            }
-
-            fn_symbol_changes, formula_to_evaluate = preprocessing.preprocess_ast(formula_to_evaluate,  # type: ignore
-                                                                                  constant_function_symbols=function_symbols,
-                                                                                  bool_vars=bool_symbols)
-
-            for old_sym, new_sym in fn_symbol_changes:
-                if old_sym.name in ctx.global_variables:
-                    ctx.global_variables[new_sym.name] = ctx.global_variables[old_sym.name]
-                    ctx.global_variables[new_sym.name].name = new_sym.name
-                    del ctx.global_variables[old_sym.name]
+            const_fn_symbols = [fn_symbol for fn_symbol in function_symbol_to_info_map.values() if fn_symbol.arity == 0]
+            formula_to_evaluate, var_table  = preprocessing.preprocess_ast(formula_to_evaluate,  # type: ignore
+                                                                           global_fn_symbols=const_fn_symbols)
 
             logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
 
@@ -582,20 +360,10 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             formula_to_evaluate = optimize_formula_structure(formula_to_evaluate)
 
             # Count all distinct variables in the formula
-            all_vars = get_all_used_variables(formula_to_evaluate, ctx)
 
-            # There might be declared global function constants that are not used in the formula. If the asserted
-            # formula does not talk about these variables, they are not needed during the procedure and they would only
-            # slow down the procedure. At the moment we don't generate values for these variables in a model.
-            # @Note: Not sure whether they need to be a part of the generated model, check with Z3
-            unused_global_function_constant_offset = min((var_info[1] for var_info in all_vars), default=1) - 1
-            vars_with_ids = [
-                (var_name, (var_id - unused_global_function_constant_offset)) for var_name, var_id, _ in all_vars
-            ]
-            alphabet = LSBF_Alphabet.from_variable_id_pairs(vars_with_ids)
+            alphabet = LSBF_Alphabet.from_vars(var_table.keys())
 
-            eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet, global_scope=ctx.global_variables)
-            add_only_used_function_constants_to_context(eval_ctx, all_vars, function_symbols)
+            eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet, var_table=var_table)
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
             nfa = run_evaluation_procedure(formula_to_evaluate, eval_ctx)
@@ -607,8 +375,10 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
 def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> NFA:
     """ Construct an automaton accepting the solutions of the given congruence """
-    var_id_pairs = sorted(ctx.get_multiple_variable_ids(congruence.vars), key=lambda pair: pair[1])
-    vars, coefs = utils.reorder_variables_according_to_ids(var_id_pairs, (congruence.vars, congruence.coefs))
+    vars: List[Var] = []
+    coefs: List[int] = []
+
+    vars, coefs = zip(*sorted(zip(congruence.vars, congruence.coefs), key = lambda pair: pair[0]))
 
     ordered_congruence = Congruence(vars=vars, coefs=coefs, rhs=congruence.rhs, modulus=congruence.modulus)
 
@@ -617,11 +387,10 @@ def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> N
     # The alphabet might have only variable IDs but no names assigned to them yet, bind the variable names to IDs
     # so that we can do vizualization properly
     assert ctx.alphabet
-    ctx.alphabet.assert_variable_names_to_ids_match(var_id_pairs)
 
     constr = ctx.get_automaton_class_for_current_backend()
     ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_CONGRUENCE, None, None)
-    nfa = relations_to_nfa.build_presburger_congruence_nfa(constr, ctx.alphabet, congruence, var_id_pairs)
+    nfa = relations_to_nfa.build_presburger_congruence_nfa(constr, ctx.alphabet, congruence)
     ctx.stats_operation_ends(nfa)
 
     return nfa
@@ -658,86 +427,26 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
     assert relation.predicate_symbol in ('<=', '=')
     operation, automaton_building_function = building_handlers[solver_config.solution_domain][relation.predicate_symbol]
 
-    # Congruence relations of the form a.x ~ k must be handled differently - it is necessary to reorder
-    # the modulo term inside, not the nonmodular variables
+    assert relation.vars == sorted(relation.vars)
+    assert automaton_building_function
 
-    if relation.is_congruence_equality():
-        assert False
-        logger.debug(f'Given relation: %s is congruence equivalence. Reordering variables.', relation)
-        modulo_term = relation.modulo_terms[0]
-        variable_id_pairs = sorted(ctx.get_multiple_variable_ids(modulo_term.variables),
-                                   key=lambda pair: pair[1])
-        var_names, var_coefs = utils.reorder_variables_according_to_ids(
-                variable_id_pairs,
-                (modulo_term.variables, modulo_term.variable_coefficients))
+    ctx.stats_operation_starts(operation, None, None)
+    nfa = automaton_building_function(automaton_constr, ctx.alphabet, relation)
+    ctx.stats_operation_ends(nfa)
 
-        modulo_term_ordered = ModuloTerm(variables=var_names,
-                                         variable_coefficients=var_coefs,
-                                         constant=modulo_term.constant,
-                                         modulo=modulo_term.modulo)
-
-        relation.modulo_terms[0] = modulo_term_ordered
-
-        logger.debug(f'Reordered modulo term from: %s to %s', modulo_term, modulo_term_ordered)
-
-        # The alphabet might have only variable IDs but no names assigned to them yet, bind the variable names to IDs
-        # so that we can do vizualization properly
-        ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
-
-        nfa = relations_to_nfa.build_presburger_modulo_nfa(automaton_constr, ctx.alphabet, relation, variable_id_pairs)
-
-        ctx.emit_evaluation_introspection_info(nfa, ParsingOperation.BUILD_NFA_FROM_CONGRUENCE)
-        return nfa
-
-    else:
-        assert not relation.modulo_terms
-        assert not relation.div_terms
-
-        # The extracted relation contains the list of variables and their
-        # coefficients in an arbitrary order - we need to make sure that the order
-        # of variables will be by ascending IDs (MTBDD requirement)
-        variable_id_pairs = sorted(ctx.get_multiple_variable_ids(relation.variable_names),
-                                   key=lambda pair: pair[1])
-        var_names, var_coefs = utils.reorder_variables_according_to_ids(
-                variable_id_pairs,
-                (relation.variable_names, relation.variable_coefficients))
-
-        # The alphabet might have only variable IDs but no names, inject
-        # the variable names so that we can do vizualization properly
-        ctx.alphabet.assert_variable_names_to_ids_match(variable_id_pairs)
-
-        reordered_relation = Relation.new_lin_relation(variable_names=var_names, variable_coefficients=var_coefs,
-                                                       absolute_part=relation.absolute_part,
-                                                       predicate_symbol=relation.predicate_symbol)
-
-        assert automaton_building_function
-
-        ctx.stats_operation_starts(operation, None, None)
-        nfa = automaton_building_function(automaton_constr, ctx.alphabet, reordered_relation, variable_id_pairs)
-        ctx.stats_operation_ends(nfa)
-
-        emit_evaluation_progress_info(
-            f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})',
-            depth
-        )
-
-    # Finalization - increment variable usage counter and bind variable ID to a name in the alphabet (lazy binding)
-    # as the variable IDs could not be determined beforehand.
-    for var_name, var_id in variable_id_pairs:
-        var_info = ctx.lookup_variable(var_name)
-        assert var_info, ('Failed to retrieve variable info from evaluation context to increment variable usage '
-                          'counter after an automaton for an atomic constraint was built.')
-        var_info.usage_count += 1
+    emit_evaluation_progress_info(
+        f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})',
+        depth
+    )
 
     return nfa
 
 
 # @Cleanup: Fold this function in if it is even used
-def build_automaton_for_boolean_variable(var_name: str, var_value: bool, ctx: EvaluationContext) -> NFA:
+def build_automaton_for_boolean_variable(var: Var, var_value: bool, ctx: EvaluationContext) -> NFA:
     """Construct an automaton corresponding the given boolean variable."""
-    logger.debug(f'Building an equivalent automaton for the bool variable {var_name}, with value {var_value}.')
-    var_id = ctx.get_variable_id(var_name)
-    return ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), var_id, var_value)
+    logger.debug(f'Building an equivalent automaton for the bool variable {var}, with value {var_value}.')
+    return ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), var, var_value)
 
 
 # @Cleanup: How is this function even used? We now have Relations in the AST, so we typically take the else branch.
@@ -750,7 +459,7 @@ def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _de
     if isinstance(operand_ast, str):
         logger.debug('Requested the automaton for an operand that is an AST Leaf (str).'
                      'Searching variable scopes for its definition.')
-
+        print(operand_ast)
         variable_info = ctx.lookup_variable(operand_ast)
         if (variable_info and variable_info.type == VariableType.BOOL):
             logger.debug(f'Found definition for %s - symbol defined as a boolean variable.', operand_ast)
@@ -916,12 +625,7 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
     """Construct an NFA corresponding to the given formula of the form (exists (vars) (phi))."""
     assert len(exists_expr) == 3
 
-    # We are entering a new variable frame (only exists can bind variables to
-    # types / manipulate FREE/BOUND sets)
-    ctx.push_new_variable_info_frame()
-    variable_bindings: Dict[str, VariableType] = parse_variable_bindings_list_to_internal_repr(exists_expr[1])
-    logger.debug(f'Exists - Extracted variable type bindings for {variable_bindings.keys()}')
-    ctx.add_multiple_variables_to_current_frame(variable_bindings)
+    bound_vars: List[Var] = exists_expr[1]  # type: ignore
 
     # Perform a look-ahead to see whether we can construct the NFA for the entire conjunction using a lazy approach
     if solver_config.backend_type == BackendType.MTBDD and solver_config.optimizations.do_lazy_evaluation:
@@ -931,57 +635,40 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
                 logger.info('Lazy constructing %s', conjunction)
                 atoms: List[AST_Atom] = conjunction[1:]  # type: ignore
                 from amaya.mtbdd_transitions import MTBDDTransitionFn
-                quantified_vars: List[str] = [var for var in variable_bindings]
 
                 ctx.stats_operation_starts(ParsingOperation.LAZY_CONSTRUCT, None, None)
-                nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, quantified_vars, ctx.get_alphabet(), ctx.get_variable_id)
+                nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, bound_vars, ctx.get_alphabet())
                 ctx.stats_operation_ends(nfa)
 
-                ctx.pop_variable_frame()
                 logger.info("Lazy construnction done, result has %d states", len(nfa.states))
                 nfa = minimize_automaton_if_configured(nfa, ctx)
                 return nfa
 
     nfa = get_automaton_for_operand(exists_expr[2], ctx, _depth)
-    vars_info = ctx.get_variables_info_for_current_frame()
 
     # We need to establish an order of individual projections applied, so that we can tell when we are projecting away
     # the last variable in this quantifier, because we don't need to do padding closure after every single variable
     # projection - we have to do it only after the variable has been projected away.
-    projected_var_ids: List[int] = list()
-    for var_name in variable_bindings:
-        current_var_info = vars_info[var_name]
-        if current_var_info.usage_count > 0:
-            projected_var_ids.append(current_var_info.id)
-        else:
-            logger.debug('Skipping projection of %s - 0 ussages found.', var_name)
 
-    if not projected_var_ids:
-        # No projection will occur
-        ctx.pop_variable_frame()
-        return nfa
+    logger.debug(f'Established projection order: {bound_vars}')
 
-    logger.debug(f'Established projection order: {projected_var_ids}')
-
-    last_var_id: int = projected_var_ids[-1]
-    for var_id in projected_var_ids:
-        logger.debug(f'Projecting away variable {var_id}')
+    last_var_to_project = bound_vars[-1]
+    for var in bound_vars:
+        logger.debug(f'Projecting away variable {var}')
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
 
         # It is sufficient to do the padding closure only after the last variable is projected away
-        skip_pad_closure = False if var_id == last_var_id else True
+        skip_pad_closure = False if var == last_var_to_project else True
 
-        projection_result = nfa.do_projection(var_id, skip_pad_closure=skip_pad_closure)
+        projection_result = nfa.do_projection(var, skip_pad_closure=skip_pad_closure)
         assert projection_result
         nfa = projection_result
         ctx.stats_operation_ends(nfa)
-        logger.debug(f'Variable {var_id} projected away.')
+        logger.debug(f'Variable {var} projected away.')
 
     nfa = minimize_automaton_if_configured(nfa, ctx)
 
-    emit_evaluation_progress_info(f' >> projection({variable_bindings}) (result_size: {len(nfa.states)})', _depth)
-
-    ctx.pop_variable_frame()
+    emit_evaluation_progress_info(f' >> projection({bound_vars}) (result_size: {len(nfa.states)})', _depth)
     return nfa
 
 
@@ -1027,15 +714,10 @@ def run_evaluation_procedure(ast: AST_Node,
         if isinstance(ast, Relation):
             return build_automaton_from_presburger_relation_ast(ast, ctx, _debug_recursion_depth)
 
-        # Check whether the thing we have encountered is a Boolean variable. If not, the input formula is malformed.
-        # @Cleanup: This should all be done in preprocessing - instead of having a string for a boolean variable
-        #           that we check every time, the tree should already be preprocessed to contain a Boolean variable,
-        #           or the error should have been reported to the user.
-        is_bool_var = False
-        maybe_variable_type = ctx.get_variable_type_if_defined(ast)
-        if maybe_variable_type is not None and maybe_variable_type == VariableType.BOOL:
-            logger.debug('Reached a SMT2 term %s, which was queried as a boolean variable.', ast)
-            return build_automaton_for_boolean_variable(var_name=ast, var_value=True, ctx=ctx)
+        if isinstance(ast, Var):
+            if ctx.var_table[ast].type != VariableType.BOOL:
+                raise ValueError(f'AST contains a freestanding non-boolean variable, don\'t know how to evaluate that. {ast}')
+            return build_automaton_for_boolean_variable(var=ast, var_value=True, ctx=ctx)
 
         raise ValueError('Cannot evaluate atom: %s.', ast)
 

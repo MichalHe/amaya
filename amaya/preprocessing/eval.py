@@ -14,8 +14,11 @@ from amaya.relations_structures import (
     AST_Node,
     BoolLiteral,
     Congruence,
+    FunctionSymbol,
     Raw_AST,
     Relation,
+    Var,
+    VariableType,
 )
 
 
@@ -26,7 +29,7 @@ class NonlinTermType(Enum):
 
 @dataclass(frozen=True)
 class NonlinTerm:
-    lin_terms: Tuple[Tuple[str, int]]
+    lin_terms: Tuple[Tuple[Var, int]]
     nonlin_constant: int
     """Divisor in when the term is DIV, modulus when the term is MOD"""
     type: NonlinTermType
@@ -36,7 +39,7 @@ class NonlinTerm:
 @dataclass(frozen=True)
 class LinTerm:
     coef: int
-    var: str
+    var: Var
 
 
 class RelationType(Enum):
@@ -53,11 +56,79 @@ class FrozenRelation:
     modulus: int = 0  # Only when type = congruence
 
 
+@dataclass
+class VarInfo:
+    name: str
+    type: VariableType
+
+
+class Scoper:
+    def __init__(self, global_symbols: Iterable[Tuple[str, VariableType]]):
+        self.scopes: List[Dict[str, Var]] = []
+        self.var_table: Dict[Var, VarInfo] = {}
+        self.next_var_id: int = 1
+
+        global_scope: Dict[str, Var] = {}
+        self.scopes.append(global_scope)
+
+        for var_name, var_type in global_symbols:
+            var = Var(id=self.next_var_id)
+            self.next_var_id += 1
+            global_scope[var_name] = var
+            self.var_table[var] = VarInfo(name=var_name, type=var_type)
+
+    def enter_quantifier(self, quantified_vars: List[Tuple[str, str]]) -> List[Var]:
+        new_scope: Dict[str, Var] = {}
+        self.scopes.append(new_scope)
+
+        vars: List[Var] = []
+
+        for var_name, raw_var_type in quantified_vars:
+            var_type = VariableType.from_smt_type_string(raw_var_type)
+            var = Var(id=self.next_var_id)
+            new_scope[var_name] = var
+            self.var_table[var] = VarInfo(name=var_name, type=var_type)
+            self.next_var_id += 1
+
+            vars.append(var)
+
+        return vars
+
+    def unwind_quantifier(self):
+        """ None of the quantified variables was used in the subformula. """
+        scope = self.scopes.pop(-1)
+        self.next_var_id = min(scope.values()).id
+
+
+    def exit_quantifier(self):
+        self.scopes.pop(-1)
+
+
+    def lookup_var_name(self, var_name: str) -> Var:
+        for scope in reversed(self.scopes):
+            if var_name in scope:
+                return scope[var_name]
+
+        raise ValueError(f'Variable has not been declared previously: {var_name}')
+
+
+    def put_var_into_current_scope(self, var_name: str, raw_var_type: str = 'Int') -> Var:
+        current_scope = self.scopes[-1]
+        if var_name in current_scope:
+            raise ValueError(f'Naming conflict - trying to insert a variable {var_name} into a scope that already contains that name')
+        var_type = VariableType.from_smt_type_string(raw_var_type)
+        var = Var(id=self.next_var_id)
+        self.next_var_id += 1
+        current_scope[var_name] = var
+        self.var_table[var] = VarInfo(name=var_name, type=var_type)
+        return var
+
+
 @dataclass(unsafe_hash=True)
 class NonlinTermNode:
     """A node in the term dependency graph"""
 
-    introduced_vars: Tuple[str, ...] = field(hash=True)
+    introduced_vars: Tuple[Var, ...] = field(hash=True)
     """ Variables used to express the term that need to be quantified. """
 
     equivalent_lin_expression: Tuple[LinTerm, ...] = field(hash=True)
@@ -72,7 +143,7 @@ class NonlinTermNode:
     dependent_terms: Set[NonlinTermNode] = field(default_factory=set, hash=False)
 
 
-def make_node_for_two_variable_rewrite(term: NonlinTerm, rewrite_id: int) -> NonlinTermNode:
+def make_node_for_two_variable_rewrite(term: NonlinTerm, rewrite_id: int, scoper: Scoper) -> NonlinTermNode:
     """
     Create a node describing rewrite of the given term using two new variables (quotient and reminder).
 
@@ -81,8 +152,8 @@ def make_node_for_two_variable_rewrite(term: NonlinTerm, rewrite_id: int) -> Non
     Mod term is rewritten as:
         x - (y mod D) = 0   --->   x - <REMINDER> && 0 <= <REMINDER> && <REMINDER> <= M-1 && y - D*<QUOTIENT> = <REMINDER>
     """
-    quotient = f'D{rewrite_id}'
-    reminder = f'M{rewrite_id}'
+    quotient = scoper.put_var_into_current_scope(f'D{rewrite_id}')
+    reminder = scoper.put_var_into_current_scope(f'M{rewrite_id}')
     introduced_vars = (quotient, reminder)
     if term.type == NonlinTermType.MOD:
         equiv_expr = (LinTerm(coef=1, var=reminder),)
@@ -104,7 +175,7 @@ def make_node_for_two_variable_rewrite(term: NonlinTerm, rewrite_id: int) -> Non
     return node
 
 
-def make_node_for_single_variable_rewrite(term: NonlinTerm, rewrite_id: int) -> NonlinTermNode:
+def make_node_for_single_variable_rewrite(term: NonlinTerm, rewrite_id: int, scoper: Scoper) -> NonlinTermNode:
     """
     Create a node describing rewrite of the given term using a single new variable (quotient).
 
@@ -113,7 +184,7 @@ def make_node_for_single_variable_rewrite(term: NonlinTerm, rewrite_id: int) -> 
     Mod term is rewritten as:
         x - (y mod M) = 0   --->   x - (y - M*<QUOTIENT>) && 0 <= (y - M*<QUOTIENT>) && (y - M*<QUOTIENT>) <= M-1
     """
-    quotient = f'D{rewrite_id}'
+    quotient = scoper.put_var_into_current_scope(f'D{rewrite_id}')
     introduced_vars = (quotient, )
 
     # (y - M*<QUOTIENT>)
@@ -136,18 +207,19 @@ def make_node_for_single_variable_rewrite(term: NonlinTerm, rewrite_id: int) -> 
 
 @dataclass
 class NonlinTermGraph:
-    index: Dict[str, List[NonlinTermNode]] = field(default_factory=lambda: defaultdict(list))
+    index: Dict[Var, List[NonlinTermNode]] = field(default_factory=lambda: defaultdict(list))
     term_nodes: Dict[NonlinTerm, NonlinTermNode] = field(default_factory=dict)
     graph_roots: Set[NonlinTermNode] = field(default_factory=set)
 
-    def make_term_known(self, term: NonlinTerm) -> NonlinTermNode:
+    def make_term_known(self, term: NonlinTerm, scoper: Scoper) -> NonlinTermNode:
         if term in self.term_nodes:
             return self.term_nodes[term]
 
-        var_id = len(self.term_nodes)
+        nonlin_var_id = len(self.term_nodes)
 
         if term.type == NonlinTermType.MOD and solver_config.preprocessing.use_congruences_when_rewriting_modulo:
-            reminder = f'M{var_id}'
+            var_name = f'mod_var_{nonlin_var_id}'
+            reminder = scoper.put_var_into_current_scope(var_name)
             introduced_vars = (reminder,)
 
             equiv_expr = (LinTerm(coef=1, var=reminder),)
@@ -166,9 +238,9 @@ class NonlinTermGraph:
                                   atoms_relating_introduced_vars=relating_atoms, body=term)
         else:
             if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
-                node = make_node_for_two_variable_rewrite(term, rewrite_id=len(self.term_nodes))
+                node = make_node_for_two_variable_rewrite(term, rewrite_id=len(self.term_nodes), scoper=scoper)
             else:
-                node = make_node_for_single_variable_rewrite(term, rewrite_id=len(self.term_nodes))
+                node = make_node_for_single_variable_rewrite(term, rewrite_id=len(self.term_nodes), scoper=scoper)
 
         self.term_nodes[term] = node
         return node
@@ -181,7 +253,7 @@ class NonlinTermGraph:
         for var, _ in node.body.lin_terms:
             self.index[var].append(node)
 
-    def drop_nodes_for_var(self, var: str) -> List[NonlinTermNode]:
+    def drop_nodes_for_var(self, var: Var) -> List[NonlinTermNode]:
         work_list = list(self.index[var])
 
         dropped_nodes = []
@@ -208,7 +280,7 @@ class NonlinTermGraph:
 class Expr:
     """A linear arithmetical expression of the form c_1*a_1 + c_2*a_2 + K"""
     constant_term: int = 0
-    linear_terms: Dict[str, int] = field(default_factory=dict)
+    linear_terms: Dict[Var, int] = field(default_factory=dict)
 
     def __neg__(self) -> Expr:
         negated_lin_terms = {var: -coef for var, coef in self.linear_terms.items()}
@@ -244,17 +316,19 @@ class Expr:
 
 @dataclass
 class ASTInfo:
-    used_vars: Set[str] = field(default_factory=set)
+    used_vars: Set[Var] = field(default_factory=set)
 
 
-
-def normalize_expr(ast: Raw_AST, nonlinear_term_graph: NonlinTermGraph) -> Tuple[Expr, Set[NonlinTermNode], Set[str]]:
-    if isinstance(ast, str):
+def normalize_expr(ast: Raw_AST,
+                   nonlinear_term_graph: NonlinTermGraph,
+                   scoper: Scoper) -> Tuple[Expr, Set[NonlinTermNode], Set[Var]]:
+    if isinstance(ast, (str, int)):
         try:
             int_val = int(ast)
             return Expr(constant_term=int_val), set(), set()
         except ValueError:
-            return Expr(linear_terms={ast: 1}), set(), {ast}
+            var = scoper.lookup_var_name(ast)
+            return Expr(linear_terms={var: 1}), set(), {var}
 
     assert isinstance(ast, list)
     node_type = ast[0]
@@ -263,24 +337,24 @@ def normalize_expr(ast: Raw_AST, nonlinear_term_graph: NonlinTermGraph) -> Tuple
 
     if len(ast) > 2 and node_type in expr_reductions:
         reduction = expr_reductions[node_type]
-        left, dependent_terms, support = normalize_expr(ast[1], nonlinear_term_graph)
+        left, dependent_terms, support = normalize_expr(ast[1], nonlinear_term_graph, scoper)
         for operand_ast in ast[2:]:
-            operand, dependent_term, other_support = normalize_expr(operand_ast, nonlinear_term_graph)
+            operand, dependent_term, other_support = normalize_expr(operand_ast, nonlinear_term_graph, scoper)
             dependent_terms.update(dependent_term)
             support.update(other_support)
             left = reduction(left, operand)
         return left, dependent_terms, support
     elif len(ast) == 2 and node_type == '-':
-        operand, dependent_terms, support = normalize_expr(ast[1], nonlinear_term_graph)
+        operand, dependent_terms, support = normalize_expr(ast[1], nonlinear_term_graph, scoper)
         return -operand, dependent_terms, support
     elif node_type in {'mod', 'div'}:
-        lin_term, dependent_terms, support = normalize_expr(ast[1], nonlinear_term_graph)
-        nonlin_constant, _, _ = normalize_expr(ast[2], nonlinear_term_graph)
+        lin_term, dependent_terms, support = normalize_expr(ast[1], nonlinear_term_graph, scoper)
+        nonlin_constant, _, _ = normalize_expr(ast[2], nonlinear_term_graph, scoper)
         lin_terms = tuple(sorted(lin_term.linear_terms.items(), key=lambda var_coef_pair: var_coef_pair[0]))
         term_body = NonlinTerm(lin_terms=lin_terms, lin_term_constant=lin_term.constant_term,
                                type=NonlinTermType(node_type), nonlin_constant=nonlin_constant.constant_term)
 
-        term_node = nonlinear_term_graph.make_term_known(term_body)
+        term_node = nonlinear_term_graph.make_term_known(term_body, scoper)
 
         for dep_term in dependent_terms:
             dep_term.dependent_terms.add(term_node)
@@ -296,14 +370,14 @@ def normalize_expr(ast: Raw_AST, nonlinear_term_graph: NonlinTermGraph) -> Tuple
     raise ValueError(f'Cannot reduce unknown expression to evaluable form. {ast=}')
 
 
-def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph) -> Tuple[Union[Relation, BoolLiteral], ASTInfo]:
+def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, scoper: Scoper) -> Tuple[Union[Relation, BoolLiteral], ASTInfo]:
     assert isinstance(ast, list)
     predicate_symbol = ast[0]
     if not isinstance(predicate_symbol, str):
         raise ValueError(f'Cannot construct equation for predicate symbol that is not a string: {predicate_symbol=}')
 
-    lhs, _, lhs_support = normalize_expr(ast[1], dep_graph)  # Will remove nonlinear terms and replace them with new variables
-    rhs, _, rhs_support = normalize_expr(ast[2], dep_graph)
+    lhs, _, lhs_support = normalize_expr(ast[1], dep_graph, scoper)  # Will remove nonlinear terms and replace them with new variables
+    rhs, _, rhs_support = normalize_expr(ast[2], dep_graph, scoper)
     support = lhs_support.union(rhs_support)
     top_level_support = set(lhs.linear_terms.keys()) | set(rhs.linear_terms.keys())
 
@@ -341,8 +415,9 @@ def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph)
     return relation, ast_info
 
 
-def split_lin_terms_into_vars_and_coefs(terms: Iterable[LinTerm]) -> Tuple[List[str], List[int]]:
-    vars, coefs = [], []
+def split_lin_terms_into_vars_and_coefs(terms: Iterable[LinTerm]) -> Tuple[List[Var], List[int]]:
+    vars: List[Var] = []
+    coefs: List[int] = []
     for term in terms:
         coefs.append(term.coef)
         vars.append(term.var)
@@ -354,9 +429,11 @@ def generate_atoms_for_term(node: NonlinTermNode) -> List[AST_Atom]:
     for frozen_atom in node.atoms_relating_introduced_vars:
         vars, coefs = split_lin_terms_into_vars_and_coefs(frozen_atom.lhs)
         if frozen_atom.type == RelationType.EQ or frozen_atom.type == RelationType.INEQ:
+            # @FixMe
             atom = Relation.new_lin_relation(variable_names=vars, variable_coefficients=coefs,
                                              absolute_part=frozen_atom.rhs, predicate_symbol=frozen_atom.type.value)
         else:
+            # @FixMe
             atom = Congruence(vars=vars, coefs=coefs, rhs=frozen_atom.rhs, modulus=frozen_atom.modulus)
         atoms.append(atom)
     return atoms
@@ -372,9 +449,16 @@ def is_any_node_of_type(types: Iterable[str], node1, node2):
     return is_node1 or is_node2
 
 
-def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, bool_vars: Set[str]) -> Tuple[AST_Node, ASTInfo]:
+def _convert_ast_into_evaluable_form(ast: Raw_AST,
+                                     dep_graph: NonlinTermGraph,
+                                     bool_vars: Set[str],
+                                     scoper: Scoper) -> Tuple[AST_Node, ASTInfo]:
     if isinstance(ast, str):
-        return ast, ASTInfo(used_vars={ast})
+        var = scoper.lookup_var_name(ast)
+        return var, ASTInfo(used_vars={var})
+
+    if isinstance(ast, BoolLiteral):
+        return ast, ASTInfo(used_vars=set())
 
     assert isinstance(ast, list), f'Freestanding integer found - not a part of any atom: {ast}'
     node_type = ast[0]
@@ -384,35 +468,36 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
         new_node: AST_Node = [node_type]
         tree_info = ASTInfo()
         for child in ast[1:]:
-            new_child, child_tree_info = _convert_ast_into_evaluable_form(child, dep_graph, bool_vars)
+            new_child, child_tree_info = _convert_ast_into_evaluable_form(child, dep_graph, bool_vars, scoper)
             new_node.append(new_child)
             tree_info.used_vars.update(child_tree_info.used_vars)
         return new_node, tree_info
 
     if node_type == 'not':
-        child, child_ast_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars)
+        child, child_ast_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars, scoper)
         if isinstance(child, BoolLiteral):
             return BoolLiteral(value=not child.value), child_ast_info
         return ['not', child], child_ast_info
 
     if node_type == 'exists':
         new_node: AST_Node = [node_type]
-        bound_vars: List[str] = [var for var, dummy_type in ast[1]]  # type: ignore
 
-        child, child_ast_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars)
+        raw_quantifier_list: List[Tuple[str, str]] = ast[1]  # type: ignore
+        quantifier_list = scoper.enter_quantifier(raw_quantifier_list)
 
-        binding_list = [[var, type] for var, type in ast[1] if var in child_ast_info.used_vars]
-        if not binding_list:
-            # The underlying AST could be x = x, which would be reduced to BoolLiteral(True). Remove the quantifier
-            # all together
+        child, child_ast_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars, scoper)
+
+        bound_vars: List[Var] = [var for var in quantifier_list if var in child_ast_info.used_vars]
+        if not bound_vars:
+            # The underlying AST could be x = x, which would be reduced to BoolLiteral(True).
+            # Remove the quantifier all together
+            scoper.unwind_quantifier()
             return child, child_ast_info
 
-        new_node.append(binding_list)  # type: ignore
+        new_node.append(bound_vars)  # type: ignore
 
         # Child's AST Info will represent this node - remove all currently bound variables
-        for var in bound_vars:
-            if var in child_ast_info.used_vars:  # A variable might be not be used e.g when x + y = x
-                child_ast_info.used_vars.remove(var)
+        child_ast_info.used_vars = child_ast_info.used_vars.difference(bound_vars)
 
         # Try dropping any of the bound vars - collect nonlinear terms (graph nodes) that have to be instantiated
         dropped_nodes: List[NonlinTermNode] = []
@@ -429,9 +514,11 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
             else:
                 child = ['and', child] + new_atoms
 
-            new_binders_in_node = [[introduced_var, 'Int'] for term_node in dropped_nodes for introduced_var in term_node.introduced_vars]
+            new_binders_in_node = [introduced_var for term_node in dropped_nodes for introduced_var in term_node.introduced_vars]
             new_node[1] += new_binders_in_node  # type: ignore
         new_node.append(child)
+
+        scoper.exit_quantifier()
 
         return new_node, child_ast_info
 
@@ -439,26 +526,31 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, b
         connectives = {'and', 'or', 'not', 'exists', 'forall'}
 
         if is_any_member_if_str(bool_vars, ast[1], ast[2]) or is_any_node_of_type(connectives, ast[1], ast[2]):
-            lhs, lhs_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars)
-            rhs, rhs_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars)
+            lhs, lhs_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars, scoper)
+            rhs, rhs_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars, scoper)
             lhs_info.used_vars.update(rhs_info.used_vars)
             return ['=', lhs, rhs], lhs_info
         lia_symbols = {'+', '-', '*', 'mod', 'div'}
         if is_any_node_of_type(lia_symbols, ast[1], ast[2]):
-            return convert_relation_to_evaluable_form(ast, dep_graph)
+            return convert_relation_to_evaluable_form(ast, dep_graph, scoper)
 
         logger.info('Not sure whether %s is a Boolean equivalence or an atom, reducing to atom.', ast)
-        return convert_relation_to_evaluable_form(ast, dep_graph)
+        return convert_relation_to_evaluable_form(ast, dep_graph, scoper)
 
     if node_type in ['<=', '<', '>', '>=']:
-        return convert_relation_to_evaluable_form(ast, dep_graph)
+        return convert_relation_to_evaluable_form(ast, dep_graph, scoper)
 
     raise ValueError(f'Cannot traverse trough {node_type=} while converting AST into evaluable form. {ast=}')
 
 
-def convert_ast_into_evaluable_form(ast: Raw_AST, bool_vars: Set[str]) -> Tuple[AST_Node, ASTInfo]:
+def convert_ast_into_evaluable_form(ast: Raw_AST, global_symbols: Iterable[FunctionSymbol]) -> Tuple[AST_Node, Dict[Var, VarInfo]]:
     dep_graph = NonlinTermGraph()
-    new_ast, new_ast_info = _convert_ast_into_evaluable_form(ast, dep_graph, bool_vars)
+
+    bool_vars = {sym.name for sym in global_symbols if sym.return_type == VariableType.BOOL}
+    global_syms = [(sym.name, sym.return_type) for sym in global_symbols]
+    scoper = Scoper(global_syms)
+
+    new_ast, new_ast_info = _convert_ast_into_evaluable_form(ast, dep_graph, bool_vars, scoper)
 
     # There might be non-linear terms still not rewritten, e.g., if the lin. term inside the modulo term
     # depends on global symbols
@@ -467,7 +559,7 @@ def convert_ast_into_evaluable_form(ast: Raw_AST, bool_vars: Set[str]) -> Tuple[
     ]
 
     if not vars_with_undropped_nodes:
-        return new_ast, ASTInfo()
+        return new_ast, scoper.var_table
 
     dropped_nodes = []
     for var in vars_with_undropped_nodes:
@@ -476,10 +568,10 @@ def convert_ast_into_evaluable_form(ast: Raw_AST, bool_vars: Set[str]) -> Tuple[
     assert dropped_nodes
 
     introduced_vars = itertools.chain(*(node.introduced_vars for node in dropped_nodes))
-    binding_list = [[var, 'Int'] for var in introduced_vars]
+    binding_list = [var for var in introduced_vars]
     new_atoms = []
     for dropped_node in dropped_nodes:
         new_atoms += generate_atoms_for_term(dropped_node)
 
     new_ast = ['exists', binding_list, ['and', new_ast, *new_atoms]]  # type: ignore
-    return new_ast, ASTInfo()
+    return new_ast, scoper.var_table

@@ -27,6 +27,7 @@ from amaya.config import (
     solver_config,
     SolutionDomain,
 )
+from amaya.relations_structures import Var
 from amaya.transitions import (
     calculate_variable_bit_position,
     SparseSimpleTransitionFunction
@@ -76,7 +77,7 @@ class NFA:
     # intersecion/union; takes (automaton_id: int, old_state: int, new_state: int)
     _debug_state_rename: Optional[Callable[[int, int, int], None]] = None
 
-    used_variables: List[int] = field(default_factory=list)
+    used_variables: List[Var] = field(default_factory=list)
     """Variable IDs that are free in the formula represented by this automaton."""
 
     def update_transition_fn(self, from_state: int, via_symbol: LSBF_AlphabetSymbol, to_state: int):
@@ -303,7 +304,7 @@ class NFA:
         if trap_state_added:
             self.states.add(trap_state)
 
-    def do_projection(self, variable_id: int, skip_pad_closure: bool = False) -> NFA:
+    def do_projection(self, var: Var, skip_pad_closure: bool = False) -> NFA:
         """
         Project away the given variable track.
 
@@ -328,12 +329,12 @@ class NFA:
             new_nfa.final_states = set(self.final_states)
 
             # Assumes that the variables are kept sorted - does not perform sorting again
-            new_used_vars = [var_id for var_id in self.used_variables if var_id != variable_id]
+            new_used_vars = [used_var for used_var in self.used_variables if used_var != var]
             new_nfa.used_variables = new_used_vars
 
-            bit_pos = calculate_variable_bit_position(self.alphabet.variable_numbers, variable_id)
+            bit_pos = calculate_variable_bit_position(self.alphabet.all_vars, var)
             if bit_pos is None:
-                raise ValueError(f'Could not find variable_name "{variable_id}" in current alphabet {self.alphabet}')
+                raise ValueError(f'Could not find variable_name "{var}" in current alphabet {self.alphabet}')
 
             new_nfa.transition_fn = self.transition_fn
             new_nfa.transition_fn.project_bit_away(bit_pos)
@@ -468,7 +469,7 @@ class NFA:
         nfa.initial_states = {0}
         nfa.final_states = {1}
 
-        self_loop_symbol = tuple('*' for vn in alphabet.variable_numbers)
+        self_loop_symbol = tuple('*' for vn in alphabet.all_vars)
         nfa.update_transition_fn(0, self_loop_symbol, 1)
         nfa.update_transition_fn(1, self_loop_symbol, 1)
 
@@ -482,13 +483,13 @@ class NFA:
         nfa.states = {0}
         nfa.initial_states = {0}
 
-        self_loop_symbol = tuple('*' for vn in alphabet.variable_numbers)
+        self_loop_symbol = tuple('*' for vn in alphabet.all_vars)
         nfa.update_transition_fn(0, self_loop_symbol, 0)
 
         return nfa
 
     @classmethod
-    def for_bool_variable(cls, overall_alphabet: LSBF_Alphabet, var_id: int, var_value: bool):
+    def for_bool_variable(cls, overall_alphabet: LSBF_Alphabet, var: Var, var_value: bool):
         """
         Builds an automaton accepting words representing the given bool variable having given value.
 
@@ -500,17 +501,17 @@ class NFA:
 
         nfa = cls(alphabet=overall_alphabet,
                   automaton_type=automaton_type,
-                  used_variables=[var_id],
+                  used_variables=[var],
                   state_semantics=AH_Atom(atom_type=AH_AtomType.BOOL, atom=[]))
         nfa.states = {0, 1}
         nfa.initial_states = {0}
         nfa.final_states = {1}
 
         transition_symbol = (1, ) if var_value else (0, )
-        cylindrified_symbol = overall_alphabet.cylindrify_symbol_of_projected_alphabet([var_id], transition_symbol)
+        cylindrified_symbol = overall_alphabet.cylindrify_symbol_of_projected_alphabet([var], transition_symbol)
 
         nfa.update_transition_fn(0, cylindrified_symbol, 1)
-        universal_symbol = tuple('*' for i in range(len(overall_alphabet.variable_numbers)))
+        universal_symbol = tuple('*' for i in range(len(overall_alphabet.all_vars)))
         nfa.update_transition_fn(1, universal_symbol, 1)
 
         nfa.extra_info = {}
@@ -536,7 +537,7 @@ class NFA:
         for state_pair, symbols in _transitions.items():
             transitions.append((state_pair[0], symbols, state_pair[1]))
 
-        var_ids = self.used_variables if solver_config.vis_display_only_free_vars else self.alphabet.variable_numbers
+        var_ids = self.used_variables if solver_config.vis_display_only_free_vars else self.alphabet.all_vars
         var_names: Tuple[str] = tuple(self.alphabet.variable_names[var_id] for var_id in var_ids)
         return AutomatonVisRepresentation(
             states=set(self.states),

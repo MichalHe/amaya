@@ -536,7 +536,7 @@ class SparseSimpleTransitionFunction(SparseTransitionFunctionBase[StateType]):
             missing_symbols = viable_symbols - out_symbols
 
             if missing_symbols and not trap_state_added:
-                universal_symbol = tuple(['*' for v in alphabet.variable_numbers])
+                universal_symbol = tuple(['*' for v in alphabet.all_vars])
                 self.insert_transition(trap_state, universal_symbol, trap_state)
                 trap_state_added = True
 

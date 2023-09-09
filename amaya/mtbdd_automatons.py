@@ -29,6 +29,7 @@ from amaya.mtbdd_transitions import (
     MTBDDTransitionFn,
     mtbdd_false
 )
+from amaya.relations_structures import Var
 from amaya.visualization import AutomatonVisRepresentation
 
 
@@ -43,7 +44,7 @@ class MTBDD_NFA(NFA):
     states:         Set[int] = field(default_factory=set)
     initial_states: Set[int] = field(default_factory=set)
     final_states:   Set[int] = field(default_factory=set)
-    used_variables: List[int] = field(default_factory=list)
+    used_variables: List[Var] = field(default_factory=list)
     applied_operations_info: List[str] = field(default_factory=list)
     state_labels:   Dict[int, Any] = field(default_factory=dict)
     extra_info:     Dict[Any, Any] = field(default_factory=dict)
@@ -51,7 +52,7 @@ class MTBDD_NFA(NFA):
     trapstate: Optional[int] = None
 
     def __post_init__(self):
-        self.transition_fn = MTBDDTransitionFn(self.alphabet.variable_numbers)
+        self.transition_fn = MTBDDTransitionFn([var.id for var in self.alphabet.all_vars])
 
     def add_state(self, state: int):
         self.states.add(state)
@@ -209,7 +210,7 @@ class MTBDD_NFA(NFA):
         nfa = MTBDD_NFA(alphabet, AutomatonType.DFA | AutomatonType.TRIVIAL)
         nfa.add_state(0)
         nfa.add_initial_state(0)
-        universal_symbol = tuple(['*'] * len(alphabet.variable_numbers))
+        universal_symbol = tuple(['*'] * len(alphabet.all_vars))
         nfa.update_transition_fn(0, universal_symbol, 0)
         nfa.used_variables = []
         return nfa

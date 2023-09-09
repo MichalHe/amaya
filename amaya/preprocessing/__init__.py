@@ -14,7 +14,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from amaya.preprocessing.eval import convert_ast_into_evaluable_form
+from amaya.preprocessing.eval import VarInfo, convert_ast_into_evaluable_form
 
 from amaya.relations_structures import (
     AST_NaryNode,
@@ -27,6 +27,7 @@ from amaya.relations_structures import (
     NodeEncounteredHandlerStatus,
     Raw_AST,
     Relation,
+    Var,
     make_and_node,
     make_exists_node,
     make_not_node,
@@ -275,195 +276,37 @@ def replace_forall_with_exists_handler(ast: AST_NaryNode, is_reeval: bool, ctx: 
     return NodeEncounteredHandlerStatus(True, False)
 
 
-@dataclass
-class Var_Scope_Info:
-    scope_id: int
-    """The number (ID) of the variable scope the currently examined variable belongs to."""
-
-    def put_scope_id_into_name(self, var_name: str) -> str:
-        return f'{var_name}{solver_config.disambiguation_scope_separator}{self.scope_id}'
-
-
 TreeType = TypeVar('TreeType', Raw_AST, AST_Node)
 
 
-def _disambiguate_vars(ast: TreeType, var_scope_info: Dict[str, Var_Scope_Info], var_scope_cnts: Dict[str, int]) -> TreeType:
-    """
-    Give every number a unique suffix so that every variable in the formula has an unique name.
-
-    Param:
-        - var_scope_info: Maps a variable to the actual scope it is in so that an unique suffix with scope id can be generated.
-        - var_scope_cnts: Counts the number of different scopes the variable has been seen so far so that a different suffix
-                          would be generated for a variable in a newly encountered context.
-    """
-
-    undeclared_var_err = ('Trying to disambiguate variable {var} of with unknown scope. Although '
-                          'it can be deduced that the scope should be global, the decision '
-                          'procedure has to know variable sorts to construct correct automata '
-                          '- all vars have to be pre-declared.')
-
-    def atom_renamer(var: str) -> str:
-        if not var in var_scope_info:
-            raise ValueError(undeclared_var_err.format(var=var))
-        return var_scope_info[var].put_scope_id_into_name(var)
-
-    if isinstance(ast, str):
-        if ast in var_scope_info:
-            disambiguated_var: TreeType = var_scope_info[ast].put_scope_id_into_name(ast)   # type: ignore
-            return disambiguated_var
-        return ast
-    elif isinstance(ast, int):
-        return ast
-    elif isinstance(ast, Relation):
-        # This branch might not be hit if the relations were not yet condensed into relations.
-        relation: Relation = ast
-        relation.rename_variables(atom_renamer)
-        return relation
-    elif isinstance(ast, Congruence):
-        congruence: Congruence = ast
-        congruence.rename_vars(atom_renamer)
-        return congruence
-
-    assert isinstance(ast, list)
-    node_type = ast[0]
-
-    if node_type in ('exists', 'forall'):
-        new_scope_info: Dict[str, Var_Scope_Info] = dict(var_scope_info)
-        quantified_vars = tuple(var_name for var_name, dummy_var_type in ast[1])
-
-        disambiguated_quantified_vars = []
-        for i, var_name in enumerate(quantified_vars):
-            this_scope_id = var_scope_cnts.get(var_name, 0)
-            var_scope_cnts[var_name] = this_scope_id + 1
-            scope_info = Var_Scope_Info(scope_id=this_scope_id)
-            new_scope_info[var_name] = scope_info
-
-            var_type: str = ast[1][i][1]
-            disambiguated_quantified_vars.append([scope_info.put_scope_id_into_name(var_name), var_type])
-
-        disambiguated_subast = _disambiguate_vars(ast[2], new_scope_info, var_scope_cnts)
-
-        return [node_type, disambiguated_quantified_vars, disambiguated_subast]
-
-    elif node_type in ('and', 'or', 'not', '<=', '<', '>', '>=', '=', '+', '-', 'mod', 'div', '*'):
-        disambiguated_subasts = (_disambiguate_vars(subtree, var_scope_info, var_scope_cnts) for subtree in ast[1:])
-        return [node_type, *disambiguated_subasts]
-
-    raise NotImplementedError(f'[Variable name disambiguation] Unhandled {node_type=} while traversing ast.')
-
-
-def disambiguate_variables(ast: TreeType, constant_function_symbols: Iterable[FunctionSymbol]) -> Tuple[Iterable[Tuple[FunctionSymbol, FunctionSymbol]], TreeType]:
-    """Modifies the AST so that all variables have unique names."""
-    global_scope_info: Dict[str, Var_Scope_Info] = {}
-    var_scope_cnt: Dict[str, int] = {}
-    for constatnt_symbol in constant_function_symbols:
-        global_scope_info[constatnt_symbol.name] = Var_Scope_Info(scope_id=0)
-        var_scope_cnt[constatnt_symbol.name] = 1
-
-    disambiguated_tree = _disambiguate_vars(ast, global_scope_info, var_scope_cnt)
-
-    # We have likely changed also how are the global symbols named, therefore, we have to disambiguate them
-    # as well so thay can be injected into the evaluation context
-    disambiguated_global_symbols = []
-    for symbol in constant_function_symbols:
-        new_symbol = FunctionSymbol(name=global_scope_info[symbol.name].put_scope_id_into_name(symbol.name),
-                                    arity=symbol.arity, args=symbol.args, return_type=symbol.return_type)
-        disambiguated_global_symbols.append((symbol, new_symbol))
-
-    return (disambiguated_global_symbols, disambiguated_tree)
-
-
-
-class VariableNamer(object):
-    def __init__(self):
-        self.next_variable_id = 0
-        self.name_table: Dict[str, str] = {}
-
-    def __call__(self, var_name: str) -> str:
-        if var_name in self.name_table:
-            return self.name_table[var_name]
-
-        new_name = f'X{self.next_variable_id}'
-        self.name_table[var_name] = new_name
-        self.next_variable_id += 1
-        return new_name
-
-
-
-def _assign_fresh_names_to_all_vars_weak(ast: AST_Node,
-                                         namer: Callable[[str], str]) -> AST_Node:
-    if isinstance(ast, str):  # Boolean variable
-        new_name = namer(ast)
-        return new_name
-
-    if isinstance(ast, Congruence):
-        congruence = ast.rename_vars(namer)
-        return congruence
-
-    if isinstance(ast, Relation):
-        ast.rename_variables(namer)  # The modification is done in-place
-        return ast
-
-    if isinstance(ast, BoolLiteral):
-        return ast
-
-    assert isinstance(ast, list), 'Unhandled node type while assigninig fresh variable names'
-
-    node_type: str = ast[0]  # type: ignore
-    if node_type == AST_Node_Names.EXISTS.value:
-        bindings: List[List[str]] = ast[1]  # type:ignore
-        new_bindings = [(namer(var), sort) for var, sort in bindings]
-        new_subformula = _assign_fresh_names_to_all_vars_weak(ast[2], namer)
-        return make_exists_node(new_bindings, new_subformula)
-
-    if node_type == AST_Node_Names.AND.value:
-        new_subformulae = [_assign_fresh_names_to_all_vars_weak(subformula, namer) for subformula in ast[1:]]
-        return make_and_node(new_subformulae)
-
-    if node_type == AST_Node_Names.OR.value:
-        new_subformulae = [_assign_fresh_names_to_all_vars_weak(subformula, namer) for subformula in ast[1:]]
-        return make_or_node(new_subformulae)
-
-    if node_type == AST_Node_Names.NOT.value:
-        new_subformula = _assign_fresh_names_to_all_vars_weak(ast[1], namer)
-        return make_not_node(new_subformula)
-
-    assert False, f'Unhandled node: {ast}'
-
-
-def assign_fresh_names_to_all_vars_weak(ast: AST_Node, fn_symbols: Iterable[FunctionSymbol]) -> Tuple[AST_Node, Iterable[FunctionSymbol], Dict[str, str]]:
+def assign_fresh_names_to_all_vars(var_table: Dict[Var, VarInfo]) -> Dict[Var, VarInfo]:
     """
     Assign new variable names X<var_id> to every variable in the tree.
-
-    The function is weak - expects the tree to be disabiguated first.
     """
-    namer = VariableNamer()
+    new_var_table: Dict[Var, VarInfo] = {}
 
-    def rename_function_symbol(fn_symbol: FunctionSymbol) -> FunctionSymbol:
-        return FunctionSymbol(name=namer(fn_symbol.name), arity=fn_symbol.arity,
-                              args=list(fn_symbol.args), return_type=fn_symbol.return_type)
-
-    new_fn_symbols = [rename_function_symbol(sym) for sym in fn_symbols]
-    new_ast = _assign_fresh_names_to_all_vars_weak(ast, namer)
-    return (new_ast, new_fn_symbols, namer.name_table)
+    i = 0
+    for var, var_info in var_table.items():
+        new_var_table[var] = VarInfo(name=f'X{i}', type=var_info.type)
+    return new_var_table
 
 
 def preprocess_ast(ast: Raw_AST,
-                   constant_function_symbols: Iterable[FunctionSymbol],
-                   bool_vars: Set[str],
-                   solver_config: SolverConfig = solver_config) -> Tuple[Iterable[Tuple[FunctionSymbol, FunctionSymbol]], AST_Node]:
+                   global_fn_symbols: Iterable[FunctionSymbol],
+                   solver_config: SolverConfig = solver_config) -> Tuple[AST_Node, Dict[Var, VarInfo]]:
     """
     Peforms preprocessing on the given AST. The following proprocessing operations are performed:
         - universal quantifiers are replaced with existential quantifiers,
         - implications are expanded: `A => B` <<-->> `~A or B`,
         - consequent negation pairs are removed,
-
+        - relations are reduced to directly evaluable forms (Relation, Congruence)
+        - all string variables are disabiguated and their occurrences are replaced by corresponding Var(ID)
+          The variable names and types can be resolved from the returned variable table.
     Params:
         - ast - The SMT tree to be preprocessed. The preprocessing is performed in place.
-        - constant_function_symbols - Global function symbols with with 0args (global vars)
+        - global_fn_symbols - Global (constant) function symbols with with 0args (global vars)
     Returns:
-        - A tuple (modified_constant_function_symbols, modified_ast). The constant function symbols might
-          be modified due to, e.g., variable disambiguation.
+        - A tuple (modified_ast, var_table).
      """
 
     logger.debug('[Preprocessing] original AST: %s', ast)
@@ -500,32 +343,13 @@ def preprocess_ast(ast: Raw_AST,
     transform_ast(ast, third_pass_context, third_pass_transformations)
     logger.info('Removed %d negation pairs.', third_pass_context["negation_pairs_removed_cnt"])
 
-    fn_symbols = constant_function_symbols
-    disambiguated_vars = False
-    if solver_config.preprocessing.disambiguate_variables:
-        logger.info('Disambiguating variables.')
-        fn_symbol_changes, ast = disambiguate_variables(ast, constant_function_symbols)
-        fn_symbols = [new_sym for old_sym, new_sym in fn_symbol_changes]
-
-        new_bool_vars = set()
-        for old_sym, new_sym in fn_symbol_changes:
-            if old_sym.name in bool_vars:
-                new_bool_vars.add(new_sym.name)
-
-        bool_vars = new_bool_vars
-        disambiguated_vars = True
-    else:
-        fn_symbol_changes = [(sym, sym) for sym in fn_symbols]
-
     logger.info('Condensing atomic relation ASTs into AST leaves.')
-    evaluable_ast, _ = convert_ast_into_evaluable_form(ast, bool_vars)
+    evaluable_ast, var_table = convert_ast_into_evaluable_form(ast, global_fn_symbols)
 
-    if disambiguated_vars and solver_config.preprocessing.assign_new_variable_names:
-        evaluable_ast, fn_symbols, name_table = assign_fresh_names_to_all_vars_weak(evaluable_ast, fn_symbols)
-    else:
-        fn_symbols = constant_function_symbols
+    if solver_config.preprocessing.assign_new_variable_names:
+        var_table = assign_fresh_names_to_all_vars(var_table)
 
-    return fn_symbol_changes, evaluable_ast
+    return evaluable_ast, var_table
 
 
 def _flatten_bool_nary_connectives(ast: AST_Node) -> AST_Node:

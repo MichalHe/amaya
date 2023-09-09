@@ -2,7 +2,7 @@ from amaya.alphabet import LSBF_Alphabet
 from amaya.automatons import NFA
 from amaya.mtbdd_automatons import MTBDD_NFA
 from amaya.presburger.constructions.integers import build_nfa_from_linear_equality
-from amaya.relations_structures import Relation
+from amaya.relations_structures import Relation, Var
 from tests.conftest import ResolutionState
 
 import pytest
@@ -10,14 +10,13 @@ import pytest
 
 @pytest.fixture
 def simple_equation() -> Relation:
-    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1],
-                                    absolute_part=2, predicate_symbol='=')
+    return Relation(vars=[Var(id=1), Var(id=2)], coefs=[2, -1], rhs=2, predicate_symbol='=')
 
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
 def test_build_nfa_from_equality(automaton_cls: NFA, simple_equation: Relation):
-    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
-    nfa = build_nfa_from_linear_equality(automaton_cls, alphabet, simple_equation, [('x', 1), ('y', 2)])
+    alphabet = LSBF_Alphabet.from_vars([Var(id=1), Var(id=2)])
+    nfa = build_nfa_from_linear_equality(automaton_cls, alphabet, simple_equation)
 
     expected_states = {str(label): ResolutionState(str(label)) for label in (2, 1, 0, -1, 'qf')}
 

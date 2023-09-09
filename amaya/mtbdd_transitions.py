@@ -24,7 +24,7 @@ import sys
 from amaya import logger
 from amaya.alphabet import LSBF_Alphabet, LSBF_AlphabetSymbol
 from amaya.automatons import AutomatonType
-from amaya.relations_structures import Congruence, ModuloTerm, Relation
+from amaya.relations_structures import AST_Atom, Congruence, Relation, Var
 
 if TYPE_CHECKING:
     from amaya.mtbdd_automatons import MTBDD_NFA
@@ -55,13 +55,15 @@ class Serialized_NFA(ct.Structure):
 def deserialize_nfa(serialized_nfa: Serialized_NFA, alphabet: LSBF_Alphabet) -> MTBDD_NFA:
     from amaya.mtbdd_automatons import MTBDD_NFA
 
+    var_ids = sorted(serialized_nfa.vars[i] for i in range(serialized_nfa.var_count))
+
     nfa = MTBDD_NFA(
         states={serialized_nfa.states[i] for i in range(serialized_nfa.state_count)},
         initial_states={serialized_nfa.initial_states[i] for i in range(serialized_nfa.initial_state_count)},
         final_states={
             serialized_nfa.final_states[i] for i in range(serialized_nfa.final_state_count)
         },
-        used_variables=sorted(serialized_nfa.vars[i] for i in range(serialized_nfa.var_count)),
+        used_variables=[Var(id=id) for id in var_ids],
         alphabet=alphabet,
         state_semantics=None  # type: ignore @TODO
     )
@@ -88,6 +90,8 @@ def serialize_nfa(nfa: MTBDD_NFA) -> Serialized_NFA:
     _mtbdds = tuple(nfa.transition_fn.mtbdds.get(s, mtbdd_false) for s in _states)
     mtbdds = (ct.c_ulong * len(nfa.states))(*_mtbdds)
 
+    used_vars = [var.id for var in nfa.used_variables]
+
     serialized_nfa = Serialized_NFA(
         states=(c_side_state_type * len(nfa.states))(*_states),
         state_count=len(nfa.states),
@@ -96,7 +100,7 @@ def serialize_nfa(nfa: MTBDD_NFA) -> Serialized_NFA:
         final_states=(c_side_state_type * len(nfa.final_states))(*tuple(nfa.final_states)),
         final_state_count=len(nfa.final_states),
         mtbdds=mtbdds,
-        vars=(ct.c_uint64 * len(nfa.used_variables))(*nfa.used_variables),
+        vars=(ct.c_uint64 * len(nfa.used_variables))(*used_vars),
         var_count=ct.c_uint64(len(nfa.used_variables))
     )
     return serialized_nfa
@@ -429,15 +433,13 @@ class MTBDDTransitionFn():
             # self.dec_mtbdd_ref(old_mtbdd)  # The old ones are not used anymore
         self.mtbdds = new_mtbdds
 
-    def project_variable_away(self, variable: int):
-        '''Projects away the variable with given number from every MTBDD stored
-        within this transition function.
+    def project_variable_away(self, variable: Var):
+        """
+        Project away the variable with given number from every MTBDD stored within this transition function.
+        """
+        assert variable.id > 0, 'MTBDD variables are numbered via ints from 1 up'
 
-        Not sure what happens when trying to project a variable that is not
-        present.'''
-        assert variable > 0, 'MTBDD variables are numbered via ints from 1 up'
-
-        variables = (ct.c_uint32 * 1)(variable)
+        variables = (ct.c_uint32 * 1)(variable.id)
         for state in self.mtbdds:
             mtbdd = self.mtbdds[state]
             new_mtbdd = mtbdd_wrapper.amaya_project_variables_away(
@@ -915,7 +917,7 @@ class MTBDDTransitionFn():
         return minimized_dfa
 
     @staticmethod
-    def construct_dfa_for_atom_conjunction(conjunction: List[Atom], quantified_vars: List[str], alphabet: LSBF_Alphabet, var_name_to_id: Callable[[str], int]) -> MTBDD_NFA:
+    def construct_dfa_for_atom_conjunction(conjunction: List[AST_Atom], quantified_vars: List[Var], alphabet: LSBF_Alphabet) -> MTBDD_NFA:
         serialized_atoms = (Serialized_Atom * len(conjunction))()
         atom_type_map = {
             '=': Serialized_Atom_Type.EQ,
@@ -930,10 +932,11 @@ class MTBDDTransitionFn():
                 congruences.append(atom)
                 all_vars.update(atom.vars)
             else:
+                assert isinstance(atom, Relation)
                 linear_atoms.append(atom)
-                all_vars.update(atom.variable_names)
+                all_vars.update(atom.vars)
 
-        solver_var_ids = sorted(var_name_to_id(var) for var in all_vars)
+        solver_var_ids = sorted(var.id for var in all_vars)
         var_id_to_local_track = dict((var_id, i) for i, var_id in enumerate(solver_var_ids))
 
         atom_idx = 0
@@ -941,10 +944,9 @@ class MTBDDTransitionFn():
             atom_type = atom_type_map[atom.predicate_symbol]
 
             dense_coefs: List[int] = [0] * len(all_vars)
-            for i, var in enumerate(atom.variable_names):
-                var_id = var_name_to_id(var)
-                local_track = var_id_to_local_track[var_id]
-                dense_coefs[local_track] = atom.variable_coefficients[i]
+            for i, var in enumerate(atom.vars):
+                local_track = var_id_to_local_track[var.id]
+                dense_coefs[local_track] = atom.coefs[i]
             coefs = (ct.c_int64 * len(all_vars))(*dense_coefs)
 
             serialized_atoms[atom_idx] = Serialized_Atom(type=atom_type,
@@ -956,8 +958,7 @@ class MTBDDTransitionFn():
         for atom in congruences:
             dense_coefs: List[int] = [0] * len(all_vars)
             for i, var in enumerate(atom.vars):
-                var_id = var_name_to_id(var)
-                local_track = var_id_to_local_track[var_id]
+                local_track = var_id_to_local_track[var.id]
                 dense_coefs[local_track] = atom.coefs[i]
             coefs = (ct.c_int64 * len(all_vars))(*dense_coefs)
 
@@ -967,7 +968,7 @@ class MTBDDTransitionFn():
                                                          modulus=atom.modulus)
             atom_idx += 1
 
-        initial_state_nums = [a.absolute_part for a in linear_atoms] + [a.rhs for a in congruences]
+        initial_state_nums = [a.rhs for a in linear_atoms] + [a.rhs for a in congruences]
         initial_state = (ct.c_int64 * len(conjunction))(*tuple(initial_state_nums))
 
         # Construct an array with variable IDs as the solver recognizes them
@@ -977,8 +978,7 @@ class MTBDDTransitionFn():
 
         serialized_quantified_vars = (ct.c_uint64 * len(quantified_vars))()
         for i, var in enumerate(sorted(quantified_vars)):
-            var_id = var_name_to_id(var)
-            serialized_quantified_vars[i] = var_id_to_local_track[var_id]
+            serialized_quantified_vars[i] = var_id_to_local_track[var.id]
 
         serialized_conjunction = Serialized_Quantified_Atom_Conjunction(
             atoms=serialized_atoms,
