@@ -34,18 +34,20 @@ class ModuloTermStateComponent(object):
 
     def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[ModuloTermStateComponent]:
         dot = vector_dot(self.variable_coefficients, alphabet_symbol)
+        difference = self.value - dot
 
         if self.modulo % 2 == 0:
-            if dot % 2 == 0:
+            if difference % 2 == 0:
+                difference %= self.modulo
+                difference += (difference < 0) * self.modulo
                 return ModuloTermStateComponent(
-                    value=dot//2,
+                    value=difference//2,
                     modulo=self.modulo//2,
                     variable_coefficients=self.variable_coefficients
                 )
             else:
                 return None
 
-        difference = self.value - dot
         next_value = difference // 2 if difference % 2 == 0 else (difference + self.modulo) // 2
         next_value = next_value % self.modulo
         return ModuloTermStateComponent(
