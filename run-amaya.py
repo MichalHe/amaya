@@ -432,13 +432,13 @@ def run_in_getsat_mode(args) -> bool:
 
                 print('error: computed different SAT as present in the input info :status field')
                 return False
-        print(computed_sat)
+        print('status: ', computed_sat)
         if args.should_print_model:
             print('Model:', model)
 
         if solver_config.print_stats:
-            print(f'------------- STATISTICS -------------')
-            print(f'Max automaton size: {stats.max_automaton_size}')
+            print(f'############ STATISTICS ############')
+            print(f'max_automaton_size: {stats.max_automaton_size}')
             for i, op in enumerate(stats.trace):
                 print(f'{i}  {op.operation.value} input1={op.operand1} input2={op.operand2} output={op.output} runtime={op.runtime_ns} (ns)')
 
