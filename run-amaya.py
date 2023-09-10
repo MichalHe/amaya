@@ -438,6 +438,7 @@ def run_in_getsat_mode(args) -> bool:
 
         if solver_config.print_stats:
             print(f'############ STATISTICS ############')
+            print(f'result_size: {len(nfa.states)}')
             print(f'max_automaton_size: {stats.max_automaton_size}')
             for i, op in enumerate(stats.trace):
                 print(f'{i}  {op.operation.value} input1={op.operand1} input2={op.operand2} output={op.output} runtime={op.runtime_ns} (ns)')

@@ -8,7 +8,7 @@ class ParsingOperation(Enum):
     BUILD_NFA_FROM_INEQ = 'build_nfa_from_ineq'
     BUILD_NFA_FROM_SHARP_INEQ = 'build_nfa_from_sharp_ineq'
     BUILD_NFA_FROM_EQ = 'build_nfa_from_eq'
-    BUILD_NFA_FROM_CONGRUENCE = 'build_nfa_from_eq'
+    BUILD_NFA_FROM_CONGRUENCE = 'build_nfa_from_congruence'
     BUILD_NFA_FROM_RELATION = 'build_nfa_from_relation'  # We don't know the relation type, or we do not care.
     LAZY_CONSTRUCT = 'lazy'
     NFA_UNION = 'union'
