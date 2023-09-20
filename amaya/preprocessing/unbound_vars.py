@@ -5,6 +5,7 @@ from dataclasses import (
     field
 )
 import functools
+import math
 import itertools
 from math import gcd
 from typing import (
@@ -179,7 +180,13 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
 
         if len(relation.vars) == 1:
             var, coef = relation.vars[0], relation.coefs[0]
-            bound = relation.rhs // coef
+            bound = relation.rhs / coef
+
+            if coef <= 0:
+                bound = math.floor(bound)
+            else:
+                bound = math.ceil(bound)
+
             if relation.predicate_symbol == '=':
                 bounds_info.var_values[var] = [Value_Interval(bound, bound)]
             elif relation.predicate_symbol == '<=':
@@ -189,6 +196,9 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
                 else:
                     value_interval.lower_limit = bound
                 bounds_info.var_values[var] = [value_interval]
+        else:
+            for var in relation.vars:
+                bounds_info.var_values[var] = [Value_Interval(None, None)]
         return bounds_info
 
     elif isinstance(ast, (str, Congruence, BoolLiteral, Var)):
@@ -205,6 +215,7 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
         var_values: Dict[Var, List[Value_Interval]] = {}
         for var, var_value_intervals in subtree_bounds_info.var_values.items():
             new_var_value_intervals = [Value_Interval(None, None)] if var in quantified_vars else var_value_intervals
+            var_values[var] = new_var_value_intervals
 
         quantifier_node_with_bounds_info = AST_Quantifier_Node_With_Bounds_Info(node_type=node_type,
                                                                                 child=subtree_bounds_info,
@@ -237,8 +248,12 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
     elif node_type == 'not':
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[1])
         negated_var_values: Dict[Var, List[Value_Interval]] = {}
-        for var, bounds in subtree_bounds_info.var_values.items():
-            negated_var_values[var] = make_value_interval_negation(bounds)
+
+        if len(subtree_bounds_info.var_values) == 1:
+            for var, bounds in subtree_bounds_info.var_values.items():
+                negated_var_values[var] = make_value_interval_negation(bounds)
+        else:
+            negated_var_values = {var: [Value_Interval(None, None)] for var in subtree_bounds_info.var_values}
 
         return AST_Internal_Node_With_Bounds_Info(node_type=node_type,
                                                   children=[subtree_bounds_info],
@@ -394,6 +409,9 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
             # not have their bounds rewritten at some upper level
             vars_to_rewrite_bounds_at_current_level: Set[Var] = set()
             for var, bound_info in ast.var_values.items():
+                if len(bound_info) == 0:
+                    return BoolLiteral(False)
+
                 if len(bound_info) == 1 and var not in vars_with_rewritten_bounds:
                     bound = bound_info[0]
                     if bound.lower_limit is None and bound.upper_limit is None:
@@ -570,19 +588,19 @@ def push_negations_towards_atoms(ast: AST_Node) -> AST_Node:
 @dataclass(frozen=True)
 class FrozenLinAtom:
     coefs: Tuple[int, ...]
-    vars: Tuple[str, ...]
+    vars: Tuple[Var, ...]
     predicate_sym: str
     rhs: int
 
     @staticmethod
     def from_relation(rel: Relation) -> FrozenLinAtom:
-        return FrozenLinAtom(coefs=tuple(rel.variable_coefficients), vars=tuple(rel.variable_names),
-                             predicate_sym=rel.predicate_symbol, rhs=rel.absolute_part)
+        return FrozenLinAtom(coefs=tuple(rel.variable_coefficients), vars=tuple(rel.vars),
+                             predicate_sym=rel.predicate_symbol, rhs=rel.rhs)
 
 @dataclass(frozen=True)
 class FrozenCongruence:
     coefs: Tuple[int, ...]
-    vars: Tuple[str, ...]
+    vars: Tuple[Var, ...]
     modulus: int
     rhs: int
 

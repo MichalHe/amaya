@@ -538,7 +538,7 @@ class NFA:
             transitions.append((state_pair[0], symbols, state_pair[1]))
 
         var_ids = self.used_variables if solver_config.vis_display_only_free_vars else self.alphabet.all_vars
-        var_names: Tuple[str] = tuple(self.alphabet.variable_names[var_id] for var_id in var_ids)
+        var_names: Tuple[str, ...] = tuple(str(var.id) for var in var_ids)
         return AutomatonVisRepresentation(
             states=set(self.states),
             final_states=set(self.final_states),

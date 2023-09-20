@@ -179,7 +179,8 @@ class MTBDD_NFA(NFA):
         else:
             logger.debug('Skipping padding closure.')
 
-        self.used_variables.remove(var)
+        if self.used_variables:
+            self.used_variables.remove(var)
 
         if not self.used_variables:
             logger.info('After the projection there are no more variables used by the MTBDD NFA - performing reduction to a trivial automaton.')

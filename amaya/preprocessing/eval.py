@@ -12,6 +12,7 @@ from amaya.relations_structures import (
     AST_Atom,
     AST_NaryNode,
     AST_Node,
+    AST_Node_Names,
     BoolLiteral,
     Congruence,
     FunctionSymbol,
@@ -31,8 +32,8 @@ class NonlinTermType(Enum):
 class NonlinTerm:
     lin_terms: Tuple[Tuple[Var, int]]
     nonlin_constant: int
+    type: NonlinTermType = field(hash=False, compare=False)
     """Divisor in when the term is DIV, modulus when the term is MOD"""
-    type: NonlinTermType
     lin_term_constant: int = 0
 
 
@@ -126,21 +127,28 @@ class Scoper:
 
 @dataclass(unsafe_hash=True)
 class NonlinTermNode:
-    """A node in the term dependency graph"""
+    """
+    A node in the term dependency graph.
 
-    introduced_vars: Tuple[Var, ...] = field(hash=True)
-    """ Variables used to express the term that need to be quantified. """
-
-    equivalent_lin_expression: Tuple[LinTerm, ...] = field(hash=True)
-
-    atoms_relating_introduced_vars: Tuple[FrozenRelation, ...] = field(hash=True)
-    """ If multiple variables are introduced, they need to be related via extra atoms. """
+    @Design: Currently we are replacing the placeholders whenever we see a variable being quantified.
+             It might save some time to replace all placeholder variables at once when
+             the tree is constructed.
+    """
 
     body: NonlinTerm = field(hash=True)
+    """ The body of the nonlinear term that is being replaced, e.g., (MOD <BODY>)"""
 
     was_dropped: bool = field(hash=False, default=False)
+    """ Was an existential quantifier with the introduced variables added into the tree? """
+
+    div_rewrite_var: Optional[Var] = field(default=None, hash=False)
+    """ Placeholder variable to replace (div x D) with. """
+
+    mod_rewrite_var: Optional[Var] = field(default=None, hash=False)
+    """ Placeholder variable to replace (mod x M) with. """
 
     dependent_terms: Set[NonlinTermNode] = field(default_factory=set, hash=False)
+    """ Nonlinear terms in the graph that contain a linear expression replacing a non-linear term represented by this node. """
 
 
 def make_node_for_two_variable_rewrite(term: NonlinTerm, rewrite_id: int, scoper: Scoper) -> NonlinTermNode:
@@ -212,37 +220,22 @@ class NonlinTermGraph:
     graph_roots: Set[NonlinTermNode] = field(default_factory=set)
 
     def make_term_known(self, term: NonlinTerm, scoper: Scoper) -> NonlinTermNode:
-        if term in self.term_nodes:
-            return self.term_nodes[term]
+        node = self.term_nodes.get(term)
+        target_field = 'mod_rewrite_var' if term.type == NonlinTermType.MOD else 'div_rewrite_var'
+        if node:
+            placeholder_var = getattr(node, target_field)
+            if getattr(node, target_field):
+                return self.term_nodes[term]
 
         nonlin_var_id = len(self.term_nodes)
+        placeholder_var_name = f'quotient_{nonlin_var_id}' if term.type == NonlinTermType.DIV else 'reminder_{nonlin_var_id}'
+        placeholder_var = scoper.put_var_into_current_scope(placeholder_var_name)
 
-        if term.type == NonlinTermType.MOD and solver_config.preprocessing.use_congruences_when_rewriting_modulo:
-            var_name = f'mod_var_{nonlin_var_id}'
-            reminder = scoper.put_var_into_current_scope(var_name)
-            introduced_vars = (reminder,)
+        if not node:
+            node = NonlinTermNode(body=term, was_dropped=False)
+            self.term_nodes[term] = node
 
-            equiv_expr = (LinTerm(coef=1, var=reminder),)
-
-            larger_than_zero = FrozenRelation(lhs=(LinTerm(coef=-1, var=reminder),), rhs=0, type=RelationType.INEQ)
-            smaller_than_modulus = FrozenRelation(lhs=(LinTerm(coef=1, var=reminder),), rhs=term.nonlin_constant-1, type=RelationType.INEQ)
-
-            congruence_terms = [LinTerm(var=var, coef=coef) for var, coef in term.lin_terms]
-            congruence_terms.append(LinTerm(coef=-1, var=reminder))
-            congruence_terms = sorted(congruence_terms, key=lambda term: term.var)  # sort to have a canonical representation
-
-            congruence = FrozenRelation(lhs=tuple(congruence_terms), rhs=0, modulus=term.nonlin_constant, type=RelationType.CONGRUENCE)
-
-            relating_atoms = (larger_than_zero, smaller_than_modulus, congruence)
-            node = NonlinTermNode(introduced_vars=introduced_vars, equivalent_lin_expression=equiv_expr,
-                                  atoms_relating_introduced_vars=relating_atoms, body=term)
-        else:
-            if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
-                node = make_node_for_two_variable_rewrite(term, rewrite_id=len(self.term_nodes), scoper=scoper)
-            else:
-                node = make_node_for_single_variable_rewrite(term, rewrite_id=len(self.term_nodes), scoper=scoper)
-
-        self.term_nodes[term] = node
+        setattr(node, target_field, placeholder_var)
         return node
 
     def make_node_root(self, node: NonlinTermNode):
@@ -327,6 +320,7 @@ def normalize_expr(ast: Raw_AST,
             int_val = int(ast)
             return Expr(constant_term=int_val), set(), set()
         except ValueError:
+            assert isinstance(ast, str)
             var = scoper.lookup_var_name(ast)
             return Expr(linear_terms={var: 1}), set(), {var}
 
@@ -359,12 +353,14 @@ def normalize_expr(ast: Raw_AST,
         for dep_term in dependent_terms:
             dep_term.dependent_terms.add(term_node)
 
-        expr = Expr(linear_terms={term.var: term.coef for term in term_node.equivalent_lin_expression})
+        placeholder_var = term_node.div_rewrite_var if node_type == 'div' else term_node.mod_rewrite_var
+        assert placeholder_var
+        expr = Expr(linear_terms={placeholder_var: 1})
 
         if not dependent_terms:
             nonlinear_term_graph.make_node_root(term_node)
 
-        support.update(term_node.introduced_vars)
+        support.add(placeholder_var)
         return expr, {term_node}, support
 
     raise ValueError(f'Cannot reduce unknown expression to evaluable form. {ast=}')
@@ -424,21 +420,6 @@ def split_lin_terms_into_vars_and_coefs(terms: Iterable[LinTerm]) -> Tuple[List[
     return vars, coefs
 
 
-def generate_atoms_for_term(node: NonlinTermNode) -> List[AST_Atom]:
-    atoms = []
-    for frozen_atom in node.atoms_relating_introduced_vars:
-        vars, coefs = split_lin_terms_into_vars_and_coefs(frozen_atom.lhs)
-        if frozen_atom.type == RelationType.EQ or frozen_atom.type == RelationType.INEQ:
-            # @FixMe
-            atom = Relation.new_lin_relation(variable_names=vars, variable_coefficients=coefs,
-                                             absolute_part=frozen_atom.rhs, predicate_symbol=frozen_atom.type.value)
-        else:
-            # @FixMe
-            atom = Congruence(vars=vars, coefs=coefs, rhs=frozen_atom.rhs, modulus=frozen_atom.modulus)
-        atoms.append(atom)
-    return atoms
-
-
 def is_any_member_if_str(container, elem1, elem2):
     return (isinstance(elem1, str) and elem1 in container) or (isinstance(elem2, str) and elem2 in container)
 
@@ -447,6 +428,166 @@ def is_any_node_of_type(types: Iterable[str], node1, node2):
     is_node1 = isinstance(node1, list) and node1[0] in types
     is_node2 = isinstance(node2, list) and node2[0] in types
     return is_node1 or is_node2
+
+
+@dataclass
+class RewriteInstructions:
+    placeholder_replacements: Dict[Var, Tuple[LinTerm, ...]] = field(default_factory=dict)
+    new_atoms: List[AST_Atom] = field(default_factory=list)
+    vars_to_quantify: List[Var] = field(default_factory=list)
+
+
+def add_two_var_rewrite_instructions(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, reminder: Var, quotient: Var):
+    rewrite_instructions.placeholder_replacements[reminder] = (LinTerm(coef=1, var=reminder),)
+    rewrite_instructions.placeholder_replacements[quotient] = (LinTerm(coef=1, var=quotient),)
+
+    greater_than_zero = Relation(vars=[reminder], coefs=[-1], rhs=0, predicate_symbol='<=')
+    smaller_than_modulus = Relation(vars=[reminder], coefs=[1], rhs=node.body.nonlin_constant-1, predicate_symbol='<=')
+
+    # <TERM_BODY> = <QUOTIENT>*<NONLIN_CONSTANT> + <REMINDER> -->  <TERM_BODY> - <QUOTIENT>*<NONLIN_CONSTANT> - <REMINDER> = 0
+    terms = tuple(LinTerm(coef=item[1], var=item[0]) for item in node.body.lin_terms)
+    terms += (LinTerm(coef=-1, var=reminder), LinTerm(coef=-node.body.nonlin_constant, var=quotient))
+    terms = sorted(terms, key=lambda term: term.var)
+    vars, coefs = split_lin_terms_into_vars_and_coefs(terms)
+
+    body_decomposition = Relation(vars=vars, coefs=coefs, rhs=0, predicate_symbol='=')
+
+    rewrite_instructions.new_atoms.extend((greater_than_zero, smaller_than_modulus, body_decomposition))
+
+
+def add_quotient_single_variable_rewrite_instructions(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, quotient: Var):
+    rewrite_instructions.placeholder_replacements[quotient] = (LinTerm(coef=1, var=quotient),)
+
+    # Make   0 <= <BODY> - <QUOTIENT>*<NONLIN_TERM_BODY>
+    terms = tuple(LinTerm(coef=item[1], var=item[0]) for item in node.body.lin_terms)
+    terms += (LinTerm(coef=-node.body.nonlin_constant, var=quotient),)
+    terms = sorted(terms, key=lambda term: term.var)
+    vars, coefs = split_lin_terms_into_vars_and_coefs(terms)
+
+    negated_coefs = [-1*coef for coef in coefs]
+    greater_than_zero = Relation(vars=vars, coefs=negated_coefs, rhs=0, predicate_symbol='<=')
+    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=node.body.nonlin_constant-1, predicate_symbol='<=')
+
+    rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus])
+
+
+def add_reminder_single_variable_rewrite_using_quotient(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, quotient: Var):
+    # Express reminder as <BODY> - <QUOTIENT>*<MODULUS>
+    terms = tuple(LinTerm(coef=item[1], var=item[0]) for item in node.body.lin_terms)
+    terms += (LinTerm(coef=-node.body.nonlin_constant, var=quotient),)
+    terms = tuple(sorted(terms, key=lambda term: term.var))
+    vars, coefs = split_lin_terms_into_vars_and_coefs(terms)
+
+    rewrite_instructions.placeholder_replacements[quotient] = terms
+
+    negated_coefs = [-1*coef for coef in coefs]
+    greater_than_zero = Relation(vars=vars, coefs=negated_coefs, rhs=0, predicate_symbol='<=')
+    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=node.body.nonlin_constant-1, predicate_symbol='<=')
+
+    rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus])
+
+
+def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, reminder: Var):
+    rewrite_instructions.placeholder_replacements[reminder] = (LinTerm(coef=1, var=reminder),)
+
+    greater_than_zero = Relation(vars=[reminder], coefs=[-1], rhs=0, predicate_symbol='<=')
+    smaller_than_modulus = Relation(vars=[reminder], coefs=[1], rhs=node.body.nonlin_constant-1, predicate_symbol='<=')
+
+    terms = tuple(LinTerm(coef=item[1], var=item[0]) for item in node.body.lin_terms)
+    terms += (LinTerm(coef=-1, var=reminder),)
+    terms = sorted(terms, key=lambda term: term.var)
+    vars, coefs = split_lin_terms_into_vars_and_coefs(terms)
+
+    congruence = Congruence(vars=vars, coefs=coefs, rhs=0, modulus=node.body.nonlin_constant)
+
+    rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus, congruence])
+
+
+def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNode], scoper: Scoper) -> RewriteInstructions:
+    rewrite_instructions = RewriteInstructions()
+
+    for node in dropped_nodes:
+        if node.div_rewrite_var is not None and node.mod_rewrite_var is not None:
+            # Reuse placeholder variables
+            reminder, quotient = node.mod_rewrite_var, node.div_rewrite_var
+            add_two_var_rewrite_instructions(rewrite_instructions, node, reminder=reminder, quotient=quotient)
+
+            rewrite_instructions.vars_to_quantify.extend((reminder, quotient))
+
+        elif node.div_rewrite_var is not None:
+            quotient = node.div_rewrite_var
+            rewrite_instructions.vars_to_quantify.append(quotient)
+
+            if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
+                reminder = scoper.put_var_into_current_scope('dummy_reminder')  # Make a new var
+                add_two_var_rewrite_instructions(rewrite_instructions, node, reminder=reminder, quotient=quotient)
+                rewrite_instructions.vars_to_quantify.append(reminder)
+                continue
+
+            add_quotient_single_variable_rewrite_instructions(rewrite_instructions, node, quotient=quotient)
+
+        elif node.mod_rewrite_var is not None:
+            reminder = node.mod_rewrite_var
+            rewrite_instructions.vars_to_quantify.append(reminder)
+
+            if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
+                quotient = scoper.put_var_into_current_scope('dummy_quotient')  # Make a new var
+                add_two_var_rewrite_instructions(rewrite_instructions, node, reminder=reminder, quotient=quotient)
+                rewrite_instructions.vars_to_quantify.append(quotient)
+                continue
+
+            if solver_config.preprocessing.use_congruences_when_rewriting_modulo:
+                add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions, node, reminder=reminder)
+                continue
+
+            add_reminder_single_variable_rewrite_using_quotient(rewrite_instructions, node, reminder)  # Use the variable as congruence
+            rewrite_instructions.vars_to_quantify.append(reminder)
+
+    return rewrite_instructions
+
+
+def apply_substitution(vars: Iterable[Var], coefs: Iterable[int], substitution: Dict[Var, Tuple[LinTerm, ...]]) -> Tuple[List[Var], List[int]]:
+    lin_term_after_substitution: List[LinTerm] = []
+    for var, coef in zip(vars, coefs):
+        if var in substitution:
+            lin_term_after_substitution.extend(LinTerm(var=subs_term.var, coef=subs_term.coef*coef) for subs_term in substitution[var])
+            continue
+        lin_term_after_substitution.append(LinTerm(var=var, coef=coef))
+
+    new_lin_term: Dict[Var, int] = defaultdict(lambda: 0)
+    for term in lin_term_after_substitution:
+        new_lin_term[term.var] += term.coef
+
+    sorted_term = sorted(new_lin_term.items(), key=lambda item: item[0])
+
+    new_vars: Tuple[Var] = tuple()
+    new_coefs: Tuple[int] = tuple()
+    new_vars, new_coefs = zip(*sorted_term)  # type: ignore
+
+    return (list(new_vars), list(new_coefs))
+
+
+def _replace_placeholders_by_equivalent_lin_terms(ast: AST_Node, rewrite_instructions: RewriteInstructions) -> AST_Node:
+    if isinstance(ast, Relation):
+        new_vars, new_coefs = apply_substitution(ast.vars, ast.coefs, rewrite_instructions.placeholder_replacements)
+        return Relation(vars=new_vars, coefs=new_coefs, rhs=ast.rhs, predicate_symbol=ast.predicate_symbol)
+
+    if isinstance(ast, Congruence):
+        new_vars, new_coefs = apply_substitution(ast.vars, ast.coefs, rewrite_instructions.placeholder_replacements)
+        return Congruence(vars=new_vars, coefs=new_coefs, rhs=ast.rhs, modulus=ast.modulus)
+
+    if isinstance(ast, (str, BoolLiteral, Var)):
+        return ast
+
+    assert isinstance(ast, list)
+
+    node_type = ast[0]
+    if node_type == AST_Node_Names.EXISTS.value:
+        child = _replace_placeholders_by_equivalent_lin_terms(ast[2], rewrite_instructions)
+        return [AST_Node_Names.EXISTS.value, ast[1], child]
+
+    children = (_replace_placeholders_by_equivalent_lin_terms(child, rewrite_instructions) for child in ast[1:])
+    return [node_type, *children]
 
 
 def _convert_ast_into_evaluable_form(ast: Raw_AST,
@@ -504,9 +645,9 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
         for var in bound_vars:
             dropped_nodes += dep_graph.drop_nodes_for_var(var)
 
-        new_atoms = []
-        for dropped_node in dropped_nodes:
-            new_atoms += generate_atoms_for_term(dropped_node)
+        rewrite_instructions = determine_how_to_rewrite_dropped_terms(dropped_nodes, scoper)
+
+        new_atoms = rewrite_instructions.new_atoms
 
         if dropped_nodes:
             if isinstance(child, list) and child[0] == 'and':
@@ -514,8 +655,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
             else:
                 child = ['and', child] + new_atoms
 
-            new_binders_in_node = [introduced_var for term_node in dropped_nodes for introduced_var in term_node.introduced_vars]
-            new_node[1] += new_binders_in_node  # type: ignore
+            new_node[1] += rewrite_instructions.vars_to_quantify  # type: ignore
         new_node.append(child)
 
         scoper.exit_quantifier()
@@ -567,11 +707,8 @@ def convert_ast_into_evaluable_form(ast: Raw_AST, global_symbols: Iterable[Funct
 
     assert dropped_nodes
 
-    introduced_vars = itertools.chain(*(node.introduced_vars for node in dropped_nodes))
-    binding_list = [var for var in introduced_vars]
-    new_atoms = []
-    for dropped_node in dropped_nodes:
-        new_atoms += generate_atoms_for_term(dropped_node)
+    rewrite_instructions = determine_how_to_rewrite_dropped_terms(dropped_nodes, scoper)
+    new_atoms = rewrite_instructions.new_atoms
 
-    new_ast = ['exists', binding_list, ['and', new_ast, *new_atoms]]  # type: ignore
+    new_ast = ['exists', rewrite_instructions.vars_to_quantify, ['and', new_ast, *rewrite_instructions.new_atoms]]  # type: ignore
     return new_ast, scoper.var_table
