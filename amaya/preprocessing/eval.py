@@ -218,6 +218,7 @@ class NonlinTermGraph:
     index: Dict[Var, List[NonlinTermNode]] = field(default_factory=lambda: defaultdict(list))
     term_nodes: Dict[NonlinTerm, NonlinTermNode] = field(default_factory=dict)
     graph_roots: Set[NonlinTermNode] = field(default_factory=set)
+    seen_term_cnt: int = 0
 
     def make_term_known(self, term: NonlinTerm, scoper: Scoper) -> NonlinTermNode:
         node = self.term_nodes.get(term)
@@ -227,7 +228,8 @@ class NonlinTermGraph:
             if getattr(node, target_field):
                 return self.term_nodes[term]
 
-        nonlin_var_id = len(self.term_nodes)
+        nonlin_var_id = self.seen_term_cnt
+        self.seen_term_cnt += 1
         placeholder_var_name = f'quotient_{nonlin_var_id}' if term.type == NonlinTermType.DIV else 'reminder_{nonlin_var_id}'
         placeholder_var = scoper.put_var_into_current_scope(placeholder_var_name)
 
