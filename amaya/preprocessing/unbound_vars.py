@@ -594,7 +594,7 @@ class FrozenLinAtom:
 
     @staticmethod
     def from_relation(rel: Relation) -> FrozenLinAtom:
-        return FrozenLinAtom(coefs=tuple(rel.variable_coefficients), vars=tuple(rel.vars),
+        return FrozenLinAtom(coefs=tuple(rel.coefs), vars=tuple(rel.vars),
                              predicate_sym=rel.predicate_symbol, rhs=rel.rhs)
 
 @dataclass(frozen=True)
