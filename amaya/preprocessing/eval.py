@@ -230,7 +230,7 @@ class NonlinTermGraph:
 
         nonlin_var_id = self.seen_term_cnt
         self.seen_term_cnt += 1
-        placeholder_var_name = f'quotient_{nonlin_var_id}' if term.type == NonlinTermType.DIV else 'reminder_{nonlin_var_id}'
+        placeholder_var_name = f'quotient_{nonlin_var_id}' if term.type == NonlinTermType.DIV else f'reminder_{nonlin_var_id}'
         placeholder_var = scoper.put_var_into_current_scope(placeholder_var_name)
 
         if not node:

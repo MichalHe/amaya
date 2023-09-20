@@ -34,9 +34,33 @@ values (resp. models), unsatisfiable cores and interpolants.
 (declare-fun ~a1~0 () Int)
 (assert (<= ~a10~0 |old(~a10~0)|))
 (assert (< 0 (+ ~a1~0 13)))
-(assert (not (and (<= 3 |old(~a10~0)|) (exists ((v_prenex_4 Int)) (and (<= (+ (div v_prenex_4 5) 449582) ~a1~0) (= 0 (mod v_prenex_4 5)) (<= (+ v_prenex_4 13) 0))))))
-(assert (not (and (exists ((v_prenex_5 Int)) (and (<= 0 v_prenex_5) (<= (+ (div v_prenex_5 5) 449582) ~a1~0) (< 38 v_prenex_5) (<= v_prenex_5 218))) (<= 2 |old(~a10~0)|))))
+(assert
+     (not
+          (and 
+               (<= 3 |old(~a10~0)|)
+               (exists ((v_prenex_4 Int))
+                    (and 
+                         (<= (+ (div v_prenex_4 5) 449582) ~a1~0)
+                         (= 0 (mod v_prenex_4 5))
+                         (<= (+ v_prenex_4 13) 0))))))
+(assert
+     (not
+          (and
+               (exists ((v_prenex_5 Int))
+                    (and
+                         (<= 0 v_prenex_5)
+                         (<= (+ (div v_prenex_5 5) 449582) ~a1~0)
+                         (< 38 v_prenex_5)
+                         (<= v_prenex_5 218)))
+               (<= 2 |old(~a10~0)|))))
 (assert (<= 3 |old(~a10~0)|))
-(assert (not (exists ((v_prenex_6 Int)) (and (<= (+ v_prenex_6 13) 0) (< v_prenex_6 0) (not (= 0 (mod v_prenex_6 5))) (<= (+ (div v_prenex_6 5) 449583) ~a1~0)))))
+(assert
+     (not
+          (exists ((v_prenex_6 Int))
+               (and
+                    (<= (+ v_prenex_6 13) 0)
+                    (< v_prenex_6 0)
+                    (not (= 0 (mod v_prenex_6 5)))
+                    (<= (+ (div v_prenex_6 5) 449583) ~a1~0)))))
 (check-sat)
 (exit)

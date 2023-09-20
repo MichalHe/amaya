@@ -32,6 +32,17 @@ values (resp. models), unsatisfiable cores and interpolants.
 (declare-fun v_main_~x~0_BEFORE_CALL_5_const_-2050951247 () Int)
 (declare-fun v_main_~y~0_BEFORE_CALL_5_const_-697640528 () Int)
 (declare-fun v_main_~z~0_BEFORE_CALL_5_const_655670095 () Int)
-(assert (and (exists ((|v_main_#t~nondet2_7| Int) (|v_main_#t~nondet2_8| Int) (|v_main_#t~nondet2_5| Int) (|v_main_#t~nondet2_6| Int)) (= v_main_~z~0_BEFORE_CALL_5_const_655670095 (+ (* 4194304 |v_main_#t~nondet2_7|) (* 4194304 |v_main_#t~nondet2_8|) (* 4194304 |v_main_#t~nondet2_5|) (* 4194304 |v_main_#t~nondet2_6|)))) (exists ((|v_main_#t~nondet1_8| Int) (|v_main_#t~nondet1_6| Int) (|v_main_#t~nondet1_7| Int) (|v_main_#t~nondet1_5| Int)) (= (+ (* 2097152 |v_main_#t~nondet1_8|) (* 2097152 |v_main_#t~nondet1_6|) (* 2097152 |v_main_#t~nondet1_7|) (* 2097152 |v_main_#t~nondet1_5|)) v_main_~y~0_BEFORE_CALL_5_const_-697640528)) (exists ((|v_main_#t~nondet0_7| Int) (|v_main_#t~nondet0_8| Int) (|v_main_#t~nondet0_5| Int) (|v_main_#t~nondet0_6| Int)) (= v_main_~x~0_BEFORE_CALL_5_const_-2050951247 (+ (* 1048576 |v_main_#t~nondet0_7|) (* 1048576 |v_main_#t~nondet0_8|) (* 1048576 |v_main_#t~nondet0_5|) (* 1048576 |v_main_#t~nondet0_6|)))) (= (mod (+ (* 4 v_main_~x~0_BEFORE_CALL_5_const_-2050951247) (* 4294967294 v_main_~y~0_BEFORE_CALL_5_const_-697640528) v_main_~z~0_BEFORE_CALL_5_const_655670095) 4294967296) 1048576)))
+(assert
+     (and
+          (exists
+               ((|v_main_#t~nondet2_7| Int) (|v_main_#t~nondet2_8| Int) (|v_main_#t~nondet2_5| Int) (|v_main_#t~nondet2_6| Int))
+               (= v_main_~z~0_BEFORE_CALL_5_const_655670095 (+ (* 4194304 |v_main_#t~nondet2_7|) (* 4194304 |v_main_#t~nondet2_8|) (* 4194304 |v_main_#t~nondet2_5|) (* 4194304 |v_main_#t~nondet2_6|))))
+          (exists
+               ((|v_main_#t~nondet1_8| Int) (|v_main_#t~nondet1_6| Int) (|v_main_#t~nondet1_7| Int) (|v_main_#t~nondet1_5| Int))
+               (= (+ (* 2097152 |v_main_#t~nondet1_8|) (* 2097152 |v_main_#t~nondet1_6|) (* 2097152 |v_main_#t~nondet1_7|) (* 2097152 |v_main_#t~nondet1_5|)) v_main_~y~0_BEFORE_CALL_5_const_-697640528))
+          (exists
+               ((|v_main_#t~nondet0_7| Int) (|v_main_#t~nondet0_8| Int) (|v_main_#t~nondet0_5| Int) (|v_main_#t~nondet0_6| Int))
+               (= v_main_~x~0_BEFORE_CALL_5_const_-2050951247 (+ (* 1048576 |v_main_#t~nondet0_7|) (* 1048576 |v_main_#t~nondet0_8|) (* 1048576 |v_main_#t~nondet0_5|) (* 1048576 |v_main_#t~nondet0_6|))))
+          (= (mod (+ (* 4 v_main_~x~0_BEFORE_CALL_5_const_-2050951247) (* 4294967294 v_main_~y~0_BEFORE_CALL_5_const_-697640528) v_main_~z~0_BEFORE_CALL_5_const_655670095) 4294967296) 1048576)))
 (check-sat)
 (exit)

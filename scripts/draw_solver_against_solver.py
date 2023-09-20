@@ -20,11 +20,11 @@ DATA = {
 PLOT_STUFF = ('x', 'y')
 
 
-def draw_single_plot(solver_pair: Tuple[str, str], data: Dict[str, np.array], target_axis, limits=None, timeout_secs=60):
+def draw_single_plot(solver_pair: Tuple[str, str], data: Dict[str, np.array], target_axis, limits=None, timeout_secs=60, color='red'):
     x_solver_data = data[solver_pair[0]]
     y_solver_data = data[solver_pair[1]]
 
-    target_axis.scatter(x_solver_data, y_solver_data, marker='1', color='red', s=40)
+    target_axis.scatter(x_solver_data, y_solver_data, marker='1', color=color, label=solver_pair[1], s=40)
 
     def calc_limit(bound_val, margin_growth_fun, margin_rounding_fun):
         if bound_val < 0.005:
@@ -46,6 +46,7 @@ def draw_single_plot(solver_pair: Tuple[str, str], data: Dict[str, np.array], ta
 
     target_axis.set_xlim(limits)
     target_axis.set_ylim(limits)
+
     target_axis.set_xscale('log')
     target_axis.set_yscale('log')
 
@@ -69,12 +70,15 @@ def make_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('results_csv')
     parser.add_argument('-t', '--title')
+    parser.add_argument('-d', '--field-delimiter', default=';')
+    parser.add_argument('-s', '--skip-first-column', default=False, action='store_true')
+    parser.add_argument('-o', '--output', default='output.pdf')
     return parser
 
 
-def load_data_from_csv(csv_path, timeout_secs=60):
+def load_data_from_csv(csv_path, timeout_secs=60, delimiter=';', skip_first_column=False):
     with open(csv_path) as csv_file:
-        reader = csv.reader(csv_file)
+        reader = csv.reader(csv_file, delimiter=delimiter)
         rows_it = iter(reader)
         header = next(rows_it)[1:]
         data = [list() for solver in header]
@@ -94,12 +98,18 @@ def load_data_from_csv(csv_path, timeout_secs=60):
 if __name__ == '__main__':
     parser = make_arg_parser()
     args = parser.parse_args()
-    data = load_data_from_csv(args.results_csv)
+    data = load_data_from_csv(args.results_csv, delimiter=args.field_delimiter)
 
-    solver_pairs: List[Tuple[str, str]] = list(itertools.combinations(data, 2))
-    fig, axs = plt.subplots(nrows=len(solver_pairs), figsize=(5, 5))
+    solver_pairs: List[Tuple[str, str]] = []
+    for solver_pair in itertools.combinations(data, 2):
+        if not any('amaya' in solver for solver in solver_pair):
+          continue
+        solver_pairs.append(solver_pair)
 
-    if not isinstance(axs, tuple):
+    fig, axs = plt.subplots(nrows=len(solver_pairs), figsize=(5, len(solver_pairs)*5))
+    # fig, axs = plt.subplots(nrows=1, figsize=(5, 5))
+
+    if not isinstance(axs, np.ndarray):
         axs = (axs,)
 
     if args.title:
@@ -108,7 +118,14 @@ if __name__ == '__main__':
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.2, left=0.15, bottom=0.1)
 
+    # colors = ['red', 'blue']
+    # for solver_pair, color in zip(solver_pairs, colors):
+        # draw_single_plot(tuple(sorted(solver_pair)), data, axs[0], color=color)
+
     for solver_pair, ax in zip(solver_pairs, axs):
         draw_single_plot(tuple(sorted(solver_pair)), data, ax)
-    plt.savefig('output.pdf', dpi=600)
+    # plt.savefig('output.pdf', dpi=600)
+    # axs[0].legend()
+    plt.savefig(args.output, dpi=600)
+
 

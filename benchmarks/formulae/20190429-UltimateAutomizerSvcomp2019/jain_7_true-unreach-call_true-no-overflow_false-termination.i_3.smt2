@@ -32,7 +32,16 @@ values (resp. models), unsatisfiable cores and interpolants.
 (declare-fun c_main_~x~0 () Int)
 (declare-fun c_main_~y~0 () Int)
 (declare-fun c_main_~z~0 () Int)
-(assert (and (exists ((|v_main_#t~nondet1_6| Int) (|v_main_#t~nondet1_7| Int) (|v_main_#t~nondet1_5| Int)) (= (+ (* 2097152 |v_main_#t~nondet1_6|) (* 2097152 |v_main_#t~nondet1_7|) (* 2097152 |v_main_#t~nondet1_5|)) c_main_~y~0)) (exists ((|v_main_#t~nondet0_7| Int) (|v_main_#t~nondet0_5| Int) (|v_main_#t~nondet0_6| Int)) (= (+ (* 1048576 |v_main_#t~nondet0_7|) (* 1048576 |v_main_#t~nondet0_5|) (* 1048576 |v_main_#t~nondet0_6|)) c_main_~x~0)) (exists ((|v_main_#t~nondet2_7| Int) (|v_main_#t~nondet2_5| Int) (|v_main_#t~nondet2_6| Int)) (= c_main_~z~0 (+ (* 4194304 |v_main_#t~nondet2_7|) (* 4194304 |v_main_#t~nondet2_5|) (* 4194304 |v_main_#t~nondet2_6|))))))
-(assert (not (and (exists ((|v_main_#t~nondet2_5| Int)) (= (* 4194304 |v_main_#t~nondet2_5|) c_main_~z~0)) (exists ((|v_main_#t~nondet0_5| Int)) (= (* 1048576 |v_main_#t~nondet0_5|) c_main_~x~0)) (exists ((|v_main_#t~nondet1_5| Int)) (= c_main_~y~0 (* 2097152 |v_main_#t~nondet1_5|))))))
+(assert
+     (and
+          (exists ((|v_main_#t~nondet1_6| Int) (|v_main_#t~nondet1_7| Int) (|v_main_#t~nondet1_5| Int)) (= (+ (* 2097152 |v_main_#t~nondet1_6|) (* 2097152 |v_main_#t~nondet1_7|) (* 2097152 |v_main_#t~nondet1_5|)) c_main_~y~0))
+          (exists ((|v_main_#t~nondet0_7| Int) (|v_main_#t~nondet0_5| Int) (|v_main_#t~nondet0_6| Int)) (= (+ (* 1048576 |v_main_#t~nondet0_7|) (* 1048576 |v_main_#t~nondet0_5|) (* 1048576 |v_main_#t~nondet0_6|)) c_main_~x~0))
+          (exists ((|v_main_#t~nondet2_7| Int) (|v_main_#t~nondet2_5| Int) (|v_main_#t~nondet2_6| Int)) (= c_main_~z~0 (+ (* 4194304 |v_main_#t~nondet2_7|) (* 4194304 |v_main_#t~nondet2_5|) (* 4194304 |v_main_#t~nondet2_6|))))))
+(assert
+     (not
+          (and
+               (exists ((|v_main_#t~nondet2_5| Int)) (= (* 4194304 |v_main_#t~nondet2_5|) c_main_~z~0))
+               (exists ((|v_main_#t~nondet0_5| Int)) (= (* 1048576 |v_main_#t~nondet0_5|) c_main_~x~0))
+               (exists ((|v_main_#t~nondet1_5| Int)) (= c_main_~y~0 (* 2097152 |v_main_#t~nondet1_5|))))))
 (check-sat)
 (exit)

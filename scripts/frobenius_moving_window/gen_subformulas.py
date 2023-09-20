@@ -32,13 +32,13 @@ def generate_formulae(formulae_count: int, dest_path: str):
     primes = read_primes()
     for i in range(formulae_count):
         window = primes[i:i+2]  # Assume window size is 2
-        print(window)
-        continue
+
         formula_str = generate_formula(*window)
 
         formula_filename = f'{i}.smt2'
 
         with open(os.path.join(dest_path, formula_filename), 'w') as output_file:
+            print(f'Writing {formula_filename}')
             output_file.write(formula_str)
 
 if __name__ == '__main__':

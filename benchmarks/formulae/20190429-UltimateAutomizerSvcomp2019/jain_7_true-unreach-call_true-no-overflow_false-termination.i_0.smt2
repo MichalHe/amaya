@@ -38,8 +38,21 @@ values (resp. models), unsatisfiable cores and interpolants.
 (declare-fun c_main_~y~0_primed () Int)
 (declare-fun c_main_~z~0 () Int)
 (declare-fun c_main_~z~0_primed () Int)
-(assert (and (= c_main_~z~0_primed (+ (* 4194304 |c_main_#t~nondet2|) c_main_~z~0)) (= c_main_~x~0_primed (+ (* 1048576 |c_main_#t~nondet0|) c_main_~x~0)) (= c_main_~y~0_primed (+ (* 2097152 |c_main_#t~nondet1|) c_main_~y~0))))
-(assert (and (exists ((|v_main_#t~nondet0_3| Int)) (= (* 1048576 |v_main_#t~nondet0_3|) c_main_~x~0)) (exists ((|v_main_#t~nondet1_3| Int)) (= c_main_~y~0 (* 2097152 |v_main_#t~nondet1_3|))) (exists ((|v_main_#t~nondet2_3| Int)) (= (* 4194304 |v_main_#t~nondet2_3|) c_main_~z~0))))
-(assert (not (and (exists ((|v_main_#t~nondet0_3| Int)) (= (* 1048576 |v_main_#t~nondet0_3|) c_main_~x~0_primed)) (exists ((|v_main_#t~nondet1_3| Int)) (= c_main_~y~0_primed (* 2097152 |v_main_#t~nondet1_3|))) (exists ((|v_main_#t~nondet2_3| Int)) (= (* 4194304 |v_main_#t~nondet2_3|) c_main_~z~0_primed)))))
+(assert
+     (and 
+          (= c_main_~z~0_primed (+ (* 4194304 |c_main_#t~nondet2|) c_main_~z~0))
+          (= c_main_~x~0_primed (+ (* 1048576 |c_main_#t~nondet0|) c_main_~x~0))
+          (= c_main_~y~0_primed (+ (* 2097152 |c_main_#t~nondet1|) c_main_~y~0))))
+(assert
+     (and
+          (exists ((|v_main_#t~nondet0_3| Int)) (= (* 1048576 |v_main_#t~nondet0_3|) c_main_~x~0))
+          (exists ((|v_main_#t~nondet1_3| Int)) (= c_main_~y~0 (* 2097152 |v_main_#t~nondet1_3|)))
+          (exists ((|v_main_#t~nondet2_3| Int)) (= (* 4194304 |v_main_#t~nondet2_3|) c_main_~z~0))))
+(assert
+     (not
+          (and
+               (exists ((|v_main_#t~nondet0_3| Int)) (= (* 1048576 |v_main_#t~nondet0_3|) c_main_~x~0_primed))
+               (exists ((|v_main_#t~nondet1_3| Int)) (= c_main_~y~0_primed (* 2097152 |v_main_#t~nondet1_3|)))
+               (exists ((|v_main_#t~nondet2_3| Int)) (= (* 4194304 |v_main_#t~nondet2_3|) c_main_~z~0_primed)))))
 (check-sat)
 (exit)
