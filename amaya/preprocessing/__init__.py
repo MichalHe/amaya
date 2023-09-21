@@ -365,11 +365,14 @@ def _flatten_bool_nary_connectives(ast: AST_Node) -> AST_Node:
 
         for child in ast[1:]:
             flattened_child = _flatten_bool_nary_connectives(child)
-            is_nary_node = isinstance(flattened_child , list)
+            is_nary_node = isinstance(flattened_child, list)
             if is_nary_node and flattened_child[0] == parent_type:
                 new_node.extend(flattened_child[1:])
             else:
                 new_node.append(flattened_child)
+
+        if len(new_node) == 2:
+            return new_node[1]
 
         return new_node
 

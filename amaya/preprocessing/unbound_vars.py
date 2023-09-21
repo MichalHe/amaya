@@ -230,7 +230,7 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
         for subtree_with_bounds in subtrees_with_bounds:
             for var, var_value_intervals in subtree_with_bounds.var_values.items():
                 overall_bounds_info.var_values[var] = make_value_interval_intersection(overall_bounds_info.var_values[var],
-                                                                                            var_value_intervals)
+                                                                                       var_value_intervals)
 
         return overall_bounds_info
 
@@ -241,7 +241,7 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
         for subtree_with_bounds in subtrees_with_bounds:
             for var, bounds_info in subtree_with_bounds.var_values.items():
                 overall_bounds_info.var_values[var] = make_value_interval_union(overall_bounds_info.var_values[var],
-                                                                                     bounds_info)
+                                                                                bounds_info)
 
         return overall_bounds_info
 
@@ -409,9 +409,6 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
             # not have their bounds rewritten at some upper level
             vars_to_rewrite_bounds_at_current_level: Set[Var] = set()
             for var, bound_info in ast.var_values.items():
-                if len(bound_info) == 0:
-                    return BoolLiteral(False)
-
                 if len(bound_info) == 1 and var not in vars_with_rewritten_bounds:
                     bound = bound_info[0]
                     if bound.lower_limit is None and bound.upper_limit is None:
