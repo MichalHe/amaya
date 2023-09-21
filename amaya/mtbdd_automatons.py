@@ -294,8 +294,8 @@ class MTBDD_NFA(NFA):
             states=set(self.states),
             state_semantics=None,
             transitions=vis_transitions,
-            variable_names=self.alphabet.variable_numbers,
-            variable_ids=self.used_variables,
+            variable_names=tuple(str(var) for var in self.alphabet.all_vars),
+            variable_ids=tuple(var.id for var in self.used_variables),
         )
 
     def remove_nonfinishing_states(self):
