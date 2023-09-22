@@ -251,7 +251,7 @@ class NonlinTermGraph:
     def drop_nodes_for_var(self, var: Var) -> List[NonlinTermNode]:
         work_list = list(self.index[var])
 
-        dropped_nodes = []
+        dropped_nodes = list(work_list)
         while work_list:
             node = work_list.pop(-1)
 
@@ -260,13 +260,12 @@ class NonlinTermGraph:
                 # the node might already be dropped
                 continue
 
-            dropped_nodes.append(node)
-
             node.was_dropped = True
             for dependent_node in node.dependent_terms:
                 if not dependent_node.was_dropped:
                     dependent_node.was_dropped = True
                     work_list.append(dependent_node)
+                    dropped_nodes.append(dependent_node)
 
         return dropped_nodes
 
@@ -452,7 +451,7 @@ def add_two_var_rewrite_instructions(rewrite_instructions: RewriteInstructions, 
     terms = sorted(terms, key=lambda term: term.var)
     vars, coefs = split_lin_terms_into_vars_and_coefs(terms)
 
-    body_decomposition = Relation(vars=vars, coefs=coefs, rhs=0, predicate_symbol='=')
+    body_decomposition = Relation(vars=vars, coefs=coefs, rhs=-node.body.lin_term_constant, predicate_symbol='=')
 
     rewrite_instructions.new_atoms.extend((greater_than_zero, smaller_than_modulus, body_decomposition))
 
@@ -466,15 +465,19 @@ def add_quotient_single_variable_rewrite_instructions(rewrite_instructions: Rewr
     terms = sorted(terms, key=lambda term: term.var)
     vars, coefs = split_lin_terms_into_vars_and_coefs(terms)
 
+    # <BODY> + <BODY_CONSTANT> - N*<QUOTIENT> <= 0
+    # <BODY> - N*<QUOTIENT> <= -<BODY_CONSTANT>
+    # -(<BODY> - N*<QUOTIENT>) >= +<BODY_CONSTANT>
     negated_coefs = [-1*coef for coef in coefs]
-    greater_than_zero = Relation(vars=vars, coefs=negated_coefs, rhs=0, predicate_symbol='<=')
-    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=node.body.nonlin_constant-1, predicate_symbol='<=')
+    greater_than_zero = Relation(vars=vars, coefs=negated_coefs, rhs=node.body.lin_term_constant, predicate_symbol='<=')
+
+    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=(node.body.nonlin_constant-1-node.body.lin_term_constant), predicate_symbol='<=')
 
     rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus])
 
 
 def add_reminder_single_variable_rewrite_using_quotient(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, quotient: Var):
-    # Express reminder as <BODY> - <QUOTIENT>*<MODULUS>
+    # Express reminder as <BODY> - <QUOTIENT>*N
     terms = tuple(LinTerm(coef=item[1], var=item[0]) for item in node.body.lin_terms)
     terms += (LinTerm(coef=-node.body.nonlin_constant, var=quotient),)
     terms = tuple(sorted(terms, key=lambda term: term.var))
@@ -482,9 +485,15 @@ def add_reminder_single_variable_rewrite_using_quotient(rewrite_instructions: Re
 
     rewrite_instructions.placeholder_replacements[quotient] = terms
 
+    # <BODY> + <BODY_CONSTANT> - N*<QUOTIENT> >= 0
+    # <BODY> - N*<QUOTIENT> >= -<BODY_CONSTANT>
+    # -(<BODY> - N*<QUOTIENT>) <= +<BODY_CONSTANT>
     negated_coefs = [-1*coef for coef in coefs]
-    greater_than_zero = Relation(vars=vars, coefs=negated_coefs, rhs=0, predicate_symbol='<=')
-    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=node.body.nonlin_constant-1, predicate_symbol='<=')
+    greater_than_zero = Relation(vars=vars, coefs=negated_coefs, rhs=node.body.lin_term_constant, predicate_symbol='<=')
+
+    # <BODY> + <BODY_CONSTANT> - N*<QUOTIENT> <= N-1
+    # <BODY> - N*<QUOTIENT> <= N - 1 - <BODY_CONSTANT>
+    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=(node.body.nonlin_constant-1-node.body.lin_term_constant), predicate_symbol='<=')
 
     rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus])
 
@@ -500,7 +509,12 @@ def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: 
     terms = sorted(terms, key=lambda term: term.var)
     vars, coefs = split_lin_terms_into_vars_and_coefs(terms)
 
-    congruence = Congruence(vars=vars, coefs=coefs, rhs=0, modulus=node.body.nonlin_constant)
+    # <BODY> + <BODY_CONSTANT> - <REMINDER> ~~ 0
+    # <BODY> - <REMINER> ~~ -BODY_CONSTANT
+    modulus = node.body.nonlin_constant
+    rhs = (-node.body.lin_term_constant) % modulus
+    assert 0 <= rhs and rhs < modulus
+    congruence = Congruence(vars=vars, coefs=coefs, rhs=rhs, modulus=node.body.nonlin_constant)
 
     rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus, congruence])
 
@@ -644,6 +658,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
 
         # Try dropping any of the bound vars - collect nonlinear terms (graph nodes) that have to be instantiated
         dropped_nodes: List[NonlinTermNode] = []
+
         for var in bound_vars:
             dropped_nodes += dep_graph.drop_nodes_for_var(var)
 

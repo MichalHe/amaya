@@ -359,8 +359,6 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             assert formula_to_evaluate
             formula_to_evaluate = optimize_formula_structure(formula_to_evaluate)
 
-            # Count all distinct variables in the formula
-
             alphabet = LSBF_Alphabet.from_vars(var_table.keys())
 
             eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet, var_table=var_table)
