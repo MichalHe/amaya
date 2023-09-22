@@ -167,7 +167,7 @@ class MTBDD_NFA(NFA):
         # Do not need to set used_variables here as the determinized automaton already has them set
         return self
 
-    def do_projection(self, var: int, skip_pad_closure: bool = False):
+    def do_projection(self, var: Var, skip_pad_closure: bool = False):
         logger.info(f'Performing MTBDD NFA projection on variable: {var}. Currently employed variables: {self.used_variables}')
 
         self.transition_fn.project_variable_away(var)
@@ -179,7 +179,7 @@ class MTBDD_NFA(NFA):
         else:
             logger.debug('Skipping padding closure.')
 
-        if self.used_variables:
+        if self.used_variables and var in self.used_variables:
             self.used_variables.remove(var)
 
         if not self.used_variables:
