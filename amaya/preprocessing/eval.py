@@ -249,7 +249,7 @@ class NonlinTermGraph:
             self.index[var].append(node)
 
     def drop_nodes_for_var(self, var: Var) -> List[NonlinTermNode]:
-        work_list = list(self.index[var])
+        work_list = list(node for node in self.index[var] if not node.was_dropped)
 
         dropped_nodes = list(work_list)
         while work_list:
