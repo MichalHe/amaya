@@ -418,7 +418,13 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
             new_ast_node: AST_NaryNode = ['and']
             for var_to_rewrite_bounds in vars_to_rewrite_bounds_at_current_level:
                 var_bounds = ast.var_values[var_to_rewrite_bounds][0]
+                are_bounds_equal = var_bounds.lower_limit == var_bounds.upper_limit
                 if var_bounds.lower_limit is not None:
+                    if are_bounds_equal:  # Both of the bounds have value (!= None)
+                        eq = Relation(vars=[var_to_rewrite_bounds], coefs=[1], predicate_symbol='=', rhs=var_bounds.lower_limit)
+                        new_ast_node.append(eq)
+                        continue
+
                     lower_bound = Relation.new_lin_relation(variable_names=[var_to_rewrite_bounds], variable_coefficients=[-1],
                                                             predicate_symbol='<=', absolute_part=-var_bounds.lower_limit)
                     new_ast_node.append(lower_bound)
