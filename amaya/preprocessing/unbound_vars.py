@@ -182,10 +182,7 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
             var, coef = relation.vars[0], relation.coefs[0]
             bound = relation.rhs / coef
 
-            if coef <= 0:
-                bound = math.floor(bound)
-            else:
-                bound = math.ceil(bound)
+            bound = math.floor(bound) if coef <= 0 else math.ceil(bound)
 
             if relation.predicate_symbol == '=':
                 bounds_info.var_values[var] = [Value_Interval(bound, bound)]
@@ -267,6 +264,22 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
     raise ValueError(f'[Variable bounds analysis] Cannot descend into AST - unknown node: {node_type=}, {ast=}')
 
 
+def filter_vars_with_no_info_from_node(vars_with_bounds_rewritten: Set[Var], node: AST_Internal_Node_With_Bounds_Info) -> Set[Var]:
+    vars_with_no_info_about_their_value: Set[Var] = set()
+
+    for var in vars_with_bounds_rewritten:
+        var_values = node.var_values.get(var, [Value_Interval()])
+
+        if len(var_values) != 1:
+            continue
+
+        value_interval = var_values[0]
+        if value_interval.lower_limit is None and value_interval.upper_limit is None:
+            vars_with_no_info_about_their_value.add(var)
+
+    return vars_with_bounds_rewritten.difference(vars_with_no_info_about_their_value)
+
+
 def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[Var]) -> Optional[AST_Node]:
     if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
         if isinstance(ast.contents, (Var, Congruence, str, BoolLiteral)):
@@ -316,8 +329,10 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
                 if simplified_subtree:
                     new_ast_node.append(simplified_subtree)
             return new_ast_node if len(new_ast_node) > 1 else None
+
         else:
-            rewritten_subtrees = (_simplify_bounded_atoms(subtree, vars_with_rewritten_bounds) for subtree in ast.children)
+            vars_to_not_rewrite = filter_vars_with_no_info_from_node(vars_with_rewritten_bounds, ast)
+            rewritten_subtrees = (_simplify_bounded_atoms(subtree, vars_to_not_rewrite) for subtree in ast.children)
             preserved_subtrees = (tree for tree in rewritten_subtrees if tree)
             new_ast_node = [ast.node_type, *preserved_subtrees]
             return new_ast_node if len(new_ast_node) > 1 else None
