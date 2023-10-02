@@ -443,7 +443,7 @@ def add_two_var_rewrite_instructions(rewrite_instructions: RewriteInstructions, 
     rewrite_instructions.placeholder_replacements[quotient] = (LinTerm(coef=1, var=quotient),)
 
     greater_than_zero = Relation(vars=[reminder], coefs=[-1], rhs=0, predicate_symbol='<=')
-    smaller_than_modulus = Relation(vars=[reminder], coefs=[1], rhs=node.body.nonlin_constant-1, predicate_symbol='<=')
+    smaller_than_modulus = Relation(vars=[reminder], coefs=[1], rhs=abs(node.body.nonlin_constant)-1, predicate_symbol='<=')
 
     # <TERM_BODY> = <QUOTIENT>*<NONLIN_CONSTANT> + <REMINDER> -->  <TERM_BODY> - <QUOTIENT>*<NONLIN_CONSTANT> - <REMINDER> = 0
     terms = tuple(LinTerm(coef=item[1], var=item[0]) for item in node.body.lin_terms)
@@ -471,7 +471,8 @@ def add_quotient_single_variable_rewrite_instructions(rewrite_instructions: Rewr
     negated_coefs = [-1*coef for coef in coefs]
     greater_than_zero = Relation(vars=vars, coefs=negated_coefs, rhs=node.body.lin_term_constant, predicate_symbol='<=')
 
-    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=(node.body.nonlin_constant-1-node.body.lin_term_constant), predicate_symbol='<=')
+    rhs = abs(node.body.nonlin_constant) - 1 - node.body.lin_term_constant
+    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=rhs, predicate_symbol='<=')
 
     rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus])
 
@@ -493,7 +494,8 @@ def add_reminder_single_variable_rewrite_using_quotient(rewrite_instructions: Re
 
     # <BODY> + <BODY_CONSTANT> - N*<QUOTIENT> <= N-1
     # <BODY> - N*<QUOTIENT> <= N - 1 - <BODY_CONSTANT>
-    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=(node.body.nonlin_constant-1-node.body.lin_term_constant), predicate_symbol='<=')
+    rhs = abs(node.body.nonlin_constant) - 1 - node.body.lin_term_constant
+    smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=rhs, predicate_symbol='<=')
 
     rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus])
 
@@ -502,7 +504,7 @@ def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: 
     rewrite_instructions.placeholder_replacements[reminder] = (LinTerm(coef=1, var=reminder),)
 
     greater_than_zero = Relation(vars=[reminder], coefs=[-1], rhs=0, predicate_symbol='<=')
-    smaller_than_modulus = Relation(vars=[reminder], coefs=[1], rhs=node.body.nonlin_constant-1, predicate_symbol='<=')
+    smaller_than_modulus = Relation(vars=[reminder], coefs=[1], rhs=abs(node.body.nonlin_constant)-1, predicate_symbol='<=')
 
     terms = tuple(LinTerm(coef=item[1], var=item[0]) for item in node.body.lin_terms)
     terms += (LinTerm(coef=-1, var=reminder),)
@@ -514,7 +516,7 @@ def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: 
     modulus = node.body.nonlin_constant
     rhs = (-node.body.lin_term_constant) % modulus
     assert 0 <= rhs and rhs < modulus
-    congruence = Congruence(vars=vars, coefs=coefs, rhs=rhs, modulus=node.body.nonlin_constant)
+    congruence = Congruence(vars=vars, coefs=coefs, rhs=rhs, modulus=abs(node.body.nonlin_constant))
 
     rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus, congruence])
 
