@@ -179,6 +179,11 @@ class AST_Node_Names(Enum):
     NOT = 'not'
 
 
+def ast_get_node_type(node: AST_NaryNode) -> str:
+    node_type: str = node[0]  # type: ignore
+    return node_type
+
+
 def make_exists_node(binding_list: List[Tuple[str, str]], subformula: AST_Node) -> AST_Node:
     # @Note: We convert the tuples into lists because the rest of the solver might expect so
     # #      however we should have a more proper types for the entire AST

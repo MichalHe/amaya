@@ -36,7 +36,7 @@ from amaya.preprocessing import (
     eval as ast_eval_lib,
     prenexing,
 )
-from amaya.preprocessing.eval import VarInfo
+from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
     AST_Atom,
@@ -50,6 +50,7 @@ from amaya.relations_structures import (
     Relation,
     Var,
     VariableType,
+    ast_get_node_type,
 )
 from amaya.tokenize import tokenize
 from amaya.semantics_tracking import (
@@ -619,6 +620,42 @@ def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: in
     return operand
 
 
+def try_lazy_construct_conjunction(exists_node: AST_NaryNode, ctx: EvaluationContext) -> Optional[NFA]:
+    bound_vars: List[Var] = exists_node[1]  # type: ignore
+    if not isinstance(exists_node[2], list):
+        return
+
+    and_node: AST_NaryNode = exists_node[2]
+    if ast_get_node_type(and_node) != AST_Node_Names.AND.value:
+        return
+
+    if not all(isinstance(child, (Relation, Congruence)) for child in and_node[1:]):
+        return
+
+    logger.info('Lazy constructing %s', and_node)
+    atoms: List[AST_Atom] = and_node[1:]  # type: ignore
+    from amaya.mtbdd_transitions import MTBDDTransitionFn
+
+    new_atoms = []
+    for atom in atoms:
+        if isinstance(atom, Relation):
+            new_atom = divide_relation_by_gcd(atom)
+            if isinstance(new_atom, BoolLiteral) and new_atom.value == False:
+                assert ctx.alphabet
+                return NFA.trivial_nonaccepting(ctx.alphabet)
+        else:
+            new_atom = atom
+        new_atoms.append(new_atom)
+
+    ctx.stats_operation_starts(ParsingOperation.LAZY_CONSTRUCT, None, None)
+    nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(new_atoms, bound_vars, ctx.get_alphabet())
+    ctx.stats_operation_ends(nfa)
+
+    logger.info("Lazy construnction done, result has %d states", len(nfa.states))
+    nfa = minimize_automaton_if_configured(nfa, ctx)
+    return nfa
+
+
 def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
     """Construct an NFA corresponding to the given formula of the form (exists (vars) (phi))."""
     assert len(exists_expr) == 3
@@ -627,20 +664,9 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
 
     # Perform a look-ahead to see whether we can construct the NFA for the entire conjunction using a lazy approach
     if solver_config.backend_type == BackendType.MTBDD and solver_config.optimizations.do_lazy_evaluation:
-        if isinstance(exists_expr[2], list) and exists_expr[2][0] == 'and':
-            conjunction = exists_expr[2]
-            if all(isinstance(child, (Relation, Congruence)) for child in conjunction[1:]):
-                logger.info('Lazy constructing %s', conjunction)
-                atoms: List[AST_Atom] = conjunction[1:]  # type: ignore
-                from amaya.mtbdd_transitions import MTBDDTransitionFn
-
-                ctx.stats_operation_starts(ParsingOperation.LAZY_CONSTRUCT, None, None)
-                nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, bound_vars, ctx.get_alphabet())
-                ctx.stats_operation_ends(nfa)
-
-                logger.info("Lazy construnction done, result has %d states", len(nfa.states))
-                nfa = minimize_automaton_if_configured(nfa, ctx)
-                return nfa
+        nfa = try_lazy_construct_conjunction(exists_expr, ctx)
+        if nfa:
+            return nfa
 
     nfa = get_automaton_for_operand(exists_expr[2], ctx, _depth)
 

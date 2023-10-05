@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 import itertools
+import math
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from amaya import logger
@@ -367,6 +368,31 @@ def normalize_expr(ast: Raw_AST,
     raise ValueError(f'Cannot reduce unknown expression to evaluable form. {ast=}')
 
 
+def divide_relation_by_gcd(relation: Relation) -> Union[Relation, BoolLiteral]:
+    # Divide both sides by GCD if configured
+    if not solver_config.optimizations.do_gcd_divide:
+        return relation
+
+    gcd = math.gcd(*relation.coefs)
+    new_coefs: List[int] = [coef // gcd for coef in relation.coefs]
+    unsat = False
+    if relation.predicate_symbol == '<=':
+        new_rhs = math.floor(relation.rhs/gcd)
+    else:  # Equation
+        if relation.rhs % gcd:
+            unsat = True
+        new_rhs = relation.rhs // gcd
+
+    if unsat:
+        msg = 'GCD of relation coefs (%s) is %d, but RHS (=%d) is not divisible -> returning False.'
+        logger.info(msg, relation.coefs, gcd, relation.rhs)
+        return BoolLiteral(False)
+
+    msg = 'GCD of relation coefs (%s) is %d, rewriting coefficients into %s and RHS into %d.'
+    logger.info(msg, relation.coefs, gcd, new_coefs, new_rhs)
+    return Relation(vars=relation.vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=relation.predicate_symbol)
+
+
 def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, scoper: Scoper) -> Tuple[Union[Relation, BoolLiteral], ASTInfo]:
     assert isinstance(ast, list)
     predicate_symbol = ast[0]
@@ -401,12 +427,11 @@ def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph,
         predicate_symbol = '<='
         abs_part -= 1
 
-    relation = Relation.new_lin_relation(variable_names=vars, variable_coefficients=coefs,
-                                         absolute_part=abs_part, predicate_symbol=predicate_symbol)
+    relation = Relation(vars=vars, coefs=coefs, rhs=abs_part, predicate_symbol=predicate_symbol)
+    # We cannot do GCD rewrite as the relation will be modified later (contains placeholder variables)
 
     # The relation might use some variables transiently trough the use of mod/div terms, include them
     # for var in vars:
-
     ast_info = ASTInfo(used_vars=support)
 
     return relation, ast_info
