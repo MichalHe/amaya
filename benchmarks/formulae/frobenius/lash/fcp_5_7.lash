@@ -1,0 +1,1 @@
+((((-1 * x1 <= 0) AND (NOT (EXISTS (x2: EXISTS (x3:  (NOT ((NOT (((-1 * x2 <= 0) AND (-1 * x3 <= 0)))) OR (NOT (-1 * x1 + 5 * x2 + 7 * x3 = 0)))) ))))) AND (NOT (EXISTS (x4:  (NOT ((EXISTS (x5: EXISTS (x6:  (NOT ((NOT (((-1 * x5 <= 0) AND (-1 * x6 <= 0)))) OR (NOT (-1 * x4 + 5 * x5 + 7 * x6 = 0)))) ))) OR (-1 * x1 + 1 * x4 <= 0))) )))))
