@@ -114,12 +114,19 @@ class Scoper:
         raise ValueError(f'Variable has not been declared previously: {var_name}')
 
 
-    def put_var_into_current_scope(self, var_name: str, raw_var_type: str = 'Int') -> Var:
+    def put_var_into_current_scope(self, var_name: str, raw_var_type: str = 'Int', add_id_to_name: bool = False) -> Var:
         current_scope = self.scopes[-1]
+
+        var_id = self.next_var_id
+
+        if add_id_to_name:
+            var_name = f'{var_name}{var_id}'
+
         if var_name in current_scope:
             raise ValueError(f'Naming conflict - trying to insert a variable {var_name} into a scope that already contains that name')
+
         var_type = VariableType.from_smt_type_string(raw_var_type)
-        var = Var(id=self.next_var_id)
+        var = Var(id=var_id)
         self.next_var_id += 1
         current_scope[var_name] = var
         self.var_table[var] = VarInfo(name=var_name, type=var_type)
@@ -562,7 +569,7 @@ def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNod
             rewrite_instructions.vars_to_quantify.append(quotient)
 
             if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
-                reminder = scoper.put_var_into_current_scope('dummy_reminder')  # Make a new var
+                reminder = scoper.put_var_into_current_scope('dummy_reminder', add_id_to_name=True)  # Make a new var
                 add_two_var_rewrite_instructions(rewrite_instructions, node, reminder=reminder, quotient=quotient)
                 rewrite_instructions.vars_to_quantify.append(reminder)
                 continue
@@ -574,7 +581,7 @@ def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNod
             rewrite_instructions.vars_to_quantify.append(reminder)
 
             if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
-                quotient = scoper.put_var_into_current_scope('dummy_quotient')  # Make a new var
+                quotient = scoper.put_var_into_current_scope('dummy_quotient', add_id_to_name=True)  # Make a new var
                 add_two_var_rewrite_instructions(rewrite_instructions, node, reminder=reminder, quotient=quotient)
                 rewrite_instructions.vars_to_quantify.append(quotient)
                 continue

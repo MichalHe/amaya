@@ -57,6 +57,9 @@ class PreprocessingConfig:
     use_two_vars_when_rewriting_nonlin_terms: bool = False
     """Use two variables <d> and <m> as in `K*<d> + <m> = y` when rewriting nonlinear terms."""
 
+    show_preprocessed_formula: bool = False
+    """Pretty print the preprocessed formula before evaluating."""
+
 
 @dataclass
 class SolverConfig(object):

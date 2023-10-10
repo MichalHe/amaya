@@ -184,6 +184,11 @@ def ast_get_node_type(node: AST_NaryNode) -> str:
     return node_type
 
 
+def ast_get_binding_list(exists_node: AST_NaryNode) -> List[Var]:
+    binding_list: List[Var] = exists_node[1]  # type: ignore
+    return binding_list
+
+
 def make_exists_node(binding_list: List[Tuple[str, str]], subformula: AST_Node) -> AST_Node:
     # @Note: We convert the tuples into lists because the rest of the solver might expect so
     # #      however we should have a more proper types for the entire AST

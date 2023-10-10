@@ -1,4 +1,8 @@
-from amaya.relations_structures import AST_NaryNode, AST_Node, Relation
+from amaya.relations_structures import AST_NaryNode, AST_Node, Relation, Var, ast_get_binding_list
+
+
+def var_into_varname(var: Var) -> str:
+    return f'x{var.id}'
 
 
 def _write_ast_in_lash(ast: AST_Node) -> str:
@@ -7,13 +11,13 @@ def _write_ast_in_lash(ast: AST_Node) -> str:
 
     if isinstance(ast, Relation):
         relation: Relation = ast
-        coef_var_pairs = list(zip(relation.variable_coefficients, relation.variable_names))
-        tokens = [str(coef_var_pairs[0][0]), '*', coef_var_pairs[0][1]]
+        coef_var_pairs = list(zip(relation.coefs, relation.vars))
+        tokens = [str(coef_var_pairs[0][0]), '*', var_into_varname(coef_var_pairs[0][1])]
         for coef, var in coef_var_pairs[1:]:
             sign = '+' if coef > 0 else '-'
-            tokens.extend((sign, str(coef), '*', var))
+            tokens.extend((sign, str(coef), '*', var_into_varname(var)))
         tokens.append(relation.predicate_symbol)
-        tokens.append(str(relation.absolute_part))
+        tokens.append(str(relation.rhs))
         return ' '.join(tokens)
 
     assert isinstance(ast, list), f'Unsupported AST node: {ast}'
@@ -30,7 +34,8 @@ def _write_ast_in_lash(ast: AST_Node) -> str:
         subformulae = ['(' + _write_ast_in_lash(subformula) + ')' for subformula in ast[1:]]
         return ' OR '.join(subformulae)
     elif node_type == 'exists':
-        var_list = [var_type_pair[0] for var_type_pair in ast[1]]  # type: ignore
+        binding_list = ast_get_binding_list(ast)
+        var_list = [var_into_varname(var) for var in binding_list]  # type: ignore
         exists_chain_head = ''.join([f'EXISTS ({var}: ' for var in var_list])
         exists_chain_tail = ''.join([')'] * len(var_list))
 

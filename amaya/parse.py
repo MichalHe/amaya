@@ -357,6 +357,11 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
 
+            if solver_config.preprocessing.show_preprocessed_formula:
+                import pprint, sys
+                pprint.pprint(formula_to_evaluate, stream=sys.stdout)
+                sys.exit(0)
+
             assert formula_to_evaluate
             formula_to_evaluate = optimize_formula_structure(formula_to_evaluate)
 

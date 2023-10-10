@@ -193,6 +193,12 @@ get_sat_subparser.add_argument('-p',
                                default=False,
                                help='Print model after the decision procedure is finished, if any.')
 
+get_sat_subparser.add_argument('-S',
+                               '--show-preprocessed-formula',
+                               action='store_true',
+                               default=False,
+                               help='Pretty print the preprocessed formula into the stdout.')
+
 get_sat_subparser.add_argument('--vis-only-free-vars',
                                action='store_true',
                                dest='vis_display_only_free_vars',
@@ -268,6 +274,7 @@ if 'specified_files' in args:
     runner_mode = RunnerMode.BENCHMARK
 elif 'input_file' in args:
     runner_mode = RunnerMode.GET_SAT
+    solver_config.track_operation_runtime = True
     solver_config.print_stats = args.print_stats
 elif 'file_to_convert' in args:
     runner_mode = RunnerMode.CONVERT_FORMULA
@@ -382,6 +389,7 @@ def run_in_getsat_mode(args) -> bool:
     solver_config.track_operation_runtime = args.should_print_operations_runtime
     solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
     solver_config.current_formula_path = os.path.abspath(args.input_file)
+    solver_config.preprocessing.show_preprocessed_formula = args.show_preprocessed_formula
 
     def write_created_automaton_to_folder(introspection_info: parse.IntrospectionData):
         filename = f'{introspection_info.operation_id}-{introspection_info.operation.value}.{args.output_format}'
@@ -588,7 +596,7 @@ def convert_smt_to_other_format(args):
             fn_symbols = [fn_symbol for fn_symbol in function_symbol_table.values() if fn_symbol.arity == 0]
             fn_symbols = sorted(fn_symbols, key=lambda fn_symbol: fn_symbol.name)
             formula_to_emit = ['and', *asserted_formulae]
-            new_fn_symbols, formula_to_emit = preprocess_ast(formula_to_emit, constant_function_symbols=fn_symbols, bool_vars=set())
+            formula_to_emit, var_table = preprocess_ast(formula_to_emit, global_fn_symbols=fn_symbols)
             output = writer(formula_to_emit)
             print(output)
 
