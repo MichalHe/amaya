@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import copy
 from typing import (
     Dict,
     List,
@@ -104,12 +105,7 @@ def mark_and_collect_ite_conditions(ast: Raw_AST, counter: ConditionCounter) -> 
 
 
 def copy_ast(ast: AST_With_Placeholders) -> AST_With_Placeholders:
-    if isinstance(ast, str) or isinstance(ast, int):
-        return ast
-
-    assert isinstance(ast, list)
-
-    return [copy_ast(item) for item in ast]
+    return copy.deepcopy(ast)
 
 
 def instantiate_condition_handles(ast: AST_With_Placeholders, conditions: Dict[int, AST_With_Placeholders], valuation_bits: int) -> Raw_AST:

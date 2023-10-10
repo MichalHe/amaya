@@ -530,6 +530,9 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
     reduction_result = get_automaton_for_operand(first_operand, ctx, _depth)
 
     for next_operand in expr[2:]:
+        if reduction_operation == ParsingOperation.NFA_INTERSECT and not reduction_result.final_states:
+            return reduction_result
+
         next_operand_automaton = get_automaton_for_operand(next_operand, ctx, _depth)
 
         # Apply the provided reduction function.
