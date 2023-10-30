@@ -161,7 +161,7 @@ class BoolLiteral:
     """True or False formula"""
     value: bool
 
-
+Frozen_AST = Union[int, str, Tuple['Raw_AST', ...]]
 Raw_AST = Union[int, str, List['Raw_AST']]
 AST_Atom = Union[str, Var, Congruence, Relation, BoolLiteral]
 AST_NaryNode = List[Union[AST_Atom, 'AST_NaryNode']]
