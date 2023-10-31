@@ -114,7 +114,7 @@ class EvaluationContext:
 
     def stats_operation_starts(self, operation: ParsingOperation, input1: Optional[NFA], input2: Optional[NFA]):
         """Notify the context that an operation has started (statistics tracking)."""
-        start = 0 if not solver_config.track_operation_runtime else time.time_ns()
+        start = time.time_ns() if solver_config.track_operation_runtime else 0
 
         operand1_info = AutomatonInfo.from_automaton(input1)
         operand2_info = AutomatonInfo.from_automaton(input2)
@@ -143,7 +143,7 @@ class EvaluationContext:
             self.introspect_handle(introspect_data)
 
 
-        runtime = time.time_ns() - op_start.start_ns if solver_config.track_operation_runtime else 0
+        runtime = (time.time_ns() - op_start.start_ns) if solver_config.track_operation_runtime else 0
         output_info = AutomatonInfo.from_automaton(output)
         assert output_info
         stat = StatPoint(operation=op_start.op_type,

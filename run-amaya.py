@@ -26,7 +26,7 @@ from enum import Enum
 import os
 import logging
 import sys
-from typing import Callable, List, Dict, Optional
+from typing import Callable, List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import time
 import statistics
@@ -44,6 +44,7 @@ from amaya.converters import write_ast_in_lash
 from amaya.preprocessing import preprocess_ast
 from amaya.preprocessing.eval import convert_ast_into_evaluable_form
 from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, FunctionSymbol
+from amaya.stats import RunStats, StatPoint
 from amaya.tokenize import tokenize
 import amaya.utils as utils
 
@@ -214,12 +215,15 @@ get_sat_subparser.add_argument('--colorize-dot',
                                     ' format is dot.')
 
 get_sat_subparser.add_argument('-s',
-                               '--print-stats',
-                               action='store_true',
-                               dest='print_stats',
-                               default=False,
-                               help='Print execution statistics.')
+                               '--collect-stats',
+                               dest='stats_format',
+                               default=None,
+                               choices=['csv', 'human'],
+                               help='Collect runtime stats and output them in the given format.')
 
+get_sat_subparser.add_argument('--stats-file',
+                               dest='stats_file',
+                               help='Collect statistics and output them into the specified file (implies --collect-stats).')
 
 benchmark_subparser = subparsers.add_parser('benchmark')
 benchmark_subparser.add_argument('--add-file',
@@ -274,8 +278,6 @@ if 'specified_files' in args:
     runner_mode = RunnerMode.BENCHMARK
 elif 'input_file' in args:
     runner_mode = RunnerMode.GET_SAT
-    solver_config.track_operation_runtime = True
-    solver_config.print_stats = args.print_stats
 elif 'file_to_convert' in args:
     runner_mode = RunnerMode.CONVERT_FORMULA
     if 'auto-infer' in args.preprocessing_switches:
@@ -382,11 +384,60 @@ def search_directory_nonrecursive(root_path: str, filter_file_ext='.smt2') -> Li
     )
 
 
+def display_runtime_statistics(output_file: Optional[str], format: Optional[str], result: automatons.NFA, statistics: RunStats):
+    if not output_file and not format:
+        return
+
+    output_file_handle = sys.stdout if not output_file else open(output_file, 'w')
+    format = 'human' if not format else format
+
+    Row_Type = Tuple[int, str, Optional[int], Optional[int], Optional[int], Optional[int], int, int]
+    def row_from_stat_point(op_idx: int, point: StatPoint) -> Row_Type:
+        id = op_idx
+        op_type = point.operation.value
+        output_size = point.output.size
+        runtime = point.runtime_ns
+
+        op1_id, op1_size = None, None
+        if point.operand1:
+            op1_id, op1_size = point.operand1.automaton_id, point.operand1.size
+
+        op2_id, op2_size = None, None
+        if point.operand2:
+            op1_id, op1_size = point.operand2.automaton_id, point.operand2.size
+
+        return (id, op_type, op1_id, op1_size, op2_id, op2_size, output_size, runtime)
+
+    if format == 'human':
+        import tabulate, functools
+        write_stat = functools.partial(print, file=output_file_handle)
+        write_stat(f'############ STATISTICS ############')
+        write_stat(f'result_size       : {len(result.states)}')
+        write_stat(f'max_automaton_size: {statistics.max_automaton_size}')
+        write_stat(f'### Trace: ')
+        header = ['id', 'operation', 'Operand1 id', 'Operand1 Size', 'Operand2 id', 'Operand2 Size', 'Output Size', 'runtime (ns)']
+        rows = [row_from_stat_point(i, row) for i, row in enumerate(statistics.trace)]
+        write_stat(tabulate.tabulate(rows, headers=header))
+    elif format == 'csv':
+        import csv
+        header = ['id', 'operation', 'operand1_id', 'operand1_size', 'operand2_id', 'operand2_size', 'output_size', 'runtime_ns']
+        rows = [row_from_stat_point(i, row) for i, row in enumerate(statistics.trace)]
+        writer = csv.writer(output_file_handle)
+        writer.writerow(header)
+        writer.writerows(rows)
+
+    output_file_handle.close()
+
+
+
 def run_in_getsat_mode(args) -> bool:
     assert os.path.exists(args.input_file), 'The SMT2 supplied file containing input formula does not exists!'
     assert os.path.isfile(args.input_file), 'The supplied file must not be a directory.'
 
-    solver_config.track_operation_runtime = args.should_print_operations_runtime
+    # Statistics
+    solver_config.print_stats = args.stats_format is not None or args.stats_file is not None
+    solver_config.track_operation_runtime = args.should_print_operations_runtime or solver_config.print_stats
+
     solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
     solver_config.current_formula_path = os.path.abspath(args.input_file)
     solver_config.preprocessing.show_preprocessed_formula = args.show_preprocessed_formula
@@ -444,12 +495,7 @@ def run_in_getsat_mode(args) -> bool:
         if args.should_print_model:
             print('Model:', model)
 
-        if solver_config.print_stats:
-            print(f'############ STATISTICS ############')
-            print(f'result_size: {len(nfa.states)}')
-            print(f'max_automaton_size: {stats.max_automaton_size}')
-            for i, op in enumerate(stats.trace):
-                print(f'{i}  {op.operation.value} input1={op.operand1} input2={op.operand2} output={op.output} runtime={op.runtime_ns} (ns)')
+        display_runtime_statistics(args.stats_file, args.stats_format, nfa, stats)
 
         if should_output_created_automata:
             # Dump tracefile
