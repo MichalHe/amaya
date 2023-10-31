@@ -148,15 +148,19 @@ argparser.add_argument('-O',
                                 'stomp-negations',
                                 'light-sat',
                                 'lazy',
+                                'minimize-congruences',
+                                'iso-conflicts',
                                 'all',
                        ],
                        help=('Controls preprocessing transformations applied on input the formula. Options:\n'
-                             '- gdc-rewrite    : Rewrite existentially quantified equations using GCD rewrite\n'
-                             '- var-bounds     : Simplify (hard) variable bounds if possible\n'
-                             '- stomp-negations: Push negation as close to atoms as possible\n'
-                             '- light-sat      : Perform light SAT reasoning on AND-OR trees\n'
-                             '- lazy           : Allow lazy evaluation of conjunctions. Requires -m MTBDD.'
-                             '- all            : Enable all above optimizations'))
+                             '- gdc-rewrite          : Rewrite existentially quantified equations using GCD rewrite\n'
+                             '- var-bounds           : Simplify (hard) variable bounds if possible\n'
+                             '- stomp-negations      : Push negation as close to atoms as possible\n'
+                             '- light-sat            : Perform light SAT reasoning on AND-OR trees\n'
+                             '- lazy                 : Allow lazy evaluation of conjunctions. Requires -m MTBDD.'
+                             '- minimize-congruences : Minimize congruences terms by replacing multiple terms containin unbound vars with a single term.'
+                             '- iso-conflics         : Detect conflicts in conjunctive clauses (and A (not B)) if A B are ismorphic modulo bound variable renaming (approximate).'
+                             '- all                  : Enable all above optimizations'))
 
 
 subparsers = argparser.add_subparsers(help='Runner operation')
@@ -344,6 +348,8 @@ for opt in args.optimizations:
         solver_config.optimizations.push_negation_towards_atoms = True
         solver_config.optimizations.do_light_sat_reasoning = True
         solver_config.optimizations.do_lazy_evaluation = True
+        solver_config.optimizations.rewrite_congruences_with_unbound_terms = True
+        solver_config.optimizations.detect_isomorphic_conflicts= True
     if opt == 'gcd-rewrite':
         solver_config.optimizations.rewrite_existential_equations_via_gcd = True
     if opt == 'var-bounds':
@@ -354,6 +360,10 @@ for opt in args.optimizations:
         solver_config.optimizations.do_light_sat_reasoning = True
     if opt == 'lazy':
         solver_config.optimizations.do_lazy_evaluation = True
+    if opt == 'iso-conflicts':
+        solver_config.optimizations.detect_isomorphic_conflicts = True
+    if opt == 'minimize-congruences':
+        solver_config.optimizations.rewrite_existential_equations_via_gcd = True
 
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""

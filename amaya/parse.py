@@ -239,21 +239,33 @@ def build_syntax_tree(tokens: Iterable[str]):
     return stack
 
 
-def optimize_formula_structure(formula_to_evaluate: AST_Node) -> AST_Node:
+def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Var, VarInfo]) -> AST_Node:
     if solver_config.optimizations.simplify_variable_bounds:
         logger.debug(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
         logger.debug(f'Simplified formula: %s', formula_to_evaluate)
 
     if solver_config.optimizations.rewrite_existential_equations_via_gcd:
-        logger.debug(f'Rewriting a: %s', formula_to_evaluate)
+        logger.debug(f'Rewriting: %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.simplify_unbounded_equations(formula_to_evaluate)
         logger.debug(f'Simplified formula: %s', formula_to_evaluate)
+
+    if solver_config.optimizations.rewrite_congruences_with_unbound_terms:
+        logger.debug(f'Rewriting congruence terms containing unbounded variables:  %s', formula_to_evaluate)
+        formula_to_evaluate = var_bounds_lib.simplify_congruences_on_unbounded_existential_vars(formula_to_evaluate, var_table)
+        logger.debug(f'Congruences rewritten. Result:  %s', formula_to_evaluate)
 
     formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
 
     if solver_config.optimizations.push_negation_towards_atoms:
+        logger.debug(f'Pushing negation towards atoms on:  %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.push_negations_towards_atoms(formula_to_evaluate)
+        logger.debug(f'Negations pushed towards atoms. Result:  %s', formula_to_evaluate)
+
+    if solver_config.optimizations.detect_isomorphic_conflicts:
+        logger.debug(f'Detecting conflicts in conjuctive clauses using formula isomorphism:  %s', formula_to_evaluate)
+        formula_to_evaluate = var_bounds_lib.detect_conflics_on_isomorphic_fragments(formula_to_evaluate)
+        logger.debug(f'Conflict detection done. Result:  %s', formula_to_evaluate)
 
     if solver_config.optimizations.do_light_sat_reasoning:
         formula_to_evaluate = var_bounds_lib.convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(formula_to_evaluate)
@@ -357,13 +369,13 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
 
+            assert formula_to_evaluate
+            formula_to_evaluate = optimize_formula_structure(formula_to_evaluate, var_table)
+
             if solver_config.preprocessing.show_preprocessed_formula:
                 import pprint, sys
                 pprint.pprint(formula_to_evaluate, stream=sys.stdout)
                 sys.exit(0)
-
-            assert formula_to_evaluate
-            formula_to_evaluate = optimize_formula_structure(formula_to_evaluate)
 
             alphabet = LSBF_Alphabet.from_vars(var_table.keys())
 

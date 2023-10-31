@@ -62,6 +62,7 @@ class FrozenRelation:
 class VarInfo:
     name: str
     type: VariableType
+    comment: Optional[str] = None
 
 
 class Scoper:

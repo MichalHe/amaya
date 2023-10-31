@@ -18,6 +18,7 @@ from typing import (
     Tuple,
     Union,
 )
+from amaya.preprocessing.eval import VarInfo
 
 from amaya.relations_structures import (
     AST_Atom,
@@ -28,6 +29,11 @@ from amaya.relations_structures import (
     Congruence,
     Relation,
     Var,
+    VariableType,
+    ast_get_binding_list,
+    ast_get_node_type,
+    make_and_node,
+    make_exists_node,
 )
 
 from amaya import logger
@@ -684,3 +690,239 @@ def _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) -
 def convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) -> AST_Node:
     result = _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast)
     return result
+
+
+def _rewrite_congruence_on_unbund_vars(exists_and_tree: AST_NaryNode, var_table: Dict[Var, VarInfo]) -> AST_NaryNode:
+    bound_vars = ast_get_binding_list(exists_and_tree)
+    and_node = exists_and_tree[2]
+    leaves = and_node[1:]  # type:ignore
+
+    relations: List[Relation] = [leaf for leaf in leaves if isinstance(leaf, Relation)]  # type: ignore
+    congruences: List[Congruence] = [leaf for leaf in leaves if isinstance(leaf, Congruence)]  # type: ignore
+
+    # Collect existential variables that have no bounds on them
+    vars_with_no_bounds: List[Var] = []
+    for var in bound_vars:
+        no_bound: bool = all(var not in rel.vars for rel in relations)  # Underapproximation?
+        if no_bound:
+            vars_with_no_bounds.append(var)
+
+    new_congruences: List[Congruence] = []
+    new_bound_vars: List[Var] = []
+    for congruence in congruences:
+        # separate the congruence (a.x + b.y ~ k) where y are unbound vars
+        unbound_vars, unbound_coefs = [], []
+        for coef, var in zip(congruence.coefs, congruence.vars):
+            if var in vars_with_no_bounds:
+                unbound_vars.append(var)
+                unbound_coefs.append(coef)
+
+        if not unbound_vars:
+            new_congruences.append(congruence)
+            continue
+
+        coef_gcd = math.gcd(*unbound_coefs)
+        if coef_gcd == 1:  # Drop the congruence altogether
+            continue
+
+        coef_modulus_gcd = math.gcd(coef_gcd, congruence.modulus)
+        if coef_modulus_gcd == 1:  # The term b.y can generate the entire ring (Z_mod, +, *)
+            continue
+
+        # Modulus and GCD have some common divisor > 1, meaning that the rhs (-b.y + k) can generate only
+        # some cyclic subset of Z_mod and we cannot further simplify the songruence
+        if len(unbound_vars) == 1:
+            new_congruences.append(congruence)
+            continue
+
+        # Replace the term b.y with GCD.y' where y' is a new variable. This helps to speed up the automaton
+        # construction as the construction of A(congruence) is exponential in #vars
+
+        # We can avoid introducing new variables
+        coef = coef_gcd
+        new_var = vars_with_no_bounds[0]
+        var_table[new_var].comment = 'Reused to rewrite congruence(s) on unbound vars'
+
+        lin_terms = [term for term in congruence.linear_terms() if term[1] not in unbound_vars]
+        lin_terms.append((coef, new_var))
+        lin_terms = sorted(lin_terms, key=lambda term: term[1])  # Sort by variable id
+
+        vars = [term[1] for term in lin_terms]
+        coefs = [term[0] for term in lin_terms]
+
+        new_congruences.append(Congruence(vars=vars, coefs=coefs, rhs=congruence.rhs, modulus=congruence.modulus))
+        new_bound_vars.append(new_var)
+
+    # Variables that were part of some relations were not considered unbound and therefore they must be stil part of the quantifier
+    new_binding_list = [var for var in bound_vars if var not in vars_with_no_bounds] + new_bound_vars
+    new_and_node = make_and_node([*relations, *new_congruences])
+    new_node = make_exists_node(new_binding_list, new_and_node)
+    return new_node
+
+
+def _simplify_congruences_on_unbounded_existential_vars(ast: AST_Node, var_table: Dict[Var, VarInfo]) -> AST_Node:
+    if not isinstance(ast, list):
+        return ast
+
+    node_type = ast_get_node_type(ast)
+
+    if node_type == 'exists':
+        # Perform lookahead to check whether we have (exists Vars (and Atoms))
+        child: AST_Node = ast[2]
+        if not isinstance(child, list):
+            return ast
+
+        child_type = ast_get_node_type(child)
+        if child_type == 'and':
+            leaves = child[1:]
+            if not all(isinstance(leaf, (Relation, Congruence)) for leaf in leaves):
+                return ['exists', ast[1], _simplify_congruences_on_unbounded_existential_vars(ast[2], var_table)]
+
+            return _rewrite_congruence_on_unbund_vars(ast, var_table)
+        return ['exists', ast[1], _simplify_congruences_on_unbounded_existential_vars(ast[2], var_table)]
+
+    # The node is some N-ary
+    rewritten_children = tuple(_simplify_congruences_on_unbounded_existential_vars(child, var_table) for child in ast[1:])
+    return [node_type, *rewritten_children]
+
+
+def simplify_congruences_on_unbounded_existential_vars(ast: AST_Node, var_table: Dict[Var, VarInfo]) -> AST_Node:
+    ret = _simplify_congruences_on_unbounded_existential_vars(ast, var_table)
+    return ret
+
+
+def _collect_used_free_variables(ast: AST_Node, bound_vars: Set[Var]) -> Set[Var]:
+    if isinstance(ast, Var):
+        return {ast}
+    if isinstance(ast, (Relation, Congruence)):
+        return set(ast.vars).difference(bound_vars)
+    if not isinstance(ast, list):
+        return set()
+
+    node_type = ast_get_node_type(ast)
+    if node_type == 'exists':
+        newly_bound_vars = ast_get_binding_list(ast)
+        new_bound_vars = bound_vars.union(newly_bound_vars)
+        return _collect_used_free_variables(ast[2], new_bound_vars)
+
+    return functools.reduce(set.union, (_collect_used_free_variables(child, bound_vars) for child in ast[1:]), set())
+
+
+def _are_exists_and_trees_isomorphic(left: AST_Node, right: AST_Node, isomorphism: Dict[Var, Var]) -> bool:
+    if type(left) != type(right):
+        return False
+
+    if isinstance(left, (Relation, Congruence)):
+        assert isinstance(right, (Relation, Congruence))
+
+        if len(left.vars) != len(right.vars):
+            return False
+
+        if sorted(left.coefs) != sorted(right.coefs):
+            return False
+
+        left_vars_to_coefs: Dict[Var, int] = {var:coef for coef, var in left.linear_terms()}
+        right_vars_to_coefs: Dict[Var, int] = {var:coef for coef, var in right.linear_terms()}
+
+        for left_var in left.vars:
+            left_coef = left_vars_to_coefs[left_var]
+            right_var = isomorphism[left_var]
+            right_coef = right_vars_to_coefs[right_var]
+
+            if left_coef != right_coef:
+                return False
+        return True
+
+    if isinstance(left, BoolLiteral):
+        assert isinstance(right, BoolLiteral)
+        return left.value == right.value
+
+    if not isinstance(left, list):
+        logger.warning('Unhandled branch in isomorphism checking, assumimg that the trees are not isomorphic')
+        return False
+
+    assert isinstance(left, list)
+    assert isinstance(right, list)
+
+    left_node_type  = ast_get_node_type(left)
+    right_node_type = ast_get_node_type(right)
+
+    if left_node_type != right_node_type:
+        return False
+
+    if len(left) != len(right):
+        return False
+
+    if left_node_type == 'exists':
+        left_bindings = ast_get_binding_list(left)
+        right_bindings = ast_get_binding_list(right)
+        if len(left_bindings) != len(right_bindings):
+            return False
+
+        # @Incomplete: Extend the isomorphism in a naive fashion
+        isomorphism = dict(isomorphism)
+        for left_var, right_var in zip(left_bindings, right_bindings):
+            isomorphism[left_var] = right_var
+
+        return _are_exists_and_trees_isomorphic(left[2], right[2], isomorphism)
+
+    return all(_are_exists_and_trees_isomorphic(left_child, right_child, isomorphism) for left_child, right_child in zip(left[1:], right[1:]))
+
+
+def are_exists_and_trees_isomorphic(left: AST_Node, right: AST_Node, free_vars: Iterable[Var]) -> bool:
+    isomorphism = {free_var: free_var for free_var in free_vars}
+    are_isomorphic = _are_exists_and_trees_isomorphic(left, right, isomorphism)
+    return are_isomorphic
+
+
+def _check_if_children_are_conflicting(children: List[AST_NaryNode], free_vars: Tuple[Var, ...]) -> bool:
+    positive, negative = [], []
+    for child in children:
+        if ast_get_node_type(child) == 'not':
+            negative.append(child)
+        else:
+            positive.append(child)
+
+    # @Incomplete: There could be other clauses that might nothing to do with the conflict
+    if len(positive) != 1 or len(negative) != 1:
+        return False
+
+    neg_node = negative[0][1] # Strip the leading 'not'
+    return are_exists_and_trees_isomorphic(positive[0], neg_node, free_vars)
+
+
+def _detect_conflics_on_isomorphic_fragments(ast: AST_Node) -> AST_Node:
+    """ Detects conflicting conjunctive clauses that conflict because of different renaming of bound vars. """
+    if not isinstance(ast, list):
+        return ast
+
+    node_type = ast_get_node_type(ast)
+    if node_type == 'exists':
+        return ['exists', ast[1], _detect_conflics_on_isomorphic_fragments(ast[2])]
+
+    if node_type == 'and':
+        rewritten_children = [_detect_conflics_on_isomorphic_fragments(child) for child in ast[1:]]
+
+        children: List[AST_NaryNode] = [child for child in rewritten_children if isinstance(child, list)]
+        free_vars_to_children: Dict[Tuple[Var, ...], List[AST_NaryNode]] = defaultdict(list)
+        for child in children:
+            free_vars = tuple(sorted(_collect_used_free_variables(child, set())))
+            free_vars_to_children[free_vars].append(child)
+
+        for free_vars, children_with_same_free_vars in free_vars_to_children.items():
+            # @Incomplete: There could be other clauses that might nothing to do with the conflict, for now we focus on (and A (not A))
+            if len(children_with_same_free_vars) > 2:
+                continue
+
+            if _check_if_children_are_conflicting(children_with_same_free_vars, free_vars):
+                return BoolLiteral(value=False)
+
+        # No clauses were found conflicting
+        return ['and', *rewritten_children]
+
+    return [ast[0], *(_detect_conflics_on_isomorphic_fragments(child) for child in ast[1:])]
+
+
+def detect_conflics_on_isomorphic_fragments(ast: AST_Node) -> AST_Node:
+    """ Detects conflicting conjunctive clauses that conflict because of different renaming of bound vars. """
+    return _detect_conflics_on_isomorphic_fragments(ast)

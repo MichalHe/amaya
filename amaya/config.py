@@ -42,6 +42,16 @@ class OptimizationsConfig:
     do_gcd_divide: bool = True
     """ Divide atoms by the GCD of their coefficients. """
 
+    rewrite_congruences_with_unbound_terms: bool = False
+    """ Rewrite congruences a.x + b.y ~ k into a.x + gcd(b).y' ~ k """
+
+    detect_isomorphic_conflicts: bool = False
+    """
+    Detect conflicts in (and A (not A)) if A and not A are the same modulo bound variable renaming.
+
+    Isomorphism is underapproximated at the moment using the first naive permutation of quantified variables.
+    """
+
 
 @dataclass
 class PreprocessingConfig:

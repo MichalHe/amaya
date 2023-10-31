@@ -48,6 +48,10 @@ class Relation(object):
         """Returns true if all relation variable coefficients are zero."""
         return all(coef == 0 for coef in self.coefs)
 
+    def linear_terms(self) -> Generator[Tuple[int, Var], None, None]:
+        for coef, var in zip(self.coefs, self.vars):
+            yield (coef, var)
+
     def is_always_satisfied(self) -> bool:
         """
         Returns true if all the variable cooeficients are zero and the relation is satisfied."""
@@ -155,6 +159,9 @@ class Congruence:
     rhs: int
     modulus: int
 
+    def linear_terms(self) -> Generator[Tuple[int, Var], None, None]:
+        for term in zip(self.coefs, self.vars):
+            yield term
 
 @dataclass
 class BoolLiteral:
@@ -189,22 +196,19 @@ def ast_get_binding_list(exists_node: AST_NaryNode) -> List[Var]:
     return binding_list
 
 
-def make_exists_node(binding_list: List[Tuple[str, str]], subformula: AST_Node) -> AST_Node:
-    # @Note: We convert the tuples into lists because the rest of the solver might expect so
-    # #      however we should have a more proper types for the entire AST
-    _binding_list = [list(binding) for binding in binding_list]
-    return [AST_Node_Names.EXISTS.value, _binding_list, subformula]  # type: ignore
+def make_exists_node(bound_vars: List[Var], subformula: AST_Node) -> AST_NaryNode:
+    return [AST_Node_Names.EXISTS.value, list(bound_vars), subformula]  # type: ignore
 
 
-def make_and_node(subformulae: List[AST_Node]) -> AST_Node:
+def make_and_node(subformulae: List[AST_Node]) -> AST_NaryNode:
     return [AST_Node_Names.AND.value, *subformulae]
 
 
-def make_or_node(subformulae: List[AST_Node]) -> AST_Node:
+def make_or_node(subformulae: List[AST_Node]) -> AST_NaryNode:
     return [AST_Node_Names.OR.value, *subformulae]
 
 
-def make_not_node(subformula: AST_Node) -> AST_Node:
+def make_not_node(subformula: AST_Node) -> AST_NaryNode:
     return [AST_Node_Names.NOT.value, subformula]
 
 
