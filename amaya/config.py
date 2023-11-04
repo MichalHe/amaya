@@ -101,5 +101,8 @@ class SolverConfig(object):
     disambiguation_scope_separator: str = '_'
     """String to use when disambiguating quantified variables, producing new var names of the form {old_name}{separator}{scope_id}."""
 
+    report_highly_effective_minimizations: bool = False
+    """Log subformula for which was the minimization highly effective (the resuld is smaller than 0.2* original size) """
+
 
 solver_config = SolverConfig()

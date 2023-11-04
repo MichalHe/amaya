@@ -489,17 +489,20 @@ def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _de
         return run_evaluation_procedure(operand_ast, ctx, _debug_recursion_depth=_depth+1)
 
 
-def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
+def minimize_automaton_if_configured(ast: AST_NaryNode, nfa: NFA, ctx: EvaluationContext) -> NFA:
     """
     Perform the configured minimization on given NFA.
 
     Minimization result is monitored for runtime, and its results are emitted to context's introspection handle
     for visualization.
 
+    :param ast: Formula encoded by the given nfa.
     :param nfa: Automaton to minimize.
     :param ctx: Evaluation context that will store information about measured timings.
     :returns: Minimized DFA equivalent to the given NFA.
     """
+    input_automaton_size = len(nfa.states)
+
     if solver_config.minimization_method == MinimizationAlgorithms.NONE:
         return nfa
 
@@ -510,11 +513,19 @@ def minimize_automaton_if_configured(nfa: NFA, ctx: EvaluationContext) -> NFA:
         if nfa.automaton_type != AutomatonType.DFA:
             ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, nfa, None)
             nfa = nfa.determinize()
+            input_automaton_size = max(len(nfa.states), input_automaton_size)
             ctx.stats_operation_ends(nfa)
         minimized_dfa = nfa.minimize_hopcroft()
 
     logger.info('Minimization applied - inputs has %d states, result %d.', len(nfa.states), len(minimized_dfa.states))
     ctx.stats_operation_ends(minimized_dfa)
+
+    if solver_config.report_highly_effective_minimizations:
+        if len(minimized_dfa.states) / input_automaton_size < 0.2:
+            import pprint, sys
+            print('---- Ultra effective minimization. AST:', file=sys.stderr)
+            pprint.pprint(ast, stream=sys.stderr)
+
     return minimized_dfa
 
 
@@ -541,7 +552,7 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
 
     reduction_result = get_automaton_for_operand(first_operand, ctx, _depth)
 
-    for next_operand in expr[2:]:
+    for operand_idx, next_operand in enumerate(expr[2:]):
         if reduction_operation == ParsingOperation.NFA_INTERSECT and not reduction_result.final_states:
             return reduction_result
 
@@ -554,7 +565,7 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
         # reduction_result = reduction_result.determinize()
         ctx.stats_operation_ends(reduction_result)
 
-        reduction_result = minimize_automaton_if_configured(reduction_result, ctx)
+        reduction_result = minimize_automaton_if_configured(expr[:operand_idx+2], reduction_result, ctx)
 
         emit_evaluation_progress_info((f' >> {reduction_operation}(lhs, rhs) '
                                        f'(result size: {len(reduction_result.states)}, '
@@ -634,7 +645,7 @@ def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: in
     operand = operand.complement()
     ctx.stats_operation_ends(operand)
 
-    operand = minimize_automaton_if_configured(operand, ctx)
+    operand = minimize_automaton_if_configured(not_expr, operand, ctx)
 
     emit_evaluation_progress_info(f' >> complement(operand) - (result size: {len(operand.states)})', _depth)
     return operand
@@ -672,7 +683,7 @@ def try_lazy_construct_conjunction(exists_node: AST_NaryNode, ctx: EvaluationCon
     ctx.stats_operation_ends(nfa)
 
     logger.info("Lazy construnction done, result has %d states", len(nfa.states))
-    nfa = minimize_automaton_if_configured(nfa, ctx)
+    nfa = minimize_automaton_if_configured(exists_node, nfa, ctx)
     return nfa
 
 
@@ -710,7 +721,7 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
         ctx.stats_operation_ends(nfa)
         logger.debug(f'Variable {var} projected away.')
 
-    nfa = minimize_automaton_if_configured(nfa, ctx)
+    nfa = minimize_automaton_if_configured(exists_expr, nfa, ctx)
 
     emit_evaluation_progress_info(f' >> projection({bound_vars}) (result_size: {len(nfa.states)})', _depth)
     return nfa

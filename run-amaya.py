@@ -229,6 +229,11 @@ get_sat_subparser.add_argument('--stats-file',
                                dest='stats_file',
                                help='Collect statistics and output them into the specified file (implies --collect-stats).')
 
+get_sat_subparser.add_argument('--hint-research',
+                               action='store_true',
+                               default=False,
+                               help='Display evaluation phenomena showing optimization potential (e.g. highly effective minimizations).')
+
 benchmark_subparser = subparsers.add_parser('benchmark')
 benchmark_subparser.add_argument('--add-file',
                                  metavar='FILE',
@@ -451,6 +456,8 @@ def run_in_getsat_mode(args) -> bool:
     solver_config.vis_display_only_free_vars = args.vis_display_only_free_vars
     solver_config.current_formula_path = os.path.abspath(args.input_file)
     solver_config.preprocessing.show_preprocessed_formula = args.show_preprocessed_formula
+
+    solver_config.report_highly_effective_minimizations = args.hint_research
 
     def write_created_automaton_to_folder(introspection_info: parse.IntrospectionData):
         filename = f'{introspection_info.operation_id}-{introspection_info.operation.value}.{args.output_format}'
