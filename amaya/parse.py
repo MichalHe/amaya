@@ -375,6 +375,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             if solver_config.preprocessing.show_preprocessed_formula:
                 import pprint, sys
                 pprint.pprint(formula_to_evaluate, stream=sys.stdout)
+                pprint.pprint(var_table)
                 sys.exit(0)
 
             alphabet = LSBF_Alphabet.from_vars(var_table.keys())

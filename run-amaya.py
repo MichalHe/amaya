@@ -150,17 +150,29 @@ argparser.add_argument('-O',
                                 'lazy',
                                 'minimize-congruences',
                                 'iso-conflicts',
+                                'linearize-similar-mod-terms',
                                 'all',
                        ],
                        help=('Controls preprocessing transformations applied on input the formula. Options:\n'
-                             '- gdc-rewrite          : Rewrite existentially quantified equations using GCD rewrite\n'
-                             '- var-bounds           : Simplify (hard) variable bounds if possible\n'
-                             '- stomp-negations      : Push negation as close to atoms as possible\n'
-                             '- light-sat            : Perform light SAT reasoning on AND-OR trees\n'
-                             '- lazy                 : Allow lazy evaluation of conjunctions. Requires -m MTBDD.'
-                             '- minimize-congruences : Minimize congruences terms by replacing multiple terms containin unbound vars with a single term.'
-                             '- iso-conflics         : Detect conflicts in conjunctive clauses (and A (not B)) if A B are ismorphic modulo bound variable renaming (approximate).'
-                             '- all                  : Enable all above optimizations'))
+                             '> gdc-rewrite:\n'
+                             '      Rewrite existentially quantified equations using GCD rewrite\n'
+                             '> var-bounds:\n'
+                             '      Simplify (hard) variable bounds if possible\n'
+                             '> stomp-negations:\n'
+                             '      Push negation as close to atoms as possible\n'
+                             '> lazy:\n'
+                             '      Allow lazy evaluation of conjunctions. Requires -m MTBDD.\n'
+                             '> light-sat:\n'
+                             '      Perform light SAT reasoning on AND-OR trees\n'
+                             '> linearize-similar-mod-terms:\n'
+                             '      Introduce linear relations between similar mod terms instead of multiple congurences.\n'
+                             '         x=(mod x 5) y=(mod (+ 1 x) 5) would lead to y=x+1 (other linearization branches are left out)\n'
+                             '> minimize-congruences:\n'
+                             '      Minimize congruences terms by replacing multiple terms containin unbound vars with a single term.\n'
+                             '> iso-conflics:\n'
+                             '      Detect conflicts in conjunctive clauses (and A (not B)) if A B are ismorphic modulo bound variable renaming (approximate).\n'
+                             '> all:\n'
+                             '      Enable all above optimizations'))
 
 
 subparsers = argparser.add_subparsers(help='Runner operation')
@@ -354,7 +366,8 @@ for opt in args.optimizations:
         solver_config.optimizations.do_light_sat_reasoning = True
         solver_config.optimizations.do_lazy_evaluation = True
         solver_config.optimizations.rewrite_congruences_with_unbound_terms = True
-        solver_config.optimizations.detect_isomorphic_conflicts= True
+        solver_config.optimizations.detect_isomorphic_conflicts = True
+        solver_config.optimizations.linearize_similar_mod_terms = True
     if opt == 'gcd-rewrite':
         solver_config.optimizations.rewrite_existential_equations_via_gcd = True
     if opt == 'var-bounds':
@@ -369,6 +382,8 @@ for opt in args.optimizations:
         solver_config.optimizations.detect_isomorphic_conflicts = True
     if opt == 'minimize-congruences':
         solver_config.optimizations.rewrite_existential_equations_via_gcd = True
+    if opt == 'linearize-similar-mod-terms':
+        solver_config.optimizations.linearize_similar_mod_terms = True
 
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""

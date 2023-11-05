@@ -264,10 +264,11 @@ class NonlinTermGraph:
         while work_list:
             node = work_list.pop(-1)
 
-            if node.was_dropped:
-                # In case the root node is dependent on multiple variables quantified on the same level
-                # the node might already be dropped
-                continue
+            # @Problematic: WTF?
+            # if node.was_dropped:
+            #     # In case the root node is dependent on multiple variables quantified on the same level
+            #     # the node might already be dropped
+            #     continue
 
             node.was_dropped = True
             for dependent_node in node.dependent_terms:
@@ -275,6 +276,7 @@ class NonlinTermGraph:
                     dependent_node.was_dropped = True
                     work_list.append(dependent_node)
                     dropped_nodes.append(dependent_node)
+
 
         return dropped_nodes
 
@@ -467,7 +469,7 @@ def is_any_node_of_type(types: Iterable[str], node1, node2):
 @dataclass
 class RewriteInstructions:
     placeholder_replacements: Dict[Var, Tuple[LinTerm, ...]] = field(default_factory=dict)
-    new_atoms: List[AST_Atom] = field(default_factory=list)
+    new_formulae: List[AST_Node] = field(default_factory=list)
     vars_to_quantify: List[Var] = field(default_factory=list)
 
 
@@ -486,7 +488,7 @@ def add_two_var_rewrite_instructions(rewrite_instructions: RewriteInstructions, 
 
     body_decomposition = Relation(vars=vars, coefs=coefs, rhs=-node.body.lin_term_constant, predicate_symbol='=')
 
-    rewrite_instructions.new_atoms.extend((greater_than_zero, smaller_than_modulus, body_decomposition))
+    rewrite_instructions.new_formulae.extend((greater_than_zero, smaller_than_modulus, body_decomposition))
 
 
 def add_quotient_single_variable_rewrite_instructions(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, quotient: Var):
@@ -507,7 +509,7 @@ def add_quotient_single_variable_rewrite_instructions(rewrite_instructions: Rewr
     rhs = abs(node.body.nonlin_constant) - 1 - node.body.lin_term_constant
     smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=rhs, predicate_symbol='<=')
 
-    rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus])
+    rewrite_instructions.new_formulae.extend([greater_than_zero, smaller_than_modulus])
 
 
 def add_reminder_single_variable_rewrite_using_quotient(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, quotient: Var):
@@ -530,7 +532,7 @@ def add_reminder_single_variable_rewrite_using_quotient(rewrite_instructions: Re
     rhs = abs(node.body.nonlin_constant) - 1 - node.body.lin_term_constant
     smaller_than_modulus = Relation(vars=vars, coefs=coefs, rhs=rhs, predicate_symbol='<=')
 
-    rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus])
+    rewrite_instructions.new_formulae.extend([greater_than_zero, smaller_than_modulus])
 
 
 def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, reminder: Var):
@@ -551,11 +553,81 @@ def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: 
     assert 0 <= rhs and rhs < modulus
     congruence = Congruence(vars=vars, coefs=coefs, rhs=rhs, modulus=abs(node.body.nonlin_constant))
 
-    rewrite_instructions.new_atoms.extend([greater_than_zero, smaller_than_modulus, congruence])
+    rewrite_instructions.new_formulae.extend([greater_than_zero, smaller_than_modulus, congruence])
+
+
+def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var, int], node: NonlinTermNode, rewrite_instructions: RewriteInstructions):
+    emitted_var, emitted_var_offset = emitted_reminder_with_offset
+    # both Emitted and New are in [0, M-1] and we have   E + E_offset ~= N + N_offset
+    assert node.mod_rewrite_var
+    new_var: Var = node.mod_rewrite_var
+    new_var_offset = (-node.body.lin_term_constant) % node.body.nonlin_constant
+
+    # combine offset into total offset: N ~= E + (E_offset - N_offset)
+    total_offset = (-emitted_var_offset + new_var_offset) % node.body.nonlin_constant
+
+    # we have N = f(E) = E + total_offset, but due to congruence there is a nonlinear jump - find the spot where to create disjunction
+    zero_point = node.body.nonlin_constant - total_offset
+
+    def fn_case(low: int, high: int, fn_dependence: Relation):
+        if low == high:
+            eq = Relation(vars=[emitted_var], coefs=[1], rhs=low, predicate_symbol='=')
+            return ['and', eq, fn_dependence]
+        low_bound  = Relation(vars=[emitted_var], coefs=[-1], rhs=low, predicate_symbol='<=')
+        high_bound = Relation(vars=[emitted_var], coefs=[1], rhs=high, predicate_symbol='<=')
+        return ['and', low_bound, high_bound, fn_dependence]
+
+    def fn_case_for_fixed_value(val: int):
+        emitted_var_val = Relation(vars=[emitted_var], coefs=[1], rhs=val, predicate_symbol='=')
+        new_var_rhs     = (val+total_offset) % node.body.nonlin_constant
+        new_var_val     = Relation(vars=[new_var], coefs=[1], rhs=new_var_rhs, predicate_symbol='=')
+        return ['and', emitted_var_val, new_var_val]
+
+    modulus = node.body.nonlin_constant
+    fn_terms = sorted([(emitted_var, 1), (new_var, -1)], key=lambda it: it[0])
+    fn_vars  = [it[0] for it in fn_terms]
+    fn_coefs = [it[1] for it in fn_terms]
+    fn         = Relation(vars=fn_vars, coefs=fn_coefs, rhs=total_offset, predicate_symbol='=')
+    shifted_fn = Relation(vars=fn_vars, coefs=fn_coefs, rhs=total_offset-modulus, predicate_symbol='=')
+
+    left_interval = (0, zero_point-1)
+    right_interval = (zero_point, modulus-1)
+
+    if left_interval[0] == left_interval[1]:
+        result_fn = ['or', fn_case_for_fixed_value(left_interval[0]), fn_case(right_interval[0], right_interval[1], shifted_fn)]
+    elif right_interval[0] == right_interval[1]:
+        result_fn = ['or', fn_case(left_interval[0], left_interval[1], fn), fn_case_for_fixed_value(right_interval[0])]
+    else:
+        result_fn = ['or', fn_case(0, zero_point-1, fn), fn_case(zero_point, modulus-1, shifted_fn)]
+
+    rewrite_instructions.new_formulae.append(result_fn)
+    rewrite_instructions.vars_to_quantify.append(new_var)
+
+    lower_bound = Relation(vars=[new_var], coefs=[-1], rhs=0, predicate_symbol='<=')
+    upper_bound = Relation(vars=[new_var], coefs=[1], rhs=modulus-1, predicate_symbol='<=')
+    rewrite_instructions.new_formulae.append(['and', lower_bound, upper_bound])
 
 
 def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNode], scoper: Scoper) -> RewriteInstructions:
     rewrite_instructions = RewriteInstructions()
+
+    # If there are multiple reminders with the same body nonlin term, but different absolute part, e.g.
+    # (mod x 5) and (mod (x + 1) 5), then it is sufficient to synthetise only one constraint, because
+    #    (mod x 5)       -->       x ~= x_0 (mod 5) && 0 <= x_0 <= 4
+    #    (mod (x + 1) 5) --> (x + 1) ~= x_1 (mod 5) && 0 <= x_1 <= 4
+    # Or equivalently:
+    #    (mod (x + 1) 5) -->       x ~= x_1 + 4 (mod 5) && 0 <= x_1 <= 4
+    # But then
+    #    x = x_0 + 5k_0
+    #    x = x_1 + 5k_1 + 4
+    # So
+    #    x_0 ~= x_1 + 4  (mod 5)   <=>  x_0 + 1 = x_1
+    # As both reminders are in [0, 4] we can linearize
+    # x_1 = f(x_0) = x_1 + 1
+    # f([0,4]) = [1,4] + [0]  (we have to do a linearization split)
+    NonlinTermWithoutAbs = Tuple[Tuple[Tuple[Var, int], ...], int]
+    VarWithOffset = Tuple[Var, int]  # To represent RHS of the already introduced congruence
+    nonlin_mod_terms_emitted: Dict[NonlinTermWithoutAbs, VarWithOffset] = {}
 
     for node in dropped_nodes:
         if node.div_rewrite_var is not None and node.mod_rewrite_var is not None:
@@ -578,8 +650,20 @@ def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNod
             add_quotient_single_variable_rewrite_instructions(rewrite_instructions, node, quotient=quotient)
 
         elif node.mod_rewrite_var is not None:
+            term_without_abs = (node.body.lin_terms, node.body.nonlin_constant)
+            if term_without_abs in nonlin_mod_terms_emitted and solver_config.optimizations.linearize_similar_mod_terms:
+                # We have already a variable that captures (mod (<LinBody> + K) M), instead of dropping another congruence
+                # we can just emit a linearized var for current node
+                emitted_var_with_offset = nonlin_mod_terms_emitted[term_without_abs]
+                rewrite_reminder_using_linearization(emitted_var_with_offset, node, rewrite_instructions)
+                continue
+
             reminder = node.mod_rewrite_var
             rewrite_instructions.vars_to_quantify.append(reminder)
+
+            # Store info in case there will be nonlinear terms that can be linearized
+            offset = (-node.body.lin_term_constant % node.body.nonlin_constant)
+            nonlin_mod_terms_emitted[term_without_abs] = (reminder, offset)
 
             if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
                 quotient = scoper.put_var_into_current_scope('dummy_quotient', add_id_to_name=True)  # Make a new var
@@ -699,7 +783,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
 
         rewrite_instructions = determine_how_to_rewrite_dropped_terms(dropped_nodes, scoper)
 
-        new_atoms = rewrite_instructions.new_atoms
+        new_atoms = rewrite_instructions.new_formulae
 
         if dropped_nodes:
             if isinstance(child, list) and child[0] == 'and':
@@ -760,7 +844,7 @@ def convert_ast_into_evaluable_form(ast: Raw_AST, global_symbols: Iterable[Funct
     assert dropped_nodes
 
     rewrite_instructions = determine_how_to_rewrite_dropped_terms(dropped_nodes, scoper)
-    new_atoms = rewrite_instructions.new_atoms
+    new_atoms = rewrite_instructions.new_formulae
 
-    new_ast = ['exists', rewrite_instructions.vars_to_quantify, ['and', new_ast, *rewrite_instructions.new_atoms]]  # type: ignore
+    new_ast = ['exists', rewrite_instructions.vars_to_quantify, ['and', new_ast, *rewrite_instructions.new_formulae]]  # type: ignore
     return new_ast, scoper.var_table

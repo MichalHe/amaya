@@ -52,6 +52,9 @@ class OptimizationsConfig:
     Isomorphism is underapproximated at the moment using the first naive permutation of quantified variables.
     """
 
+    linearize_similar_mod_terms: bool = False
+    """Introduce a linear relations between two variables for similar mod terms instead of using congruences."""
+
 
 @dataclass
 class PreprocessingConfig:
