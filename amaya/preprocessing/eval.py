@@ -357,7 +357,13 @@ def normalize_expr(ast: Raw_AST,
         lin_term, dependent_terms, support = normalize_expr(ast[1], nonlinear_term_graph, scoper)
         nonlin_constant, _, _ = normalize_expr(ast[2], nonlinear_term_graph, scoper)
         lin_terms = tuple(sorted(lin_term.linear_terms.items(), key=lambda var_coef_pair: var_coef_pair[0]))
-        term_body = NonlinTerm(lin_terms=lin_terms, lin_term_constant=lin_term.constant_term,
+
+        constant_term = lin_term.constant_term
+        if node_type == 'mod':
+            # Normalize the offset into [0, M-1]
+            constant_term = (lin_term.constant_term % nonlin_constant.constant_term)
+
+        term_body = NonlinTerm(lin_terms=lin_terms, lin_term_constant=constant_term,
                                type=NonlinTermType(node_type), nonlin_constant=nonlin_constant.constant_term)
 
         term_node = nonlinear_term_graph.make_term_known(term_body, scoper)
@@ -558,6 +564,7 @@ def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: 
 
 def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var, int], node: NonlinTermNode, rewrite_instructions: RewriteInstructions):
     emitted_var, emitted_var_offset = emitted_reminder_with_offset
+
     # both Emitted and New are in [0, M-1] and we have   E + E_offset ~= N + N_offset
     assert node.mod_rewrite_var
     new_var: Var = node.mod_rewrite_var
@@ -659,6 +666,7 @@ def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNod
                 continue
 
             reminder = node.mod_rewrite_var
+
             rewrite_instructions.vars_to_quantify.append(reminder)
 
             # Store info in case there will be nonlinear terms that can be linearized
