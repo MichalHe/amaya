@@ -931,3 +931,165 @@ def _detect_conflics_on_isomorphic_fragments(ast: AST_Node) -> AST_Node:
 def detect_conflics_on_isomorphic_fragments(ast: AST_Node) -> AST_Node:
     """ Detects conflicting conjunctive clauses that conflict because of different renaming of bound vars. """
     return _detect_conflics_on_isomorphic_fragments(ast)
+
+
+
+@dataclass
+class Parent_Context_Var_Values:
+    seen_vars: Set[Var] = field(default_factory=set)
+    asserted_var_values: List[Dict[Var, Value_Interval]] = field(default_factory=lambda: [defaultdict(Value_Interval)])
+
+    def enter_context(self):
+        new_ctx = {}
+        self.asserted_var_values.append(new_ctx)
+
+    def enter_blocking_context(self):
+        new_ctx = {var: Value_Interval() for var in self.seen_vars}
+        self.asserted_var_values.append(new_ctx)
+
+    def lookup_asserted_values(self, var: Var) -> Value_Interval:
+        for ctx in reversed(self.asserted_var_values):
+            if var in ctx:
+                return ctx[var]
+        return Value_Interval()  # [-Inf,Inf]
+
+    def exit_context(self):
+        self.asserted_var_values.pop(-1)
+
+    def assert_new_var_value(self, var: Var, new_interval: Value_Interval):
+        self.seen_vars.add(var)
+
+        active_ctx = self.asserted_var_values[-1]
+        active_ctx[var] = new_interval
+
+
+def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: Parent_Context_Var_Values) -> AST_Node:
+    if isinstance(node, Relation):
+        relation: Relation = node
+
+        if len(relation.vars) > 1:
+            return node
+
+        var, coef = relation.vars[0], relation.coefs[0]
+        rhs = relation.rhs
+
+        if relation.predicate_symbol == '<=':
+            implied_val = math.floor(rhs / coef)
+
+            ctx_vals = contexter.lookup_asserted_values(var)
+
+            if coef < 0:
+                ctx_lower_val = ctx_vals.lower_limit
+                if not ctx_lower_val:
+                    return node
+                if ctx_lower_val > implied_val:  # The relation can be strenghtened
+                    rhs = -ctx_lower_val   # Because coef is negative -x <= k  <-> x >= -k
+                    return Relation(vars=relation.vars, coefs=[-1], rhs=rhs, predicate_symbol='<=')
+            else:  # coef > 0
+                ctx_upper_val = ctx_vals.upper_limit
+                if not ctx_upper_val:
+                    return node
+                if ctx_upper_val < implied_val:  # The relation can be strenghtened
+                    return Relation(vars=relation.vars, coefs=[1], rhs=ctx_upper_val, predicate_symbol='<=')
+            return node
+
+        # relation is an equation
+        if (relation.rhs % coef) != 0:  # -2x = 5
+            return BoolLiteral(False)
+
+        implied_val = relation.rhs // coef  # x = +/- implied_value
+        val_interval = contexter.lookup_asserted_values(var)
+
+        upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
+        lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
+
+        if implied_val < lower or implied_val > upper:
+            return BoolLiteral(False)
+
+        return Relation(vars=[var], coefs=[1], rhs=implied_val, predicate_symbol='=')
+
+    if not isinstance(node, list):  # Congruences, BoolLiterals etc
+        return node
+
+    node_type = ast_get_node_type(node)
+
+    if node_type == 'and':
+        contexter.enter_context()
+
+        children = node[1:]
+        bounds = (child for child in children if isinstance(child, Relation) and len(child.vars) == 1)
+
+        for bound in bounds:
+            var, coef = bound.vars[0], bound.coefs[0]
+            rhs = bound.rhs
+
+            val_interval = contexter.lookup_asserted_values(var)
+
+            if bound.predicate_symbol == '=':
+                if (rhs % coef) != 0:
+                    return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (3x = 5 AND <Subformula>)
+                implied_val = rhs // coef
+
+                upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
+                lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
+
+                if implied_val < lower or implied_val > upper:
+                    return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (x = 0 AND <Subformula>)
+
+                new_interval = Value_Interval(lower_limit=implied_val, upper_limit=implied_val)
+                contexter.assert_new_var_value(var, new_interval)
+                continue
+
+            implied_val = math.floor(rhs / coef)
+
+            if coef < 0:  # Lower limit
+                old_lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
+                new_lower = max(implied_val, old_lower)
+                contexter.assert_new_var_value(var, Value_Interval(new_lower, val_interval.upper_limit))
+            else:  # Upper limit
+                old_upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
+                new_upper = min(implied_val, old_upper)
+                contexter.assert_new_var_value(var, Value_Interval(val_interval.lower_limit, new_upper))
+
+        new_children = [_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:]]
+        contexter.exit_context()
+        return ['and', *new_children]
+
+    if node_type == 'not':
+        if isinstance(node[1], Relation) and node[1].predicate_symbol == '=':
+            # Check if what the negated equation implies is already implied from parent context
+            eq = node[1]
+            var, coef, rhs = eq.vars[0], eq.coefs[0], eq.rhs
+            if (rhs % coef) != 0:
+                return BoolLiteral(True)
+            implied_val = rhs // coef
+
+            val_interval = contexter.lookup_asserted_values(var)
+            upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
+            lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
+
+            # If the implied_value is not included in the interval, then we can just ignore it
+            if implied_val < lower or implied_val > upper:
+                return BoolLiteral(True)
+
+        # Once we've passed through a negation we forget everything about parent context.
+        # alternatively, we would need a ritcher interval domain to precisely handle nagations.
+        contexter.enter_blocking_context()
+        new_node = [node_type, _prune_conjunctions_false_due_to_parent_context(node[1], contexter)]
+        contexter.exit_context()
+        return new_node
+
+    new_children = (_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:])
+    return [node_type, *new_children]
+
+
+def prune_conjunctions_false_due_to_parent_context(root: AST_Node) -> AST_Node:
+    """
+    Remove conjunctions that are false due to them assessing variable values that are falsified in partent contexts.
+
+    For example:
+        (and (>= x 0) (or (and (= x 3) (= y 2)) <Subformula>)) would remove (and (= x 3) (= y  2))
+    """
+    contexter = Parent_Context_Var_Values()
+    result = _prune_conjunctions_false_due_to_parent_context(root, contexter)
+    return result
