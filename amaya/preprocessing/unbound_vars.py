@@ -430,7 +430,7 @@ def drop_negation_if_holding(ast: AST_Node, holding_negation: bool) -> AST_Node:
     return [AST_Node_Names.NOT.value, ast] if holding_negation else ast
 
 
-def _push_negations_towards_atoms(ast: AST_Node, holding_negation) -> AST_Node:
+def _push_negations_towards_atoms(ast: AST_Node, holding_negation: bool) -> AST_Node:
     if isinstance(ast, str):
         return drop_negation_if_holding(ast, holding_negation)
 
@@ -455,7 +455,11 @@ def _push_negations_towards_atoms(ast: AST_Node, holding_negation) -> AST_Node:
 
     node_type: str = ast[0]  # type: ignore
     if node_type == AST_Node_Names.EXISTS.value:
-        return drop_negation_if_holding(ast, holding_negation)
+        if holding_negation:
+            child = _push_negations_towards_atoms(ast[2], False)
+            return ['not', [node_type, ast[1], child]]
+        else:  # Not holding negation
+            return [node_type, ast[1], _push_negations_towards_atoms(ast[2], holding_negation)]
 
     if node_type == AST_Node_Names.AND.value:
         res_node_type = AST_Node_Names.OR.value if holding_negation else AST_Node_Names.AND.value
@@ -483,7 +487,8 @@ def push_negations_towards_atoms(ast: AST_Node) -> AST_Node:
     Example:
         (not (and X (exists Z (Y (Z)))))   --->    (or (not X) (not (exists Z (Y (Z)))))
     """
-    return _push_negations_towards_atoms(ast, holding_negation=False)
+    result = _push_negations_towards_atoms(ast, holding_negation=False)
+    return result
 
 
 @dataclass(frozen=True)
