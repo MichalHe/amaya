@@ -255,12 +255,12 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
         formula_to_evaluate = var_bounds_lib.simplify_congruences_on_unbounded_existential_vars(formula_to_evaluate, var_table)
         logger.debug(f'Congruences rewritten. Result:  %s', formula_to_evaluate)
 
-    formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
-
     if solver_config.optimizations.push_negation_towards_atoms:
         logger.debug(f'Pushing negation towards atoms on:  %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.push_negations_towards_atoms(formula_to_evaluate)
         logger.debug(f'Negations pushed towards atoms. Result:  %s', formula_to_evaluate)
+
+    formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
 
     if solver_config.optimizations.detect_isomorphic_conflicts:
         logger.debug(f'Detecting conflicts in conjuctive clauses using formula isomorphism:  %s', formula_to_evaluate)
@@ -269,6 +269,8 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
 
     if solver_config.optimizations.do_light_sat_reasoning:
         formula_to_evaluate = var_bounds_lib.convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(formula_to_evaluate)
+
+    formula_to_evaluate = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(formula_to_evaluate)
 
     return formula_to_evaluate
 

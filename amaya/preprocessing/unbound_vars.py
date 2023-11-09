@@ -18,7 +18,7 @@ from typing import (
     Tuple,
     Union,
 )
-from amaya.preprocessing.eval import VarInfo
+from amaya.preprocessing.eval import VarInfo, split_lin_terms_into_vars_and_coefs
 
 from amaya.relations_structures import (
     AST_Atom,
@@ -697,28 +697,69 @@ def convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) ->
     return result
 
 
-def _rewrite_congruence_on_unbund_vars(exists_and_tree: AST_NaryNode, var_table: Dict[Var, VarInfo]) -> AST_NaryNode:
+def _collect_variables_present_in_formula(ast: AST_Node) -> Set[Var]:
+    if isinstance(ast, (Relation, Congruence)):
+        return set(ast.vars)
+    if isinstance(ast, Var):
+        return set([ast])
+
+    assert isinstance(ast, list)
+
+    node_type = ast_get_node_type(ast)
+    if node_type == 'exists':
+        return _collect_variables_present_in_formula(ast[2])
+
+    return functools.reduce(set.union, (_collect_variables_present_in_formula(child) for child in ast[1:]), set())
+
+
+def replace_congruence_component_with_term(congruence: Congruence, component: Tuple[Tuple[int, Var]], replace_term: Tuple[int, Var]) -> Congruence:
+    component_vars = tuple(term[1] for term in component)
+
+    new_terms: List[Tuple[int, Var]] = [term for term in congruence.linear_terms() if term[1] not in component_vars]
+    new_terms.append(replace_term)
+    new_terms = sorted(new_terms, key=lambda it: it[1])
+
+    vars, coefs = [], []
+    for coef, var in new_terms:
+        vars.append(var)
+        coefs.append(coef)
+
+    return Congruence(vars=vars, coefs=coefs, rhs=congruence.rhs, modulus=congruence.modulus)
+
+
+
+def _try_rewrite_congruence_on_unbund_vars(exists_and_tree: AST_NaryNode, var_table: Dict[Var, VarInfo]) -> Optional[AST_NaryNode]:
     bound_vars = ast_get_binding_list(exists_and_tree)
     and_node = exists_and_tree[2]
     leaves = and_node[1:]  # type:ignore
 
-    relations: List[Relation] = [leaf for leaf in leaves if isinstance(leaf, Relation)]  # type: ignore
-    congruences: List[Congruence] = [leaf for leaf in leaves if isinstance(leaf, Congruence)]  # type: ignore
+    _used_vars = (_collect_variables_present_in_formula(leaf) for leaf in leaves if not isinstance(leaf, Congruence))
+    used_vars = functools.reduce(set.union, _used_vars, set())
+    bound_vars_used_only_in_congruences = set(bound_vars) - used_vars
 
-    # Collect existential variables that have no bounds on them
-    vars_with_no_bounds: List[Var] = []
-    for var in bound_vars:
-        no_bound: bool = all(var not in rel.vars for rel in relations)  # Underapproximation?
-        if no_bound:
-            vars_with_no_bounds.append(var)
+    congruences, non_congruences = [], []
+    for child in leaves:
+        if isinstance(child, Congruence):
+            congruences.append(child)
+        else:
+            non_congruences.append(child)
+
+    if not bound_vars_used_only_in_congruences:
+        return None
 
     new_congruences: List[Congruence] = []
     new_bound_vars: List[Var] = []
-    for congruence in congruences:
-        # separate the congruence (a.x + b.y ~ k) where y are unbound vars
-        unbound_vars, unbound_coefs = [], []
+    var_to_replace_multiple_unbound_with = next(iter(bound_vars_used_only_in_congruences))
+
+    LinTerm = Tuple[Tuple[int, Var], ...]
+    unbound_components: Dict[LinTerm, Tuple[Var, List[int]]] = {}
+
+    free_var_id = max(var_table).id + 1
+    for congruence_idx, congruence in enumerate(congruences):
+        unbound_vars: List[Var] = []
+        unbound_coefs: List[int] = []
         for coef, var in zip(congruence.coefs, congruence.vars):
-            if var in vars_with_no_bounds:
+            if var in bound_vars_used_only_in_congruences:
                 unbound_vars.append(var)
                 unbound_coefs.append(coef)
 
@@ -726,42 +767,58 @@ def _rewrite_congruence_on_unbund_vars(exists_and_tree: AST_NaryNode, var_table:
             new_congruences.append(congruence)
             continue
 
-        coef_gcd = math.gcd(*unbound_coefs)
-        if coef_gcd == 1:  # Drop the congruence altogether
-            continue
+        component: Tuple[Tuple[int, Var], ...] = tuple(sorted(zip(unbound_coefs, unbound_vars), key=lambda it: it[0]))
+        if component in unbound_components:
+            unbound_components[component][1].append(congruence_idx)
+        else:
+            unbound_components[component] = (Var(free_var_id), [congruence_idx])
+            free_var_id += 1
 
-        coef_modulus_gcd = math.gcd(coef_gcd, congruence.modulus)
-        if coef_modulus_gcd == 1:  # The term b.y can generate the entire ring (Z_mod, +, *)
+    for component, var_and_congruence_indices in unbound_components.items():
+        var, congruence_indices = var_and_congruence_indices
+        component_gcd = gcd(*(lin_term[0] for lin_term in component))
+
+        if component_gcd == 1:
+            # The term b.y can generate the entire ring (Z_mod, +, *). If there are multiple congruences,
+            # then we need cannot drop them as they "communicate" via the term
+            if len(congruence_indices) == 1:
+                continue
+
+            # There are multiple congruences with the same term, introduce a new single variable so they can
+            # communicate
+            replacement_term = (component_gcd, var)
+            for congruence_idx in congruence_indices:
+                congruence = congruences[congruence_idx]
+                new_congruence = replace_congruence_component_with_term(congruence, component, replacement_term)
+                new_congruences.append(new_congruence)
+
+            new_bound_vars.append(var)
             continue
 
         # Modulus and GCD have some common divisor > 1, meaning that the rhs (-b.y + k) can generate only
         # some cyclic subset of Z_mod and we cannot further simplify the songruence
-        if len(unbound_vars) == 1:
-            new_congruences.append(congruence)
+        if len(component) == 1:
+            new_congruences.extend(congruences[idx] for idx in congruence_indices)
             continue
 
-        # Replace the term b.y with GCD.y' where y' is a new variable. This helps to speed up the automaton
-        # construction as the construction of A(congruence) is exponential in #vars
+        coef = component_gcd
+        replacement_term = (component_gcd, var)
+        for congruence_idx in congruence_indices:
+            congruence = congruences[congruence_idx]
+            new_congruence = replace_congruence_component_with_term(congruence, component, replacement_term)
+            new_congruences.append(new_congruence)
 
-        # We can avoid introducing new variables
-        coef = coef_gcd
-        new_var = vars_with_no_bounds[0]
-        var_table[new_var].comment = 'Reused to rewrite congruence(s) on unbound vars'
-
-        lin_terms = [term for term in congruence.linear_terms() if term[1] not in unbound_vars]
-        lin_terms.append((coef, new_var))
-        lin_terms = sorted(lin_terms, key=lambda term: term[1])  # Sort by variable id
-
-        vars = [term[1] for term in lin_terms]
-        coefs = [term[0] for term in lin_terms]
-
-        new_congruences.append(Congruence(vars=vars, coefs=coefs, rhs=congruence.rhs, modulus=congruence.modulus))
-        new_bound_vars.append(new_var)
+        new_bound_vars.append(var)
 
     # Variables that were part of some relations were not considered unbound and therefore they must be stil part of the quantifier
-    new_binding_list = [var for var in bound_vars if var not in vars_with_no_bounds] + new_bound_vars
-    new_and_node = make_and_node([*relations, *new_congruences])
+    new_binding_list = [var for var in bound_vars if var not in bound_vars_used_only_in_congruences] + new_bound_vars
+    assert new_binding_list, exists_and_tree
+    new_and_node = make_and_node([*non_congruences, *new_congruences])
     new_node = make_exists_node(new_binding_list, new_and_node)
+
+    for new_var in new_bound_vars:
+        var_table[new_var] = VarInfo(name='congruence replacement', type=VariableType.INT)
+
     return new_node
 
 
@@ -779,11 +836,10 @@ def _simplify_congruences_on_unbounded_existential_vars(ast: AST_Node, var_table
 
         child_type = ast_get_node_type(child)
         if child_type == 'and':
-            leaves = child[1:]
-            if not all(isinstance(leaf, (Relation, Congruence)) for leaf in leaves):
+            new_ast = _try_rewrite_congruence_on_unbund_vars(ast, var_table)
+            if not new_ast:
                 return ['exists', ast[1], _simplify_congruences_on_unbounded_existential_vars(ast[2], var_table)]
-
-            return _rewrite_congruence_on_unbund_vars(ast, var_table)
+            return new_ast
         return ['exists', ast[1], _simplify_congruences_on_unbounded_existential_vars(ast[2], var_table)]
 
     # The node is some N-ary
@@ -1054,6 +1110,9 @@ def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: P
         new_children = [_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:]]
         contexter.exit_context()
         return ['and', *new_children]
+
+    if node_type == 'exists':
+        return [node_type, node[1], _prune_conjunctions_false_due_to_parent_context(node[2], contexter)]
 
     if node_type == 'not':
         if isinstance(node[1], Relation) and node[1].predicate_symbol == '=':
