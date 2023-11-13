@@ -160,68 +160,6 @@ class NonlinTermNode:
     """ Nonlinear terms in the graph that contain a linear expression replacing a non-linear term represented by this node. """
 
 
-def make_node_for_two_variable_rewrite(term: NonlinTerm, rewrite_id: int, scoper: Scoper) -> NonlinTermNode:
-    """
-    Create a node describing rewrite of the given term using two new variables (quotient and reminder).
-
-    Div term is rewritten as:
-        x - (y div D) = 0   --->   x - <QUOTIENT> && 0 <= <REMINDER> && <REMINDER> <= M-1 && y - D*<QUOTIENT> = <REMINDER>
-    Mod term is rewritten as:
-        x - (y mod D) = 0   --->   x - <REMINDER> && 0 <= <REMINDER> && <REMINDER> <= M-1 && y - D*<QUOTIENT> = <REMINDER>
-    """
-    quotient = scoper.put_var_into_current_scope(f'D{rewrite_id}')
-    reminder = scoper.put_var_into_current_scope(f'M{rewrite_id}')
-    introduced_vars = (quotient, reminder)
-    if term.type == NonlinTermType.MOD:
-        equiv_expr = (LinTerm(coef=1, var=reminder),)
-    else:
-        equiv_expr = (LinTerm(coef=1, var=quotient),)
-
-    larger_than_zero = FrozenRelation(lhs=(LinTerm(coef=-1, var=reminder),), rhs=0, type=RelationType.INEQ)
-    smaller_than_modulus = FrozenRelation(lhs=(LinTerm(coef=1, var=reminder),), rhs=term.nonlin_constant-1, type=RelationType.INEQ)
-
-    divisor_reminder_terms = [LinTerm(var=var, coef=coef) for var, coef in term.lin_terms]
-    divisor_reminder_terms.extend([LinTerm(coef=-term.nonlin_constant, var=quotient), LinTerm(coef=-1, var=reminder)])
-    divisor_reminder_terms = sorted(divisor_reminder_terms, key=lambda term: term.var)
-
-    divisor_reminder_atom = FrozenRelation(lhs=tuple(divisor_reminder_terms), rhs=0, type=RelationType.EQ)
-
-    relating_atoms = (larger_than_zero, smaller_than_modulus, divisor_reminder_atom)
-    node = NonlinTermNode(introduced_vars=introduced_vars, equivalent_lin_expression=equiv_expr,
-                          atoms_relating_introduced_vars=relating_atoms, body=term)
-    return node
-
-
-def make_node_for_single_variable_rewrite(term: NonlinTerm, rewrite_id: int, scoper: Scoper) -> NonlinTermNode:
-    """
-    Create a node describing rewrite of the given term using a single new variable (quotient).
-
-    Div term is rewritten as:
-        x - (y div M) = 0   --->   x - <QUOTIENT> && 0 <= (y - M*<QUOTIENT>) && (y - M*<QUOTIENT>) <= M-1
-    Mod term is rewritten as:
-        x - (y mod M) = 0   --->   x - (y - M*<QUOTIENT>) && 0 <= (y - M*<QUOTIENT>) && (y - M*<QUOTIENT>) <= M-1
-    """
-    quotient = scoper.put_var_into_current_scope(f'D{rewrite_id}')
-    introduced_vars = (quotient, )
-
-    # (y - M*<QUOTIENT>)
-    _reminder_expr = [LinTerm(coef=coef, var=var) for var, coef in term.lin_terms] + [LinTerm(coef=-term.nonlin_constant, var=quotient)]
-    _reminder_expr = sorted(_reminder_expr, key=lambda lin_term: lin_term.var)
-    reminder_expr = tuple(_reminder_expr)
-
-    negated_equiv_expr = tuple(LinTerm(coef=-term.coef, var=term.var) for term in reminder_expr)
-    larger_than_zero = FrozenRelation(lhs=negated_equiv_expr, rhs=0, type=RelationType.INEQ)
-
-    smaller_than_modulus = FrozenRelation(lhs=reminder_expr, rhs=term.nonlin_constant-1, type=RelationType.INEQ)
-
-    equiv_expr = reminder_expr if term.type == NonlinTermType.MOD else (LinTerm(coef=1, var=quotient),)
-
-    relating_atoms = (larger_than_zero, smaller_than_modulus)
-    node = NonlinTermNode(introduced_vars=introduced_vars, equivalent_lin_expression=equiv_expr,
-                          atoms_relating_introduced_vars=relating_atoms, body=term)
-    return node
-
-
 @dataclass
 class NonlinTermGraph:
     index: Dict[Var, List[NonlinTermNode]] = field(default_factory=lambda: defaultdict(list))
