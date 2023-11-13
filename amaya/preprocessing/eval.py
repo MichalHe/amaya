@@ -554,9 +554,15 @@ def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: 
 
     # <BODY> + <BODY_CONSTANT> - <REMINDER> ~~ 0
     # <BODY> - <REMINER> ~~ -BODY_CONSTANT
-    modulus = node.body.nonlin_constant
+
+    # @Note: It is OK to take an absolute value of the modulus here since we know that were only mod terms and no
+    #        div terms with the same modulo. Moreover, it is required for correct restriction of the reminder,
+    #        as the reminder needs to be 0 <= reminder <= abs(modulus) - 1. Plus the mod automaton also
+    #        requires a positive modulus.
+    modulus = abs(node.body.nonlin_constant)
+
     rhs = (-node.body.lin_term_constant) % modulus
-    assert 0 <= rhs and rhs < modulus
+    assert 0 <= rhs and rhs < modulus, f'rhs: {rhs=} {modulus=}'
     congruence = Congruence(vars=vars, coefs=coefs, rhs=rhs, modulus=abs(node.body.nonlin_constant))
 
     rewrite_instructions.new_formulae.extend([greater_than_zero, smaller_than_modulus, congruence])
