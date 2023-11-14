@@ -246,7 +246,7 @@ class FunctionSymbol:
 
 @dataclass
 class ASTp_Node_Base:
-    referenced_vars: Tuple[Var,...]
+    referenced_vars: Tuple[Var,...] = field(repr=False)
 
 
 @dataclass
@@ -272,6 +272,7 @@ class AST_Connective(ASTp_Node_Base):
     children: Tuple[ASTp_Node, ...]
 
 
+ASTp_Leaf_Type_List = (Relation, Congruence, BoolLiteral, Var)
 ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral, Var]
 
 
@@ -332,3 +333,30 @@ def convert_ast_into_astp(ast: AST_Node) -> ASTp_Node:
             return AST_Quantifier(referenced_vars=_collect_referenced_vars_unary(child), bound_vars=bound_vars, child=child)
         case _:
             raise NotImplementedError(f'Unhandled branch when converting AST into ASTp: {ast}')
+
+
+def pprint_formula(ast: ASTp_Node, indent: int = 0):
+    indent_str = '   ' * indent
+    match ast:
+        case BoolLiteral() | Relation() | Congruence() | Var():
+            print(f'{indent_str}{ast}')
+        case AST_Connective():
+            connective_symbol_table = {
+                Connective_Type.AND:   'and',
+                Connective_Type.OR:    'or',
+                Connective_Type.EQUIV: '<=>'
+            }
+            symbol = connective_symbol_table[ast.type]
+            print(f'{indent_str}{symbol}')
+            for child in ast.children:
+                pprint_formula(child,  indent=indent+1)
+        case AST_Negation():
+            print(f'{indent_str}NOT')
+            pprint_formula(ast.child,  indent=indent+1)
+        case AST_Quantifier():
+            _var_list = [f'x{var.id}' for var in ast.bound_vars]
+            var_list = ','.join(_var_list)
+            print(f'{indent_str}exists ({var_list})')
+            pprint_formula(ast.child,  indent=indent+1)
+        case _:
+            raise NotImplementedError(f'Unhandled node while pprinting formula: {ast=}')
