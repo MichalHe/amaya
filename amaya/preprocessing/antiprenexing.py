@@ -1,100 +1,110 @@
-from dataclasses import dataclass
-from typing import (
-    List,
-    Set,
-    Tuple,
-)
+from collections import defaultdict
+import functools
 
+from typing import Dict, Iterable, List, Set
 from amaya.relations_structures import (
-    AST_Node,
+    AST_Connective,
+    AST_Negation,
+    AST_Quantifier,
+    ASTp_Leaf_Type_List,
+    ASTp_Node,
+    BoolLiteral,
+    Congruence,
+    Connective_Type,
     Relation,
+    Var,
+    pprint_formula
 )
 
 
-@dataclass
-class Tagged_AST_Node:
-    node: AST_Node
-    variables: Set[str]
+def _get_referenced_vars(ast: ASTp_Node) -> Iterable[Var]:
+    match ast:
+        case Var():
+            return (ast,)
+        case Relation() | Congruence():
+            return ast.vars
+        case BoolLiteral():
+            return tuple()
+        case _:
+            return ast.referenced_vars
 
 
-def tag_ast_nodes_with_variables_used_inside_their_ast(root: AST_Node) -> Tagged_AST_Node:
-    """Tag every inner AST node with information about variables used in their AST-subtrees."""
-    if not isinstance(root, list):
-        relation: Relation = root
-        variables = relation.get_variables()
-        return Tagged_AST_Node(node=root, variables=variables)
+def _perform_miniscoping(quantif_node: AST_Quantifier) -> ASTp_Node:
+    if isinstance(quantif_node.child, AST_Negation):
+        return quantif_node
 
-    root_node_type = root[0]
+    if isinstance(quantif_node.child, AST_Connective) and quantif_node.child.type == Connective_Type.EQUIV:
+        # @Incomplete: we would be passing a quantifier through a negation if we tried to push the quantifier
+        #              inside, or?
+        return quantif_node
 
-    if root_node_type in ('exists', 'forall'):
-        tagged_subtree = tag_ast_nodes_with_variables_used_inside_their_ast(root[2])
-        tagged_node = [root_node_type, root[1], tagged_subtree]
-        return Tagged_AST_Node(node=tagged_node, variables=tagged_subtree.variables)
+    if isinstance(quantif_node.child, AST_Quantifier):
+        bound_vars = sorted(set(quantif_node.bound_vars).union(quantif_node.child.bound_vars))
+        merged_quantifier = AST_Quantifier(referenced_vars=quantif_node.referenced_vars, bound_vars=tuple(bound_vars), child=quantif_node.child.child)
+        return _perform_miniscoping(merged_quantifier)
 
-    if root_node_type in ('and', 'or', 'not'):
-        vars_used_in_subtrees: Set[str] = set()
-        tagged_node = [root_node_type]
+    if isinstance(quantif_node.child, ASTp_Leaf_Type_List):
+        return quantif_node
 
-        for subtree in root[1:]:
-            tagged_subtree = tag_ast_nodes_with_variables_used_inside_their_ast(subtree)
-            vars_used_in_subtrees.update(tagged_subtree.variables)
-            tagged_node.append(tagged_subtree)
+    connective: AST_Connective = quantif_node.child
 
-        return Tagged_AST_Node(node=tagged_node, variables=vars_used_in_subtrees)
+    bound_vars = set(quantif_node.bound_vars)
 
-    raise ValueError('A node {} not handled when tagging AST with used variables.'.format(root))
+    scope_range = list(miniscope_quantifiers(child) for child in connective.children)
 
+    min_var_covers_entire_scope = False
+    while not min_var_covers_entire_scope and bound_vars:
+        # Select var with min scope
+        var_to_child_indices: Dict[Var, List[int]] = defaultdict(list)
+        for child_idx, child in enumerate(scope_range):
+            for var in _get_referenced_vars(child):
+                if var not in bound_vars:
+                    continue
+                var_to_child_indices[var].append(child_idx)
+        min_scope_var = min(var_to_child_indices, key=lambda var: len(var_to_child_indices[var]))
 
-def push_quantifiers_inside_on_tagged_ast(root: Tagged_AST_Node,
-                                          carried_quantifiers: Set[Tuple[str, str]]) -> AST_Node:
+        if len(var_to_child_indices[min_scope_var]) == len(scope_range):
+            min_var_covers_entire_scope = True
+            break
 
-    if isinstance(root.node, Relation):
-        # We might have arrived with to a relation carrying an quantifier binding only variables in this relation
-        relation: Relation = root.node
-        relation_variables = relation.get_variables()
-        bindings = [
-            [var_name, var_type] for var_name, var_type in carried_quantifiers if var_name in relation_variables
-        ]
-        if bindings:
-            return ['exists', bindings, relation]
-        else:
-            return relation
+        # Make a new node capturing the min scope
+        min_scope = tuple(scope_range[child_idx] for child_idx in var_to_child_indices[min_scope_var])
+        _referenced_vars: Set[Var] = functools.reduce(set.union, tuple(_get_referenced_vars(child) for child in min_scope), set())
+        referenced_vars = tuple(sorted(_referenced_vars))
+        miniscoped_subtree = AST_Connective(referenced_vars=referenced_vars, type=connective.type, children=min_scope) if len(min_scope) > 1 else min_scope[0]
+        miniscoped_node = AST_Quantifier(referenced_vars=referenced_vars,
+                                         bound_vars=(min_scope_var,),
+                                         child=miniscoped_subtree)
 
-    node_type = root.node[0]
-    # Pick the quantifier and carry it with us as we recurse deeper until we find a node that uses the var being bound
-    if node_type == 'exists':
-        carried_quantifiers = set(carried_quantifiers)
-        carried_quantifiers.update(tuple(binding) for binding in root.node[1])
-        return push_quantifiers_inside_on_tagged_ast(root.node[2], carried_quantifiers)
+        # Modify tree by removing the min_scope nodes that were put into one new node
+        untouched_subtrees = [child for child_idx, child in enumerate(scope_range) if child_idx not in var_to_child_indices[min_scope_var]]
+        scope_range = untouched_subtrees + [miniscoped_node]
 
-    if node_type in ('and', 'or'):
-        dropped_variables: Set[Tuple[str, str]] = set()
+        bound_vars.remove(min_scope_var)
 
-        # Identify what quantifiers we have to drop at this place
-        for var_name, var_type in carried_quantifiers:
-            if all((var_name in subtree.variables for subtree in root.node[1:])):
-                # All subformulae use the variable, we have to drop the carried quantifier here
-                dropped_variables.add((var_name, var_type))
+    if len(scope_range) > 1:
+        scope = AST_Connective(referenced_vars=quantif_node.referenced_vars, type=connective.type, children=tuple(scope_range))
+        if not bound_vars:
+            return scope
+        result = AST_Quantifier(referenced_vars=quantif_node.referenced_vars, bound_vars=tuple(sorted(bound_vars)), child=scope)
+        return result
 
-        for var_type_pair in dropped_variables:
-            carried_quantifiers.remove(var_type_pair)
-
-        subtrees = [push_quantifiers_inside_on_tagged_ast(subtree, carried_quantifiers) for subtree in root.node[1:]]
-
-        if dropped_variables:
-            bindings = [list(binding) for binding in dropped_variables]
-            return ['exists', bindings, [node_type, *subtrees]]
-        else:
-            return [node_type, *subtrees]
-
-    if node_type in ('not',):
-        return [node_type, push_quantifiers_inside_on_tagged_ast(root.node[1], carried_quantifiers)]
-
-    else:
-        raise ValueError(f'Don\'t know how to push quantifiers inside of a node with type: {node_type=}')
+    # Scope size is 1
+    return scope_range[0]
 
 
-def perform_antiprenexing(formula: AST_Node) -> AST_Node:
-    """Push quantifiers present in the formula as deep as possible."""
-    tagged_ast = tag_ast_nodes_with_variables_used_inside_their_ast(formula)
-    return push_quantifiers_inside_on_tagged_ast(tagged_ast, carried_quantifiers=set())
+def miniscope_quantifiers(ast: ASTp_Node):
+    match ast:
+        case Var() | Congruence() | Relation() | BoolLiteral():
+            return ast
+        case AST_Quantifier():
+            result = _perform_miniscoping(ast)
+            return result
+        case AST_Connective():
+            children = tuple(miniscope_quantifiers(child) for child in ast.children)
+            return AST_Connective(referenced_vars=ast.referenced_vars, type=ast.type, children=children)
+        case AST_Negation():
+            child = miniscope_quantifiers(ast.child)
+            return AST_Negation(referenced_vars=ast.referenced_vars, child=child)
+        case _:
+            raise NotImplementedError(f'Node {ast} is not handled when miniscoping quantifiers.')
