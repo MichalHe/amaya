@@ -57,6 +57,7 @@ from amaya.relations_structures import (
     VariableType,
     ast_get_node_type,
     convert_ast_into_astp,
+    pprint_formula,
 )
 from amaya.tokenize import tokenize
 from amaya.semantics_tracking import (
@@ -282,6 +283,7 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
         logger.debug('Interval analysis done. Result:  %s', formula_to_evaluate)
 
     astp = convert_ast_into_astp(formula_to_evaluate)
+    astp = antiprenexing.miniscope_quantifiers(astp)
     return astp
 
 
@@ -385,7 +387,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             if solver_config.preprocessing.show_preprocessed_formula:
                 import pprint, sys
-                pprint.pprint(astp, stream=sys.stdout)
+                pprint_formula(astp)
                 pprint.pprint(var_table)
                 sys.exit(0)
 
