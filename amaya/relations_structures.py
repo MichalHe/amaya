@@ -242,3 +242,88 @@ class FunctionSymbol:
     arity: int
     args: List[Tuple[str, VariableType]]
     return_type: VariableType
+
+
+@dataclass
+class ASTp_Node_Base:
+    referenced_vars: Tuple[Var,...]
+
+
+@dataclass
+class AST_Negation(ASTp_Node_Base):
+    child: ASTp_Node
+
+
+@dataclass
+class AST_Quantifier(ASTp_Node_Base):
+    bound_vars: Tuple[Var, ...]
+    child: ASTp_Node
+
+
+class Connective_Type(IntEnum):
+    AND   = 0x01
+    OR    = 0x01
+    EQUIV = 0x02
+
+
+@dataclass
+class AST_Connective(ASTp_Node_Base):
+    type: Connective_Type
+    children: Tuple[ASTp_Node, ...]
+
+
+ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral]
+
+
+def _collect_referenced_vars(children: Iterable[ASTp_Node]) -> Tuple[Var, ...]:
+    refd_vars: Set[Var] = set()
+
+    for child in children:
+        if isinstance(child, (Relation, Congruence)):
+            refd_vars.update(child.vars)
+            continue
+        if isinstance(child, BoolLiteral):
+            continue
+
+        refd_vars.update(child.referenced_vars)
+
+    return tuple(sorted(refd_vars))
+
+
+def _collect_referenced_vars_unary(child: ASTp_Node):
+    if isinstance(child, (Relation, Congruence)):
+        return tuple(child.vars)
+    if isinstance(child, BoolLiteral):
+        return tuple()
+    return child.referenced_vars
+
+
+def convert_ast_into_astp(ast: AST_Node) -> ASTp_Node:
+    if isinstance(ast, (Relation, Congruence, BoolLiteral)):
+        return ast
+
+    assert isinstance(ast, list)
+    node_type = ast_get_node_type(ast)
+
+    match node_type:
+        case 'and':
+            children = tuple(convert_ast_into_astp(child) for child in ast[1:])
+            referenced_vars = _collect_referenced_vars(children)
+            return AST_Connective(type=Connective_Type.AND, referenced_vars=referenced_vars, children=children)
+        case 'or':
+            children = tuple(convert_ast_into_astp(child) for child in ast[1:])
+            referenced_vars = _collect_referenced_vars(children)
+            return AST_Connective(type=Connective_Type.OR, referenced_vars=referenced_vars, children=children)
+        case '=':
+            children = tuple(convert_ast_into_astp(child) for child in ast[1:])
+            referenced_vars = _collect_referenced_vars(children)
+            return AST_Connective(type=Connective_Type.EQUIV, referenced_vars=referenced_vars, children=children)
+        case 'not':
+            child = convert_ast_into_astp(ast[1])
+            return AST_Negation(child=child, referenced_vars=_collect_referenced_vars_unary(child))
+        case 'exists':
+            bound_vars: Tuple[Var,...] = tuple(ast_get_binding_list(ast))
+            child = convert_ast_into_astp(ast[2])
+            return AST_Quantifier(referenced_vars=_collect_referenced_vars_unary(child), bound_vars=bound_vars, child=child)
+        case _:
+            raise NotImplementedError(f'Unhandled branch when converting AST into ASTp: {ast}')
