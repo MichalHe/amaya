@@ -1107,9 +1107,19 @@ def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: P
                 new_upper = min(implied_val, old_upper)
                 contexter.assert_new_var_value(var, Value_Interval(val_interval.lower_limit, new_upper))
 
-        new_children = [_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:]]
+        new_bounds = []
+        for var, var_values in contexter.asserted_var_values[-1].items():
+            if var_values.lower_limit is not None:
+                new_bounds.append(Relation(vars=[var], coefs=[-1], rhs=-var_values.lower_limit, predicate_symbol='<='))
+            if var_values.upper_limit is not None:
+                new_bounds.append(Relation(vars=[var], coefs=[1], rhs=var_values.upper_limit, predicate_symbol='<='))
+
+        def is_bound(node: AST_Node):
+            return isinstance(node, Relation) and len(node.vars) == 1
+
+        new_children = [_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:] if not is_bound(child)]
         contexter.exit_context()
-        return ['and', *new_children]
+        return ['and', *new_bounds, *new_children]
 
     if node_type == 'exists':
         return [node_type, node[1], _prune_conjunctions_false_due_to_parent_context(node[2], contexter)]
