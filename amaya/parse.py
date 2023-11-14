@@ -36,21 +36,27 @@ from amaya.preprocessing import (
     eval as ast_eval_lib,
     prenexing,
 )
-from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd
+from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd, split_lin_terms_into_vars_and_coefs
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
     AST_Atom,
+    AST_Connective,
+    AST_Negation,
     AST_Node_Names,
     AST_NaryNode,
     AST_Node,
+    AST_Quantifier,
+    ASTp_Node,
     BoolLiteral,
     Congruence,
+    Connective_Type,
     FunctionSymbol,
     NodeEncounteredHandlerStatus,
     Relation,
     Var,
     VariableType,
     ast_get_node_type,
+    convert_ast_into_astp,
 )
 from amaya.tokenize import tokenize
 from amaya.semantics_tracking import (
@@ -239,7 +245,7 @@ def build_syntax_tree(tokens: Iterable[str]):
     return stack
 
 
-def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Var, VarInfo]) -> AST_Node:
+def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
     if solver_config.optimizations.simplify_variable_bounds:
         logger.debug('Simplifying variable bounds of formula: %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
@@ -275,8 +281,8 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
         formula_to_evaluate = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(formula_to_evaluate)
         logger.debug('Interval analysis done. Result:  %s', formula_to_evaluate)
 
-    return formula_to_evaluate
-
+    astp = convert_ast_into_astp(formula_to_evaluate)
+    return astp
 
 
 def parse_function_symbol_declaration(decl_ast: AST_NaryNode) -> FunctionSymbol:
@@ -366,20 +372,20 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             ctx = EvaluationContext()
 
             # If there are multiple assert statements, evaluate their conjunction
-            formula_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
+            ast_to_evaluate = formulae_to_assert[0] if len(formulae_to_assert) == 1 else ['and'] + formulae_to_assert
 
             const_fn_symbols = [fn_symbol for fn_symbol in function_symbol_to_info_map.values() if fn_symbol.arity == 0]
-            formula_to_evaluate, var_table  = preprocessing.preprocess_ast(formula_to_evaluate,  # type: ignore
+            ast_to_evaluate, var_table  = preprocessing.preprocess_ast(ast_to_evaluate,  # type: ignore
                                                                            global_fn_symbols=const_fn_symbols)
 
-            logger.info('Preprocessing resulted in the following AST: %s', formula_to_evaluate)
+            logger.info('Preprocessing resulted in the following AST: %s', ast_to_evaluate)
 
-            assert formula_to_evaluate
-            formula_to_evaluate = optimize_formula_structure(formula_to_evaluate, var_table)
+            assert ast_to_evaluate
+            astp = optimize_formula_structure(ast_to_evaluate, var_table)
 
             if solver_config.preprocessing.show_preprocessed_formula:
                 import pprint, sys
-                pprint.pprint(formula_to_evaluate, stream=sys.stdout)
+                pprint.pprint(astp, stream=sys.stdout)
                 pprint.pprint(var_table)
                 sys.exit(0)
 
@@ -388,7 +394,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet, var_table=var_table)
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
-            nfa = run_evaluation_procedure(formula_to_evaluate, eval_ctx)
+            nfa = run_evaluation_procedure(astp, eval_ctx)
             eval_result = nfa
         elif statement_root == 'exit':
             return (nfa, smt_info, eval_ctx.stats)
@@ -400,7 +406,11 @@ def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> N
     vars: List[Var] = []
     coefs: List[int] = []
 
-    vars, coefs = zip(*sorted(zip(congruence.vars, congruence.coefs), key = lambda pair: pair[0]))
+    terms = sorted(zip(congruence.vars, congruence.coefs), key = lambda pair: pair[0])
+    vars, coefs = [], []
+    for var, coef in terms:
+        vars.append(var)
+        coefs.append(coef)
 
     ordered_congruence = Congruence(vars=vars, coefs=coefs, rhs=congruence.rhs, modulus=congruence.modulus)
 
@@ -472,13 +482,14 @@ def build_automaton_for_boolean_variable(var: Var, var_value: bool, ctx: Evaluat
 
 
 # @Cleanup: How is this function even used? We now have Relations in the AST, so we typically take the else branch.
-def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _depth: int) -> NFA:
+def get_automaton_for_operand(operand_ast: ASTp_Node, ctx: EvaluationContext, _depth: int) -> NFA:
     """
     Construct automaton accepting solutions of the formula given by its AST.
 
     If the given ast is not a leaf, the evaluation procedure is ran to build the NFA encoding the AST.
     """
     if isinstance(operand_ast, str):
+        assert False
         logger.debug('Requested the automaton for an operand that is an AST Leaf (str).'
                      'Searching variable scopes for its definition.')
         print(operand_ast)
@@ -495,7 +506,7 @@ def get_automaton_for_operand(operand_ast: AST_Node, ctx: EvaluationContext, _de
         return run_evaluation_procedure(operand_ast, ctx, _debug_recursion_depth=_depth+1)
 
 
-def minimize_automaton_if_configured(ast: AST_NaryNode, nfa: NFA, ctx: EvaluationContext) -> NFA:
+def minimize_automaton_if_configured(ast: ASTp_Node, nfa: NFA, ctx: EvaluationContext) -> NFA:
     """
     Perform the configured minimization on given NFA.
 
@@ -535,7 +546,7 @@ def minimize_automaton_if_configured(ast: AST_NaryNode, nfa: NFA, ctx: Evaluatio
     return minimized_dfa
 
 
-def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
+def evaluate_binary_conjunction_expr(expr: AST_Connective,
                                      ctx: EvaluationContext,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
                                      reduction_operation: ParsingOperation,
@@ -546,18 +557,16 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
     Perform the evaluation of AND and OR expressions in an abstract fashion using the provided
     reduction function (used to compose the individual operands into a result).
     """
-    assert type(expr) == list
-
-    if len(expr) == 2:
+    if len(expr.children) == 1:
         # There might be situation when we simplify variable bounds that we lift some atoms all the way to the root of the formula
         # while keeping their connectives intact - for example, a [and, <atom>] might come to exist in the formula
-        return get_automaton_for_operand(expr[1], ctx, _depth)
+        return get_automaton_for_operand(expr.children[0], ctx, _depth)
 
-    first_operand = expr[1]
+    first_operand = expr.children[0]
 
     reduction_result = get_automaton_for_operand(first_operand, ctx, _depth)
 
-    for operand_idx, next_operand in enumerate(expr[2:]):
+    for operand_idx, next_operand in enumerate(expr.children[1:]):
         if reduction_operation == ParsingOperation.NFA_INTERSECT and not reduction_result.final_states:
             return reduction_result
 
@@ -570,7 +579,8 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
         # reduction_result = reduction_result.determinize()
         ctx.stats_operation_ends(reduction_result)
 
-        reduction_result = minimize_automaton_if_configured(expr[:operand_idx+2], reduction_result, ctx)
+        captured_subformula = AST_Connective(referenced_vars=tuple(), type=expr.type, children=expr.children[:operand_idx+1])
+        reduction_result = minimize_automaton_if_configured(captured_subformula, reduction_result, ctx)
 
         emit_evaluation_progress_info((f' >> {reduction_operation}(lhs, rhs) '
                                        f'(result size: {len(reduction_result.states)}, '
@@ -579,7 +589,7 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
     return reduction_result
 
 
-def evaluate_and_expr(and_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+def evaluate_and_expr(and_expr: AST_Connective, ctx: EvaluationContext, _depth: int) -> NFA:
     """Construct an automaton corresponding to the given conjuction."""
 
     result = evaluate_binary_conjunction_expr(
@@ -593,7 +603,7 @@ def evaluate_and_expr(and_expr: AST_NaryNode, ctx: EvaluationContext, _depth: in
     return result
 
 
-def evaluate_or_expr(or_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+def evaluate_or_expr(or_expr: AST_Connective, ctx: EvaluationContext, _depth: int) -> NFA:
     """Construct an automaton corresponding to the given disjunction."""
 
     return evaluate_binary_conjunction_expr(
@@ -605,17 +615,16 @@ def evaluate_or_expr(or_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int)
     )
 
 
-def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+def evaluate_not_expr(not_expr: AST_Negation, ctx: EvaluationContext, _depth: int) -> NFA:
     """Return the automaton corresponding to the given SMT expression containing a negated formula."""
 
-    assert len(not_expr) == 2
-    operand = get_automaton_for_operand(not_expr[1], ctx, _depth)
+    operand = get_automaton_for_operand(not_expr.child, ctx, _depth)
 
     # @Cleanup: I think we don't have to handle Bool automatons in an explicit manner - check whether we need this code.
     if (operand.automaton_type & AutomatonType.BOOL):
         assert len(operand.used_variables) == 1
 
-        variable_id: int = operand.used_variables[0]
+        variable_id = operand.used_variables[0]
         variable_value: bool = operand.extra_info['bool_var_value']
         logger.debug('Complementing an automaton for a bool variable {variable_id}, returninig direct complement.')
         ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
@@ -656,20 +665,17 @@ def evaluate_not_expr(not_expr: AST_NaryNode, ctx: EvaluationContext, _depth: in
     return operand
 
 
-def try_lazy_construct_conjunction(exists_node: AST_NaryNode, ctx: EvaluationContext) -> Optional[NFA]:
-    bound_vars: List[Var] = exists_node[1]  # type: ignore
-    if not isinstance(exists_node[2], list):
+def try_lazy_construct_conjunction(exists_node: AST_Quantifier, ctx: EvaluationContext) -> Optional[NFA]:
+    if not (isinstance(exists_node.child, AST_Connective) and exists_node.child.type == Connective_Type.AND):
         return
 
-    and_node: AST_NaryNode = exists_node[2]
-    if ast_get_node_type(and_node) != AST_Node_Names.AND.value:
-        return
+    and_node: AST_Connective = exists_node.child
 
-    if not all(isinstance(child, (Relation, Congruence)) for child in and_node[1:]):
+    if not all(isinstance(child, (Relation, Congruence)) for child in and_node.children):
         return
 
     logger.info('Lazy constructing %s', and_node)
-    atoms: List[AST_Atom] = and_node[1:]  # type: ignore
+    atoms: List[Relation | Congruence] = list(and_node.children[0:])  # type: ignore
     from amaya.mtbdd_transitions import MTBDDTransitionFn
 
     new_atoms = []
@@ -684,7 +690,7 @@ def try_lazy_construct_conjunction(exists_node: AST_NaryNode, ctx: EvaluationCon
         new_atoms.append(new_atom)
 
     ctx.stats_operation_starts(ParsingOperation.LAZY_CONSTRUCT, None, None)
-    nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(new_atoms, bound_vars, ctx.get_alphabet())
+    nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(new_atoms, list(exists_node.bound_vars), ctx.get_alphabet())
     ctx.stats_operation_ends(nfa)
 
     logger.info("Lazy construnction done, result has %d states", len(nfa.states))
@@ -692,11 +698,8 @@ def try_lazy_construct_conjunction(exists_node: AST_NaryNode, ctx: EvaluationCon
     return nfa
 
 
-def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _depth: int) -> NFA:
+def evaluate_exists_expr(exists_expr: AST_Quantifier, ctx: EvaluationContext, _depth: int) -> NFA:
     """Construct an NFA corresponding to the given formula of the form (exists (vars) (phi))."""
-    assert len(exists_expr) == 3
-
-    bound_vars: List[Var] = exists_expr[1]  # type: ignore
 
     # Perform a look-ahead to see whether we can construct the NFA for the entire conjunction using a lazy approach
     if solver_config.backend_type == BackendType.MTBDD and solver_config.optimizations.do_lazy_evaluation:
@@ -704,16 +707,16 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
         if nfa:
             return nfa
 
-    nfa = get_automaton_for_operand(exists_expr[2], ctx, _depth)
+    nfa = get_automaton_for_operand(exists_expr.child, ctx, _depth)
 
     # We need to establish an order of individual projections applied, so that we can tell when we are projecting away
     # the last variable in this quantifier, because we don't need to do padding closure after every single variable
     # projection - we have to do it only after the variable has been projected away.
 
-    logger.debug(f'Established projection order: {bound_vars}')
+    logger.debug(f'Established projection order: {exists_expr.bound_vars}')
 
-    last_var_to_project = bound_vars[-1]
-    for var in bound_vars:
+    last_var_to_project = exists_expr.bound_vars[-1]
+    for var in exists_expr.bound_vars:
         logger.debug(f'Projecting away variable {var}')
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
 
@@ -728,16 +731,18 @@ def evaluate_exists_expr(exists_expr: AST_NaryNode, ctx: EvaluationContext, _dep
 
     nfa = minimize_automaton_if_configured(exists_expr, nfa, ctx)
 
-    emit_evaluation_progress_info(f' >> projection({bound_vars}) (result_size: {len(nfa.states)})', _depth)
+    emit_evaluation_progress_info(f' >> projection({exists_expr.bound_vars}) (result_size: {len(nfa.states)})', _depth)
     return nfa
 
 
-def evaluate_bool_equivalence_expr(ast: AST_NaryNode, ctx: EvaluationContext, _depth: int = 0) -> NFA:
+def evaluate_bool_equivalence_expr(ast: AST_Connective, ctx: EvaluationContext, _depth: int = 0) -> NFA:
     """
     Constructs an automaton for the given equivalence of two Booleans.
     """
-    left_nfa = get_automaton_for_operand(ast[1], ctx, _depth)
-    right_nfa = get_automaton_for_operand(ast[2], ctx, _depth)
+    assert len(ast.children) == 2, 'Equivalence with more than 2 children is currently not supported.'
+
+    left_nfa = get_automaton_for_operand(ast.children[0], ctx, _depth)
+    right_nfa = get_automaton_for_operand(ast.children[1], ctx, _depth)
     positive_branch = left_nfa.intersection(right_nfa)
 
     if left_nfa.automaton_type & AutomatonType.NFA:
@@ -751,7 +756,7 @@ def evaluate_bool_equivalence_expr(ast: AST_NaryNode, ctx: EvaluationContext, _d
     return positive_branch.union(negative_branch)
 
 
-def run_evaluation_procedure(ast: AST_Node,
+def run_evaluation_procedure(ast: ASTp_Node,
                              ctx: EvaluationContext,
                              _debug_recursion_depth: int = 0) -> NFA:
     """
@@ -763,39 +768,39 @@ def run_evaluation_procedure(ast: AST_Node,
     :returns: The NFA corresponding to the given formula.
     """
 
-    if not isinstance(ast, list):
-        if isinstance(ast, BoolLiteral):
+    match ast:
+        case BoolLiteral():
             automaton_cls = ctx.get_automaton_class_for_current_backend()
             return automaton_cls.trivial_accepting(ctx.get_alphabet()) if ast.value else automaton_cls.trivial_nonaccepting(ctx.get_alphabet())
 
-        if isinstance(ast, Congruence):
+        case Congruence():
             return make_nfa_for_congruence(ast, ctx)
 
-        if isinstance(ast, Relation):
+        case Relation():
             return build_automaton_from_presburger_relation_ast(ast, ctx, _debug_recursion_depth)
 
-        if isinstance(ast, Var):
+        case Var():
             if ctx.var_table[ast].type != VariableType.BOOL:
                 raise ValueError(f'AST contains a freestanding non-boolean variable, don\'t know how to evaluate that. {ast}')
             return build_automaton_for_boolean_variable(var=ast, var_value=True, ctx=ctx)
 
-        raise ValueError('Cannot evaluate atom: %s.', ast)
+        case AST_Connective():
+            fn_table = {
+                Connective_Type.AND:   evaluate_and_expr,
+                Connective_Type.OR:    evaluate_or_expr,
+                Connective_Type.EQUIV: evaluate_bool_equivalence_expr,
+            }
 
-    node_name = ast[0]
-    emit_evaluation_progress_info(f'eval_smt_tree({ast}), node_name={node_name}', _debug_recursion_depth)
-    # Current node is a NFA operation
-    evaluation_functions = {
-        'and': evaluate_and_expr,
-        'or': evaluate_or_expr,
-        'not': evaluate_not_expr,
-        'exists': evaluate_exists_expr,
-        '=': evaluate_bool_equivalence_expr,
-    }
+            fn = fn_table[ast.type]
+            result = fn(ast, ctx, _debug_recursion_depth)
 
-    if node_name not in evaluation_functions:
-        raise NotImplementedError(f'Don\'t know how to evaluate {node_name} when evaluating the formula: {ast}')
+        case AST_Quantifier():
+            result = evaluate_exists_expr(ast, ctx, _debug_recursion_depth)
 
-    evaluation_function = evaluation_functions[node_name]
+        case AST_Negation():
+            result = evaluate_not_expr(ast, ctx, _debug_recursion_depth)
 
-    result = evaluation_function(ast, ctx, _debug_recursion_depth)
+        case _:
+            raise NotImplementedError(f'Don\'t know how to evaluate {ast}.')
+
     return result

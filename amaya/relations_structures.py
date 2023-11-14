@@ -262,8 +262,8 @@ class AST_Quantifier(ASTp_Node_Base):
 
 class Connective_Type(IntEnum):
     AND   = 0x01
-    OR    = 0x01
-    EQUIV = 0x02
+    OR    = 0x02
+    EQUIV = 0x03
 
 
 @dataclass
@@ -272,7 +272,7 @@ class AST_Connective(ASTp_Node_Base):
     children: Tuple[ASTp_Node, ...]
 
 
-ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral]
+ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral, Var]
 
 
 def _collect_referenced_vars(children: Iterable[ASTp_Node]) -> Tuple[Var, ...]:
@@ -281,6 +281,9 @@ def _collect_referenced_vars(children: Iterable[ASTp_Node]) -> Tuple[Var, ...]:
     for child in children:
         if isinstance(child, (Relation, Congruence)):
             refd_vars.update(child.vars)
+            continue
+        if isinstance(child, Var):
+            refd_vars.add(child)
             continue
         if isinstance(child, BoolLiteral):
             continue
@@ -293,13 +296,15 @@ def _collect_referenced_vars(children: Iterable[ASTp_Node]) -> Tuple[Var, ...]:
 def _collect_referenced_vars_unary(child: ASTp_Node):
     if isinstance(child, (Relation, Congruence)):
         return tuple(child.vars)
+    if isinstance(child, Var):
+        return (child,)
     if isinstance(child, BoolLiteral):
         return tuple()
     return child.referenced_vars
 
 
 def convert_ast_into_astp(ast: AST_Node) -> ASTp_Node:
-    if isinstance(ast, (Relation, Congruence, BoolLiteral)):
+    if isinstance(ast, (Relation, Congruence, BoolLiteral, Var)):
         return ast
 
     assert isinstance(ast, list)
