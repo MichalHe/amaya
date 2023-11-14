@@ -137,24 +137,26 @@ argparser.add_argument('-p',
                              '- nonlinear-term-use-two-vars: Always use two variables (quotient, reminder) when rewriting a non-linear term\n'
                              '- auto-infer                 : Convert-mode specific - infer preprocessing options from output format.'))
 
+optimization_choices = [
+    'gcd-rewrite',
+    'var-bounds',
+    'stomp-negations',
+    'light-sat',
+    'lazy',
+    'minimize-congruences',
+    'interval-analysis',
+    'miniscope',
+    'iso-conflicts',
+    'linearize-similar-mod-terms',
+    'all',
+]
 
 argparser.add_argument('-O',
                        '--optimize',
                        action='append',
                        dest='optimizations',
                        default=[],
-                       choices=['gcd-rewrite',
-                                'var-bounds',
-                                'stomp-negations',
-                                'light-sat',
-                                'lazy',
-                                'minimize-congruences',
-                                'interval-analysis',
-                                'miniscope',
-                                'iso-conflicts',
-                                'linearize-similar-mod-terms',
-                                'all',
-                       ],
+                       choices=optimization_choices,
                        help=('Controls preprocessing transformations applied on input the formula. Options:\n'
                              '> gdc-rewrite:\n'
                              '      Rewrite existentially quantified equations using GCD rewrite\n'
@@ -179,6 +181,8 @@ argparser.add_argument('-O',
                              '      Detect conflicts in conjunctive clauses (and A (not B)) if A B are ismorphic modulo bound variable renaming (approximate).\n'
                              '> all:\n'
                              '      Enable all above optimizations'))
+
+argparser.add_argument('-N', '--no-optimize', dest='forbidden_optimizations', choices=optimization_choices, default=[], action='append')
 
 
 subparsers = argparser.add_subparsers(help='Runner operation')
@@ -396,6 +400,12 @@ for opt in args.optimizations:
         solver_config.optimizations.rewrite_existential_equations_via_gcd = True
     if opt == 'linearize-similar-mod-terms':
         solver_config.optimizations.linearize_similar_mod_terms = True
+
+
+for forbidden_opt in args.forbidden_optimizations:
+    if forbidden_opt == 'miniscoping':
+        solver_config.optimizations.do_miniscoping = False
+
 
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""
