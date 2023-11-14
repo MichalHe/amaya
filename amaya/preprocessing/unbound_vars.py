@@ -1109,8 +1109,14 @@ def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: P
 
         new_bounds = []
         for var, var_values in contexter.asserted_var_values[-1].items():
+            is_single_value_implied = var_values.lower_limit == var_values.upper_limit
+            if var_values.lower_limit is not None and is_single_value_implied:
+                new_bounds.append(Relation(vars=[var], coefs=[1], rhs=var_values.lower_limit, predicate_symbol='='))
+                continue
+
             if var_values.lower_limit is not None:
                 new_bounds.append(Relation(vars=[var], coefs=[-1], rhs=-var_values.lower_limit, predicate_symbol='<='))
+
             if var_values.upper_limit is not None:
                 new_bounds.append(Relation(vars=[var], coefs=[1], rhs=var_values.upper_limit, predicate_symbol='<='))
 
