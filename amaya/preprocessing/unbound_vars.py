@@ -1035,16 +1035,28 @@ def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: P
             ctx_vals = contexter.lookup_asserted_values(var)
 
             if coef < 0:
+                # Look whether the current bound requires var value to be higher then possible due to parent's constraints
+                parents_upper_limit = ctx_vals.upper_limit if ctx_vals.upper_limit is not None else implied_val + 1
+                if implied_val > parents_upper_limit:  # Parent asserts that x must be <= than 5, child says x must be >= 6
+                    return BoolLiteral(False)
+
+                # Look whether we are strengthening the lower bound or not
                 ctx_lower_val = ctx_vals.lower_limit
                 if not ctx_lower_val:
                     return node
+
                 if ctx_lower_val > implied_val:  # The relation can be strenghtened
                     rhs = -ctx_lower_val   # Because coef is negative -x <= k  <-> x >= -k
                     return Relation(vars=relation.vars, coefs=[-1], rhs=rhs, predicate_symbol='<=')
             else:  # coef > 0
+                parents_lower_limit = ctx_vals.lower_limit if ctx_vals.lower_limit is not None else implied_val - 1
+                if implied_val < parents_lower_limit:  # Parent asserts that x must be >= 0, child says x must be <= -1
+                    return BoolLiteral(False)
+
                 ctx_upper_val = ctx_vals.upper_limit
                 if not ctx_upper_val:
                     return node
+
                 if ctx_upper_val < implied_val:  # The relation can be strenghtened
                     return Relation(vars=relation.vars, coefs=[1], rhs=ctx_upper_val, predicate_symbol='<=')
             return node
@@ -1142,11 +1154,16 @@ def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: P
         if any(child == BoolLiteral(True) for child in new_children):
             return BoolLiteral(True)
 
-        new_children = tuple(filter(lambda child: child != BoolLiteral(False), new_children))
+        new_children = tuple(child for child in new_children if child != BoolLiteral(False))
+
         if len(new_children) == 1:
             return new_children[0]
 
+        if len(new_children) == 0:
+            return BoolLiteral(False)
+
         result_node = [node_type, *new_children]
+        return result_node
 
     if node_type == 'exists':
         return [node_type, node[1], _prune_conjunctions_false_due_to_parent_context(node[2], contexter)]
