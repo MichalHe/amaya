@@ -149,6 +149,7 @@ argparser.add_argument('-O',
                                 'light-sat',
                                 'lazy',
                                 'minimize-congruences',
+                                'interval-analysis',
                                 'iso-conflicts',
                                 'linearize-similar-mod-terms',
                                 'all',
@@ -169,6 +170,8 @@ argparser.add_argument('-O',
                              '         x=(mod x 5) y=(mod (+ 1 x) 5) would lead to y=x+1 (other linearization branches are left out)\n'
                              '> minimize-congruences:\n'
                              '      Minimize congruences terms by replacing multiple terms containin unbound vars with a single term.\n'
+                             '> interval-analysis:\n'
+                             '      Use interval analysis to prune formula from conflicting subformulae - e.g. parent asserts that x >= 5 and child asserts that x <= 3.\n'
                              '> iso-conflics:\n'
                              '      Detect conflicts in conjunctive clauses (and A (not B)) if A B are ismorphic modulo bound variable renaming (approximate).\n'
                              '> all:\n'
@@ -363,6 +366,7 @@ for opt in args.optimizations:
         solver_config.optimizations.simplify_variable_bounds = True
         solver_config.optimizations.rewrite_existential_equations_via_gcd = True
         solver_config.optimizations.push_negation_towards_atoms = True
+        solver_config.optimizations.do_interval_analysis = True
         solver_config.optimizations.do_light_sat_reasoning = True
         solver_config.optimizations.do_lazy_evaluation = True
         solver_config.optimizations.rewrite_congruences_with_unbound_terms = True
@@ -378,6 +382,8 @@ for opt in args.optimizations:
         solver_config.optimizations.do_light_sat_reasoning = True
     if opt == 'lazy':
         solver_config.optimizations.do_lazy_evaluation = True
+    if opt == 'interval-analysis':
+        solver_config.optimizations.do_interval_analysis = True
     if opt == 'iso-conflicts':
         solver_config.optimizations.detect_isomorphic_conflicts = True
     if opt == 'minimize-congruences':

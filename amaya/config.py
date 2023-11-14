@@ -33,6 +33,14 @@ class OptimizationsConfig:
     push_negation_towards_atoms: bool = False
     """Push negations as close to atoms as possible."""
 
+    do_interval_analysis: bool = True
+    """
+    Use interval analysis to prune the formula from simple conflicting clauses.
+
+    Examle:
+        parent asserts x >= 4 and a child asserts that x <= 2
+    """
+
     do_light_sat_reasoning: bool = False
     """Detect AND-OR trees and convert them into DNF form and detect contradictions."""
 

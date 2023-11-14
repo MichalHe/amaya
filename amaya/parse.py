@@ -241,36 +241,39 @@ def build_syntax_tree(tokens: Iterable[str]):
 
 def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Var, VarInfo]) -> AST_Node:
     if solver_config.optimizations.simplify_variable_bounds:
-        logger.debug(f'Simplifying variable bounds of formula: %s', formula_to_evaluate)
+        logger.debug('Simplifying variable bounds of formula: %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
-        logger.debug(f'Simplified formula: %s', formula_to_evaluate)
+        logger.debug('Simplified formula: %s', formula_to_evaluate)
 
     if solver_config.optimizations.rewrite_existential_equations_via_gcd:
-        logger.debug(f'Rewriting: %s', formula_to_evaluate)
+        logger.debug('Rewriting: %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.simplify_unbounded_equations(formula_to_evaluate)
-        logger.debug(f'Simplified formula: %s', formula_to_evaluate)
+        logger.debug('Simplified formula: %s', formula_to_evaluate)
 
     if solver_config.optimizations.rewrite_congruences_with_unbound_terms:
-        logger.debug(f'Rewriting congruence terms containing unbounded variables:  %s', formula_to_evaluate)
+        logger.debug('Rewriting congruence terms containing unbounded variables:  %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.simplify_congruences_on_unbounded_existential_vars(formula_to_evaluate, var_table)
-        logger.debug(f'Congruences rewritten. Result:  %s', formula_to_evaluate)
+        logger.debug('Congruences rewritten. Result:  %s', formula_to_evaluate)
 
     if solver_config.optimizations.push_negation_towards_atoms:
-        logger.debug(f'Pushing negation towards atoms on:  %s', formula_to_evaluate)
+        logger.debug('Pushing negation towards atoms on:  %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.push_negations_towards_atoms(formula_to_evaluate)
-        logger.debug(f'Negations pushed towards atoms. Result:  %s', formula_to_evaluate)
+        logger.debug('Negations pushed towards atoms. Result:  %s', formula_to_evaluate)
 
     formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
 
     if solver_config.optimizations.detect_isomorphic_conflicts:
-        logger.debug(f'Detecting conflicts in conjuctive clauses using formula isomorphism:  %s', formula_to_evaluate)
+        logger.debug('Detecting conflicts in conjuctive clauses using formula isomorphism:  %s', formula_to_evaluate)
         formula_to_evaluate = var_bounds_lib.detect_conflics_on_isomorphic_fragments(formula_to_evaluate)
-        logger.debug(f'Conflict detection done. Result:  %s', formula_to_evaluate)
+        logger.debug('Conflict detection done. Result:  %s', formula_to_evaluate)
 
     if solver_config.optimizations.do_light_sat_reasoning:
         formula_to_evaluate = var_bounds_lib.convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(formula_to_evaluate)
 
-    formula_to_evaluate = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(formula_to_evaluate)
+    if solver_config.optimizations.do_interval_analysis:
+        logger.debug('Detecting conflicts in formula using interval analysis:  %s', formula_to_evaluate)
+        formula_to_evaluate = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(formula_to_evaluate)
+        logger.debug('Interval analysis done. Result:  %s', formula_to_evaluate)
 
     return formula_to_evaluate
 
@@ -549,7 +552,6 @@ def evaluate_binary_conjunction_expr(expr: AST_NaryNode,
         # There might be situation when we simplify variable bounds that we lift some atoms all the way to the root of the formula
         # while keeping their connectives intact - for example, a [and, <atom>] might come to exist in the formula
         return get_automaton_for_operand(expr[1], ctx, _depth)
-
 
     first_operand = expr[1]
 
