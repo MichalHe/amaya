@@ -47,6 +47,9 @@ class OptimizationsConfig:
     do_lazy_evaluation: bool = False
     """Enable lazy evaluation of subformulae of the form `(exists (..) (and atom1 atom2 ...))`"""
 
+    do_miniscoping: bool = False
+    """ Perform miniscoping (antiprenexing) on the formula. """
+
     do_gcd_divide: bool = True
     """ Divide atoms by the GCD of their coefficients. """
 

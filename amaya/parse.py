@@ -283,7 +283,8 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
         logger.debug('Interval analysis done. Result:  %s', formula_to_evaluate)
 
     astp = convert_ast_into_astp(formula_to_evaluate)
-    astp = antiprenexing.miniscope_quantifiers(astp)
+    if solver_config.optimizations.do_miniscoping:
+        astp = antiprenexing.miniscope_quantifiers(astp)
     return astp
 
 
