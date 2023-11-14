@@ -1125,7 +1125,28 @@ def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: P
 
         new_children = [_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:] if not is_bound(child)]
         contexter.exit_context()
-        return ['and', *new_bounds, *new_children]
+        new_node = ['and', *new_bounds, *new_children]
+
+        if any(child == BoolLiteral(False) for child in new_node[1:]):
+            return BoolLiteral(False)
+
+        new_node = [child for child in new_node if child != BoolLiteral(True)]
+        if len(new_node) == 2:
+            return new_node[1]
+
+        return new_node
+
+    if node_type == 'or':
+        new_children = list(_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:])
+
+        if any(child == BoolLiteral(True) for child in new_children):
+            return BoolLiteral(True)
+
+        new_children = tuple(filter(lambda child: child != BoolLiteral(False), new_children))
+        if len(new_children) == 1:
+            return new_children[0]
+
+        result_node = [node_type, *new_children]
 
     if node_type == 'exists':
         return [node_type, node[1], _prune_conjunctions_false_due_to_parent_context(node[2], contexter)]
