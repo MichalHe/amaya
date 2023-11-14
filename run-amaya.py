@@ -523,7 +523,7 @@ def run_in_getsat_mode(args) -> bool:
 
                 print('error: computed different SAT as present in the input info :status field')
                 return False
-        print('status: ', computed_sat)
+        print('result:', computed_sat)
         if args.should_print_model:
             print('Model:', model)
 
