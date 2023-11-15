@@ -22,11 +22,16 @@ from amaya.preprocessing.eval import VarInfo, split_lin_terms_into_vars_and_coef
 
 from amaya.relations_structures import (
     AST_Atom,
+    AST_Connective,
     AST_NaryNode,
+    AST_Negation,
     AST_Node,
     AST_Node_Names,
+    AST_Quantifier,
+    ASTp_Node,
     BoolLiteral,
     Congruence,
+    Connective_Type,
     Relation,
     Var,
     VariableType,
@@ -1019,7 +1024,100 @@ class Parent_Context_Var_Values:
         active_ctx[var] = new_interval
 
 
-def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: Parent_Context_Var_Values) -> AST_Node:
+def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_Var_Values) -> ASTp_Node:
+    match connective.type:
+        case Connective_Type.AND:
+            contexter.enter_context()
+
+            children = connective.children
+            bounds = (child for child in children if isinstance(child, Relation) and len(child.vars) == 1)
+
+            for bound in bounds:
+                var, coef = bound.vars[0], bound.coefs[0]
+                rhs = bound.rhs
+
+                val_interval = contexter.lookup_asserted_values(var)
+
+                if bound.predicate_symbol == '=':
+                    if (rhs % coef) != 0:
+                        return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (3x = 5 AND <Subformula>)
+                    implied_val = rhs // coef
+
+                    upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
+                    lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
+
+                    if implied_val < lower or implied_val > upper:
+                        return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (x = 0 AND <Subformula>)
+
+                    new_interval = Value_Interval(lower_limit=implied_val, upper_limit=implied_val)
+                    contexter.assert_new_var_value(var, new_interval)
+                    continue
+
+                implied_val = math.floor(rhs / coef)
+
+                if coef < 0:  # Lower limit
+                    old_lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
+                    new_lower = max(implied_val, old_lower)
+                    contexter.assert_new_var_value(var, Value_Interval(new_lower, val_interval.upper_limit))
+                else:  # Upper limit
+                    old_upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
+                    new_upper = min(implied_val, old_upper)
+                    contexter.assert_new_var_value(var, Value_Interval(val_interval.lower_limit, new_upper))
+
+            new_bounds = []
+            for var, var_values in contexter.asserted_var_values[-1].items():
+                is_single_value_implied = var_values.lower_limit == var_values.upper_limit
+                if var_values.lower_limit is not None and is_single_value_implied:
+                    new_bounds.append(Relation(vars=[var], coefs=[1], rhs=var_values.lower_limit, predicate_symbol='='))
+                    continue
+
+                if var_values.lower_limit is not None:
+                    new_bounds.append(Relation(vars=[var], coefs=[-1], rhs=-var_values.lower_limit, predicate_symbol='<='))
+
+                if var_values.upper_limit is not None:
+                    new_bounds.append(Relation(vars=[var], coefs=[1], rhs=var_values.upper_limit, predicate_symbol='<='))
+
+            def is_bound(node: ASTp_Node):
+                return isinstance(node, Relation) and len(node.vars) == 1
+
+            _new_rich_children = (_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in children if not is_bound(child))
+            new_rich_children = tuple((child for child in _new_rich_children if child != BoolLiteral(True)))
+
+            if any(child == BoolLiteral(False) for child in new_rich_children):
+                return BoolLiteral(False)
+
+            contexter.exit_context()
+
+            new_subtree = (*new_bounds, *new_rich_children)
+            if len(new_subtree) == 0:
+                return BoolLiteral(False)
+            if len(new_subtree) == 1:
+                return new_subtree[0]
+
+            new_node = AST_Connective(referenced_vars=connective.referenced_vars, type=Connective_Type.AND, children=new_subtree)
+            return new_node
+
+        case Connective_Type.OR:
+            _new_children = (_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in connective.children)
+            new_children = tuple(child for child in _new_children if child != BoolLiteral(False))
+
+            if any(child == BoolLiteral(True) for child in new_children):
+                return BoolLiteral(True)
+
+            if len(new_children) == 0:
+                return BoolLiteral(False)
+            if len(new_children) == 1:
+                return new_children[0]
+
+            new_node = AST_Connective(referenced_vars=connective.referenced_vars, type=Connective_Type.OR, children=new_children)
+            return new_node
+        case Connective_Type.EQUIV:
+            new_children = tuple(_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in connective.children)
+            return AST_Connective(referenced_vars=connective.referenced_vars, type=Connective_Type.EQUIV, children=new_children)
+        case _:
+            raise NotImplementedError(f'Connective not handled when doing interval analysis: {connective=}')
+
+def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: Parent_Context_Var_Values) -> ASTp_Node:
     if isinstance(node, Relation):
         relation: Relation = node
 
@@ -1076,127 +1174,48 @@ def _prune_conjunctions_false_due_to_parent_context(node: AST_Node, contexter: P
 
         return Relation(vars=[var], coefs=[1], rhs=implied_val, predicate_symbol='=')
 
-    if not isinstance(node, list):  # Congruences, BoolLiterals etc
+    if isinstance(node, (Congruence, Var, BoolLiteral)):  # Congruences, BoolLiterals etc
         return node
 
-    node_type = ast_get_node_type(node)
+    match node:
+        case AST_Connective():
+            return _prune_in_connective(node, contexter)
 
-    if node_type == 'and':
-        contexter.enter_context()
-
-        children = node[1:]
-        bounds = (child for child in children if isinstance(child, Relation) and len(child.vars) == 1)
-
-        for bound in bounds:
-            var, coef = bound.vars[0], bound.coefs[0]
-            rhs = bound.rhs
-
-            val_interval = contexter.lookup_asserted_values(var)
-
-            if bound.predicate_symbol == '=':
+        case AST_Negation():
+            child = node.child
+            if isinstance(child, Relation) and child.predicate_symbol == '=':
+                # Check if what the negated equation implies is already implied from parent context
+                eq = child
+                var, coef, rhs = eq.vars[0], eq.coefs[0], eq.rhs
                 if (rhs % coef) != 0:
-                    return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (3x = 5 AND <Subformula>)
+                    return BoolLiteral(True)
                 implied_val = rhs // coef
 
+                val_interval = contexter.lookup_asserted_values(var)
                 upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
                 lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
 
+                # If the implied_value is not included in the interval, then we can just ignore it
                 if implied_val < lower or implied_val > upper:
-                    return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (x = 0 AND <Subformula>)
+                    return BoolLiteral(True)
 
-                new_interval = Value_Interval(lower_limit=implied_val, upper_limit=implied_val)
-                contexter.assert_new_var_value(var, new_interval)
-                continue
+            # Once we've passed through a negation we forget everything about parent context.
+            # alternatively, we would need a ritcher interval domain to precisely handle nagations.
+            contexter.enter_blocking_context()
+            new_child = _prune_conjunctions_false_due_to_parent_context(child, contexter)
+            new_node = AST_Negation(referenced_vars=node.referenced_vars, child=new_child)
+            contexter.exit_context()
+            return new_node
 
-            implied_val = math.floor(rhs / coef)
+        case AST_Quantifier():
+            child = _prune_conjunctions_false_due_to_parent_context(node.child, contexter)
+            return AST_Quantifier(referenced_vars=node.referenced_vars, bound_vars=node.bound_vars, child=child)
 
-            if coef < 0:  # Lower limit
-                old_lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
-                new_lower = max(implied_val, old_lower)
-                contexter.assert_new_var_value(var, Value_Interval(new_lower, val_interval.upper_limit))
-            else:  # Upper limit
-                old_upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
-                new_upper = min(implied_val, old_upper)
-                contexter.assert_new_var_value(var, Value_Interval(val_interval.lower_limit, new_upper))
-
-        new_bounds = []
-        for var, var_values in contexter.asserted_var_values[-1].items():
-            is_single_value_implied = var_values.lower_limit == var_values.upper_limit
-            if var_values.lower_limit is not None and is_single_value_implied:
-                new_bounds.append(Relation(vars=[var], coefs=[1], rhs=var_values.lower_limit, predicate_symbol='='))
-                continue
-
-            if var_values.lower_limit is not None:
-                new_bounds.append(Relation(vars=[var], coefs=[-1], rhs=-var_values.lower_limit, predicate_symbol='<='))
-
-            if var_values.upper_limit is not None:
-                new_bounds.append(Relation(vars=[var], coefs=[1], rhs=var_values.upper_limit, predicate_symbol='<='))
-
-        def is_bound(node: AST_Node):
-            return isinstance(node, Relation) and len(node.vars) == 1
-
-        new_children = [_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:] if not is_bound(child)]
-        contexter.exit_context()
-        new_node = ['and', *new_bounds, *new_children]
-
-        if any(child == BoolLiteral(False) for child in new_node[1:]):
-            return BoolLiteral(False)
-
-        new_node = [child for child in new_node if child != BoolLiteral(True)]
-        if len(new_node) == 2:
-            return new_node[1]
-
-        return new_node
-
-    if node_type == 'or':
-        new_children = list(_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:])
-
-        if any(child == BoolLiteral(True) for child in new_children):
-            return BoolLiteral(True)
-
-        new_children = tuple(child for child in new_children if child != BoolLiteral(False))
-
-        if len(new_children) == 1:
-            return new_children[0]
-
-        if len(new_children) == 0:
-            return BoolLiteral(False)
-
-        result_node = [node_type, *new_children]
-        return result_node
-
-    if node_type == 'exists':
-        return [node_type, node[1], _prune_conjunctions_false_due_to_parent_context(node[2], contexter)]
-
-    if node_type == 'not':
-        if isinstance(node[1], Relation) and node[1].predicate_symbol == '=':
-            # Check if what the negated equation implies is already implied from parent context
-            eq = node[1]
-            var, coef, rhs = eq.vars[0], eq.coefs[0], eq.rhs
-            if (rhs % coef) != 0:
-                return BoolLiteral(True)
-            implied_val = rhs // coef
-
-            val_interval = contexter.lookup_asserted_values(var)
-            upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
-            lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
-
-            # If the implied_value is not included in the interval, then we can just ignore it
-            if implied_val < lower or implied_val > upper:
-                return BoolLiteral(True)
-
-        # Once we've passed through a negation we forget everything about parent context.
-        # alternatively, we would need a ritcher interval domain to precisely handle nagations.
-        contexter.enter_blocking_context()
-        new_node = [node_type, _prune_conjunctions_false_due_to_parent_context(node[1], contexter)]
-        contexter.exit_context()
-        return new_node
-
-    new_children = (_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in node[1:])
-    return [node_type, *new_children]
+        case _:
+            raise NotImplementedError(f'ASTp node not handled when doing interval analysis: {node=}')
 
 
-def prune_conjunctions_false_due_to_parent_context(root: AST_Node) -> AST_Node:
+def prune_conjunctions_false_due_to_parent_context(root: ASTp_Node) -> ASTp_Node:
     """
     Remove conjunctions that are false due to them assessing variable values that are falsified in partent contexts.
 

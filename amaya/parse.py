@@ -277,12 +277,13 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
     if solver_config.optimizations.do_light_sat_reasoning:
         formula_to_evaluate = var_bounds_lib.convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(formula_to_evaluate)
 
-    if solver_config.optimizations.do_interval_analysis:
-        logger.debug('Detecting conflicts in formula using interval analysis:  %s', formula_to_evaluate)
-        formula_to_evaluate = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(formula_to_evaluate)
-        logger.debug('Interval analysis done. Result:  %s', formula_to_evaluate)
-
     astp = convert_ast_into_astp(formula_to_evaluate)
+
+    if solver_config.optimizations.do_interval_analysis:
+        logger.debug('Detecting conflicts in formula using interval analysis:  %s', astp)
+        astp = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(astp)
+        logger.debug('Interval analysis done. Result:  %s', astp)
+
     if solver_config.optimizations.do_miniscoping:
         astp = antiprenexing.miniscope_quantifiers(astp)
     return astp
