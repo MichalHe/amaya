@@ -35,24 +35,15 @@ from amaya.relations_structures import (
     Relation,
     Var,
     VariableType,
+    Value_Interval,
     ast_get_binding_list,
     ast_get_node_type,
     make_and_node,
     make_exists_node,
+    pprint_formula,
 )
 
 from amaya import logger
-
-
-@dataclass
-class Value_Interval:
-    lower_limit: Optional[int] = None
-    upper_limit: Optional[int] = None
-
-    def __repr__(self) -> str:
-        lower = self.lower_limit if self.lower_limit is not None else '-inf'
-        upper = self.upper_limit if self.upper_limit is not None else '+inf'
-        return f'<{lower}, {upper}>'
 
 
 @dataclass
@@ -1023,6 +1014,16 @@ class Parent_Context_Var_Values:
         active_ctx = self.asserted_var_values[-1]
         active_ctx[var] = new_interval
 
+    def get_known_variable_domains(self) -> Dict[Var, Value_Interval]:
+        domains = {}
+
+        for context in reversed(self.asserted_var_values):
+            domains.update(context)
+            if len(domains) == len(self.seen_vars):
+                return domains
+
+        return domains
+
 
 def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_Var_Values) -> ASTp_Node:
     match connective.type:
@@ -1094,7 +1095,11 @@ def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_V
             if len(new_subtree) == 1:
                 return new_subtree[0]
 
-            new_node = AST_Connective(referenced_vars=connective.referenced_vars, type=Connective_Type.AND, children=new_subtree)
+            new_node = AST_Connective(referenced_vars=connective.referenced_vars,
+                                      type=Connective_Type.AND,
+                                      children=new_subtree,
+                                      variable_bounds=contexter.get_known_variable_domains())
+
             return new_node
 
         case Connective_Type.OR:
@@ -1225,3 +1230,92 @@ def prune_conjunctions_false_due_to_parent_context(root: ASTp_Node) -> ASTp_Node
     contexter = Parent_Context_Var_Values()
     result = _prune_conjunctions_false_due_to_parent_context(root, contexter)
     return result
+
+
+@dataclass
+class Var_Monotonicity:
+    increasing: bool = False
+    decreasing: bool = False
+    congruence_counts: int = 0
+
+
+def _determine_monotonicity_of_variables(tree: ASTp_Node, vars: Dict[Var, Var_Monotonicity]) -> None:
+    match tree:
+        case Relation():
+            if len(tree.vars) == 1:
+                return
+            for coef, var in tree.linear_terms():
+                if var in vars:
+                    if coef < 0:
+                        vars[var].increasing = True
+                    else:
+                        vars[var].decreasing = True
+        case Congruence():
+            for var in tree.vars:
+                if var in vars:
+                    vars[var].congruence_counts += 1
+
+        case BoolLiteral() | Var():
+            return
+
+        case AST_Connective():
+            for child in tree.children:
+                _determine_monotonicity_of_variables(child, vars)
+
+
+def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]:
+    monotonicity_info = {var: Var_Monotonicity() for var in exists_node.bound_vars}
+    _determine_monotonicity_of_variables(exists_node.child, monotonicity_info)
+
+    can_be_simplified = False
+    for var, var_monotonicity in monotonicity_info.items():
+        can_var_be_simplified = not (var_monotonicity.increasing and var_monotonicity.decreasing)
+        can_be_simplified = can_be_simplified or can_var_be_simplified
+
+    if can_be_simplified:
+        print('Quantifier can be simplified!')
+        pprint_formula(exists_node)
+    else:
+        print('Quantifier CANNOT be simplified!')
+        pprint_formula(exists_node)
+
+    return exists_node, True
+
+
+def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
+    match root:
+        case Relation() | Congruence() | Var() | BoolLiteral():
+            return root, False
+
+        case AST_Connective():
+            is_and_connective = root.type == Connective_Type.AND
+            _optimized_subtree = tuple(_optimize_bottom_quantifiers(child) for child in root.children)
+            optimized_children = tuple(it[0] for it in _optimized_subtree)
+            any_quantifier_present: bool = functools.reduce(lambda x, y: x or y, (it[1] for it in _optimized_subtree), False)
+            new_node = AST_Connective(referenced_vars=root.referenced_vars,
+                                      type=root.type,
+                                      children=optimized_children,
+                                      variable_bounds=root.variable_bounds)
+            return (new_node, any_quantifier_present or not is_and_connective)
+
+        case AST_Negation():
+            optimized_child, any_quantifier_present = _optimize_bottom_quantifiers(root.child)
+            new_node = AST_Negation(referenced_vars=root.referenced_vars, child=optimized_child)
+
+            return new_node, any_quantifier_present
+
+        case AST_Quantifier():
+            optimized_child, any_quantifiers_present = _optimize_bottom_quantifiers(root.child)
+            if any_quantifiers_present:
+                new_node = AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=root.bound_vars, child=optimized_child)
+                return new_node, True
+            new_node, quantifier_lingers = _optimize_exists_tree(root)
+            return new_node, quantifier_lingers
+
+        case _:
+            raise NotImplementedError(f'Unhandled node while optimizing bottom quantifiers {root=}.')
+
+
+def optimize_bottom_quantifiers(root: ASTp_Node) -> ASTp_Node:
+    optimized_tree, _ = _optimize_bottom_quantifiers(root)
+    return optimized_tree

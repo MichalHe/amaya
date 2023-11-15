@@ -13,6 +13,7 @@ from typing import (
     List,
     Dict,
     Generic,
+    Optional,
     Tuple,
     TypeVar,
     Set,
@@ -237,6 +238,17 @@ class VariableType(IntEnum):
 
 
 @dataclass
+class Value_Interval:
+    lower_limit: Optional[int] = None
+    upper_limit: Optional[int] = None
+
+    def __repr__(self) -> str:
+        lower = self.lower_limit if self.lower_limit is not None else '-inf'
+        upper = self.upper_limit if self.upper_limit is not None else '+inf'
+        return f'<{lower}, {upper}>'
+
+
+@dataclass
 class FunctionSymbol:
     name: str
     arity: int
@@ -270,6 +282,7 @@ class Connective_Type(IntEnum):
 class AST_Connective(ASTp_Node_Base):
     type: Connective_Type
     children: Tuple[ASTp_Node, ...]
+    variable_bounds: Optional[Dict[Var, Value_Interval]] = field(default=None, repr=False)
 
 
 ASTp_Leaf_Type_List = (Relation, Congruence, BoolLiteral, Var)
