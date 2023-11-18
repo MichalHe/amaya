@@ -284,6 +284,11 @@ class AST_Connective(ASTp_Node_Base):
     children: Tuple[ASTp_Node, ...]
     variable_bounds: Optional[Dict[Var, Value_Interval]] = field(default=None, repr=False)
 
+    def replace_children(self, new_children: Tuple[ASTp_Node, ...]) -> AST_Connective:
+        return AST_Connective(referenced_vars=self.referenced_vars,
+                              type=self.type,
+                              children=new_children,
+                              variable_bounds=self.variable_bounds)
 
 ASTp_Leaf_Type_List = (Relation, Congruence, BoolLiteral, Var)
 ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral, Var]

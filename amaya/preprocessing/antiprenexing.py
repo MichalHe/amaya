@@ -71,7 +71,15 @@ def _perform_miniscoping(quantif_node: AST_Quantifier) -> ASTp_Node:
         min_scope = tuple(scope_range[child_idx] for child_idx in var_to_child_indices[min_scope_var])
         _referenced_vars: Set[Var] = functools.reduce(set.union, tuple(_get_referenced_vars(child) for child in min_scope), set())
         referenced_vars = tuple(sorted(_referenced_vars))
-        miniscoped_subtree = AST_Connective(referenced_vars=referenced_vars, type=connective.type, children=min_scope) if len(min_scope) > 1 else min_scope[0]
+
+        if len(min_scope) > 1:
+            miniscoped_subtree = AST_Connective(referenced_vars=referenced_vars,
+                                                type=connective.type,
+                                                children=min_scope,
+                                                variable_bounds=connective.variable_bounds)
+        else:
+            miniscoped_subtree = min_scope[0]
+
         miniscoped_node = AST_Quantifier(referenced_vars=referenced_vars,
                                          bound_vars=(min_scope_var,),
                                          child=miniscoped_subtree)

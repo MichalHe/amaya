@@ -1237,13 +1237,28 @@ class Var_Monotonicity:
     increasing: bool = False
     decreasing: bool = False
     congruence_counts: int = 0
+    upper_limit: Optional[int] = None
+    lower_limit: Optional[int] = None
+
+
+def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[Var, Var_Monotonicity]) -> bool:
+    if len(relation.vars) > 1 or relation.predicate_symbol != '<=':
+        return False
+    var, coef = relation.vars[0], relation.coefs[0]
+    bounds = var_info[var]
+    if coef < 0:
+        bounds.lower_limit = math.ceil(relation.rhs / coef)  # -3x <= 1 ---> x >= (-1/3) ---> x is in [0, ...]
+    else:
+        bounds.upper_limit = math.floor(relation.rhs / coef)  # 3x <= 1 ---> x <= (1/3) ---> x is in [..., 0]
+    return True
 
 
 def _determine_monotonicity_of_variables(tree: ASTp_Node, vars: Dict[Var, Var_Monotonicity]) -> None:
     match tree:
         case Relation():
-            if len(tree.vars) == 1:
+            if _set_limit_on_interestring_var_if_bound(tree, vars):
                 return
+
             for coef, var in tree.linear_terms():
                 if var in vars:
                     if coef < 0:
@@ -1263,18 +1278,104 @@ def _determine_monotonicity_of_variables(tree: ASTp_Node, vars: Dict[Var, Var_Mo
                 _determine_monotonicity_of_variables(child, vars)
 
 
+def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int]) -> ASTp_Node | None:
+    """ Substitute a *free* variable with a given value (None=inf). """
+    match root:
+        case Relation() | Congruence():
+            if var not in root.vars:
+                return root
+
+            if not value:
+                return
+
+            new_coefs, new_vars = [], []
+            var_coef = 1
+            for other_coef, other_var in root.linear_terms():
+                if other_var == var:
+                    var_coef = other_coef
+                    continue
+                new_coefs.append(other_coef)
+                new_vars.append(other_var)
+
+            if not new_vars:
+                return
+
+            new_rhs = root.rhs - var_coef*value
+            if isinstance(root, Congruence):
+                return Congruence(vars=new_vars, coefs=new_coefs, rhs=(new_rhs % root.modulus), modulus=root.modulus)
+            return Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=root.predicate_symbol)
+
+        case BoolLiteral() | Var():
+            return root
+
+        case AST_Connective():
+            _subst_children = (_substitute_var_with_value(child, var, value) for child in root.children)
+            subst_children = tuple(child for child in _subst_children if child is not None)
+            if not subst_children:
+                return None
+            if len(subst_children) == 1:
+                return subst_children[0]
+            return root.replace_children(subst_children)
+
+        case AST_Quantifier():
+            new_child = _substitute_var_with_value(root.child, var, value)
+            if not new_child:
+                return None
+            new_bound_vars = root.bound_vars if var not in root.bound_vars else tuple(it for it in root.bound_vars if it != var)
+            return AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=new_bound_vars, child=new_child)
+
+        case AST_Negation():
+            new_child = _substitute_var_with_value(root.child, var, value)
+            if not new_child:
+                return None
+            return AST_Negation(referenced_vars=root.referenced_vars, child=new_child)
+
+        case _:
+            raise ValueError(f'Invalid substitution. Trying substitute {var} := {value} into {type(root)}')
+
+
+
 def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]:
+    """
+    Optimize the structure of exists (X) where X is quantifier free.
+
+    Returns:
+        - A possibly optimized X
+        - True if any quantifier lingers (is still present)
+    """
     monotonicity_info = {var: Var_Monotonicity() for var in exists_node.bound_vars}
     _determine_monotonicity_of_variables(exists_node.child, monotonicity_info)
 
-    can_be_simplified = False
+    vars_to_instantiate = []
     for var, var_monotonicity in monotonicity_info.items():
-        can_var_be_simplified = not (var_monotonicity.increasing and var_monotonicity.decreasing)
-        can_be_simplified = can_be_simplified or can_var_be_simplified
+        is_direction_of_optimal_value_known = not (var_monotonicity.increasing and var_monotonicity.decreasing)
+        if not is_direction_of_optimal_value_known:
+            continue  # Some atoms would like the variable to be large, some would like it to be small...
 
-    if can_be_simplified:
-        print('Quantifier can be simplified!')
-        pprint_formula(exists_node)
+        var_causes_nonlinearities = var_monotonicity.congruence_counts > 0
+        if is_direction_of_optimal_value_known and not var_causes_nonlinearities:
+            vars_to_instantiate.append(var)
+            continue
+
+        # Assess whether the variable can be inf in a suitable direction - then we can deal with one Congruence
+        var_has_limited_nonlinearity = var_monotonicity.congruence_counts = 1
+        can_be_pos_inf = (not var_monotonicity.decreasing) and var_monotonicity.upper_limit is None
+        can_be_neg_inf = (not var_monotonicity.increasing) and var_monotonicity.lower_limit is None
+        if can_be_pos_inf or can_be_neg_inf:
+            vars_to_instantiate.append(var)
+
+    optimized_tree = exists_node.child
+    if vars_to_instantiate:
+        for var in vars_to_instantiate:
+            var_info   = monotonicity_info[var]
+            var_value  = var_info.lower_limit if var_info.decreasing else var_info.upper_limit
+            fixed_tree = _substitute_var_with_value(optimized_tree, var, var_value)
+            if not fixed_tree:
+                return BoolLiteral(True), False
+            optimized_tree = fixed_tree
+
+        quantifier_lingers = len(exists_node.bound_vars) - len(vars_to_instantiate) > 0
+        return optimized_tree, quantifier_lingers
     else:
         print('Quantifier CANNOT be simplified!')
         pprint_formula(exists_node)
@@ -1306,10 +1407,12 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
 
         case AST_Quantifier():
             optimized_child, any_quantifiers_present = _optimize_bottom_quantifiers(root.child)
+            new_node = AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=root.bound_vars, child=optimized_child)
+
             if any_quantifiers_present:
-                new_node = AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=root.bound_vars, child=optimized_child)
                 return new_node, True
-            new_node, quantifier_lingers = _optimize_exists_tree(root)
+
+            new_node, quantifier_lingers = _optimize_exists_tree(new_node)
             return new_node, quantifier_lingers
 
         case _:
