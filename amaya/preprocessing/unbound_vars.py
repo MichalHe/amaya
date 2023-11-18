@@ -1334,6 +1334,12 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int]) 
             raise ValueError(f'Invalid substitution. Trying substitute {var} := {value} into {type(root)}')
 
 
+def _do_bounds_imply_conflict(var_info: Var_Monotonicity) -> bool:
+    if not var_info.upper_limit or not var_info.lower_limit:
+        return False
+
+    return var_info.upper_limit < var_info.lower_limit
+
 
 def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]:
     """
@@ -1348,6 +1354,9 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
 
     vars_to_instantiate = []
     for var, var_monotonicity in monotonicity_info.items():
+        if _do_bounds_imply_conflict(var_monotonicity):
+            return BoolLiteral(False), False
+
         is_direction_of_optimal_value_known = not (var_monotonicity.increasing and var_monotonicity.decreasing)
         if not is_direction_of_optimal_value_known:
             continue  # Some atoms would like the variable to be large, some would like it to be small...
@@ -1378,9 +1387,36 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         return optimized_tree, quantifier_lingers
     else:
         print('Quantifier CANNOT be simplified!')
-        pprint_formula(exists_node)
+        # pprint_formula(exists_node)
 
     return exists_node, True
+
+
+def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type, subtrees: Tuple[ASTp_Node]) -> Tuple[Tuple[ASTp_Node,...], bool]:
+    """
+    Use idempotence and anihilation to simplify the connective subtrees.
+
+    Returns:
+        - simplified subtrees (Bool literals are filtered out)
+        - True if the result is a boolean literal that should replace the connective
+    """
+    if connective_type == Connective_Type.EQUIV:
+        return subtrees, False
+
+    if connective_type == Connective_Type.AND:
+        neutral_elem = BoolLiteral(True)
+        zero_elem = BoolLiteral(False)
+    else:
+        neutral_elem = BoolLiteral(False)
+        zero_elem = BoolLiteral(True)
+
+    if zero_elem in subtrees:
+        return (zero_elem,), True
+
+    result = tuple(it for it in subtrees if it != neutral_elem)
+    if len(result) == 0:
+        return (neutral_elem,), True
+    return result, False
 
 
 def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
@@ -1392,6 +1428,10 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
             is_and_connective = root.type == Connective_Type.AND
             _optimized_subtree = tuple(_optimize_bottom_quantifiers(child) for child in root.children)
             optimized_children = tuple(it[0] for it in _optimized_subtree)
+            optimized_children, connective_destroyed = _use_bool_laws_to_simplify_connective(root.type, optimized_children)
+            if connective_destroyed or len(optimized_children) == 1:
+                return optimized_children[0], False
+
             any_quantifier_present: bool = functools.reduce(lambda x, y: x or y, (it[1] for it in _optimized_subtree), False)
             new_node = AST_Connective(referenced_vars=root.referenced_vars,
                                       type=root.type,
@@ -1401,6 +1441,10 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
 
         case AST_Negation():
             optimized_child, any_quantifier_present = _optimize_bottom_quantifiers(root.child)
+            if optimized_child == BoolLiteral(True):
+                return BoolLiteral(False), False
+            elif optimized_child == BoolLiteral(False):
+                return BoolLiteral(True), False
             new_node = AST_Negation(referenced_vars=root.referenced_vars, child=optimized_child)
 
             return new_node, any_quantifier_present
