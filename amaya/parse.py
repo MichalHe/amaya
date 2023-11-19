@@ -287,7 +287,7 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
     if solver_config.optimizations.do_miniscoping:
         astp = antiprenexing.miniscope_quantifiers(astp)
 
-    astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
+    # astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
 
     return astp
 
@@ -393,7 +393,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             if solver_config.preprocessing.show_preprocessed_formula:
                 import pprint, sys
                 pprint_formula(astp)
-                pprint.pprint(var_table)
+                # pprint.pprint(var_table)
                 sys.exit(0)
 
             alphabet = LSBF_Alphabet.from_vars(var_table.keys())
