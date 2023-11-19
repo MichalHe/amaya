@@ -1392,7 +1392,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
     return exists_node, True
 
 
-def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type, subtrees: Tuple[ASTp_Node]) -> Tuple[Tuple[ASTp_Node,...], bool]:
+def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type, subtrees: Tuple[ASTp_Node]) -> Tuple[ASTp_Node,...]:
     """
     Use idempotence and anihilation to simplify the connective subtrees.
 
@@ -1401,7 +1401,7 @@ def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type, subt
         - True if the result is a boolean literal that should replace the connective
     """
     if connective_type == Connective_Type.EQUIV:
-        return subtrees, False
+        return subtrees
 
     if connective_type == Connective_Type.AND:
         neutral_elem = BoolLiteral(True)
@@ -1411,12 +1411,12 @@ def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type, subt
         zero_elem = BoolLiteral(True)
 
     if zero_elem in subtrees:
-        return (zero_elem,), True
+        return (zero_elem,)
 
     result = tuple(it for it in subtrees if it != neutral_elem)
     if len(result) == 0:
-        return (neutral_elem,), True
-    return result, False
+        return (neutral_elem,)
+    return result
 
 
 def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
@@ -1428,8 +1428,8 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
             is_and_connective = root.type == Connective_Type.AND
             _optimized_subtree = tuple(_optimize_bottom_quantifiers(child) for child in root.children)
             optimized_children = tuple(it[0] for it in _optimized_subtree)
-            optimized_children, connective_destroyed = _use_bool_laws_to_simplify_connective(root.type, optimized_children)
-            if connective_destroyed or len(optimized_children) == 1:
+            optimized_children = _use_bool_laws_to_simplify_connective(root.type, optimized_children)
+            if len(optimized_children) == 1:
                 return optimized_children[0], False
 
             any_quantifier_present: bool = functools.reduce(lambda x, y: x or y, (it[1] for it in _optimized_subtree), False)
