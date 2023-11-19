@@ -155,6 +155,9 @@ class Relation(object):
     def is_hard_bound(self) -> bool:
         return len(self.vars) == 1 and self.predicate_symbol == '<='
 
+    def specifies_a_single_value_for_var(self) -> bool:
+        return len(self.vars) == 1 and self.predicate_symbol == '='
+
 
 @dataclass
 class Congruence:

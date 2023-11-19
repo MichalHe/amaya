@@ -1240,25 +1240,36 @@ class Var_Monotonicity:
     increasing: bool = False
     decreasing: bool = False
     congruence_counts: int = 0
-    upper_limit: Optional[int] = None
-    lower_limit: Optional[int] = None
+    limits: Value_Interval = field(default_factory=Value_Interval)
 
 
 def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[Var, Var_Monotonicity]) -> bool:
-    if not relation.is_hard_bound():
-        return False
+    if relation.is_hard_bound():
+        var, coef = relation.vars[0], relation.coefs[0]
 
-    var, coef = relation.vars[0], relation.coefs[0]
+        if var not in var_info:
+            return True  # The relation is a hard bound (True), but the variable is not considered as interestring
 
-    if var not in var_info:
-        return True  # The relation is a hard bound (True), but the variable is not considered as interestring
+        bounds = var_info[var]
+        if coef < 0:
+            bound_val = math.ceil(relation.rhs / coef)  # -3x <= 1 ---> x >= (-1/3) ---> x is in [0, ...]
+            bounds.limits.try_strengthen_lower(bound_val)
+        else:
+            bound_val = math.floor(relation.rhs / coef)  # 3x <= 1 ---> x <= (1/3) ---> x is in [..., 0]
+            bounds.limits.try_strengthen_upper(bound_val)
+        return True
 
-    bounds = var_info[var]
-    if coef < 0:
-        bounds.lower_limit = math.ceil(relation.rhs / coef)  # -3x <= 1 ---> x >= (-1/3) ---> x is in [0, ...]
-    else:
-        bounds.upper_limit = math.floor(relation.rhs / coef)  # 3x <= 1 ---> x <= (1/3) ---> x is in [..., 0]
-    return True
+    elif relation.specifies_a_single_value_for_var():
+        var, coef = relation.vars[0], relation.coefs[0]
+        if var not in var_info:
+            return True
+
+        bound_val = relation.rhs // coef
+        bounds = var_info[var]
+        bounds.limits.try_strengthen_lower(bound_val)
+        bounds.limits.try_strengthen_upper(bound_val)
+        return True
+    return False
 
 
 def _determine_monotonicity_of_variables(tree: ASTp_Node, vars: Dict[Var, Var_Monotonicity]) -> None:
@@ -1343,10 +1354,10 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int]) 
 
 
 def _do_bounds_imply_conflict(var_info: Var_Monotonicity) -> bool:
-    if not var_info.upper_limit or not var_info.lower_limit:
+    if var_info.limits.lower_limit is None or var_info.limits.upper_limit is None:
         return False
 
-    return var_info.upper_limit < var_info.lower_limit
+    return var_info.limits.upper_limit < var_info.limits.lower_limit
 
 
 def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]:
@@ -1376,8 +1387,8 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
 
         # Assess whether the variable can be inf in a suitable direction - then we can deal with one Congruence
         var_has_limited_nonlinearity = var_monotonicity.congruence_counts = 1
-        can_be_pos_inf = (not var_monotonicity.decreasing) and var_monotonicity.upper_limit is None
-        can_be_neg_inf = (not var_monotonicity.increasing) and var_monotonicity.lower_limit is None
+        can_be_pos_inf = (not var_monotonicity.decreasing) and var_monotonicity.limits.upper_limit is None
+        can_be_neg_inf = (not var_monotonicity.increasing) and var_monotonicity.limits.lower_limit is None
         if can_be_pos_inf or can_be_neg_inf:
             vars_to_instantiate.append(var)
 
@@ -1385,7 +1396,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
     if vars_to_instantiate:
         for var in vars_to_instantiate:
             var_info   = monotonicity_info[var]
-            var_value  = var_info.lower_limit if var_info.decreasing else var_info.upper_limit
+            var_value  = var_info.limits.lower_limit if var_info.decreasing else var_info.limits.upper_limit
             fixed_tree = _substitute_var_with_value(optimized_tree, var, var_value)
             if not fixed_tree:
                 return BoolLiteral(True), False
@@ -1395,7 +1406,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         return optimized_tree, quantifier_lingers
     else:
         print('Quantifier CANNOT be simplified!')
-        pprint_formula(exists_node)
+        # pprint_formula(exists_node)
 
     return exists_node, True
 
