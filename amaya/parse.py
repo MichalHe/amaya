@@ -287,7 +287,7 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
     if solver_config.optimizations.do_miniscoping:
         astp = antiprenexing.miniscope_quantifiers(astp)
 
-    astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
+    # astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
 
     return astp
 

@@ -5,6 +5,7 @@ from dataclasses import (
 )
 from enum import Enum, IntEnum
 import functools
+import math
 from typing import (
     Any,
     Callable,
@@ -151,6 +152,9 @@ class Relation(object):
 
         return self_lin_term == other_lin_term
 
+    def is_hard_bound(self) -> bool:
+        return len(self.vars) == 1 and self.predicate_symbol == '<='
+
 
 @dataclass
 class Congruence:
@@ -246,6 +250,28 @@ class Value_Interval:
         lower = self.lower_limit if self.lower_limit is not None else '-inf'
         upper = self.upper_limit if self.upper_limit is not None else '+inf'
         return f'<{lower}, {upper}>'
+
+    def try_strengthen_lower(self, new_lower: int):
+        if self.lower_limit is None:
+            self.lower_limit = new_lower
+        else:
+            self.lower_limit = max(self.lower_limit, new_lower)
+
+    def try_strengthen_upper(self, new_upper: int):
+        if self.upper_limit is None:
+            self.upper_limit = new_upper
+        else:
+            self.upper_limit = min(self.upper_limit, new_upper)
+
+    def synthetize_atoms(self, var: Var) -> Tuple[Relation, ...]:
+        atoms = []
+        if self.lower_limit is not None:
+            lower_limit = Relation(vars=[var], coefs=[-1], rhs=-self.lower_limit, predicate_symbol='<=')
+            atoms.append(lower_limit)
+        if self.upper_limit is not None:
+            upper_limit = Relation(vars=[var], coefs=[1], rhs=self.upper_limit, predicate_symbol='<=')
+            atoms.append(upper_limit)
+        return tuple(atoms)
 
 
 @dataclass
@@ -378,3 +404,27 @@ def pprint_formula(ast: ASTp_Node, indent: int = 0):
             pprint_formula(ast.child,  indent=indent+1)
         case _:
             raise NotImplementedError(f'Unhandled node while pprinting formula: {ast=}')
+
+
+class Bound_Type(IntEnum):
+    LOWER = 0x01
+    UPPER = 0x02
+
+
+def get_hard_bound_semantics(rel: Relation) -> Tuple[Bound_Type, Var, int]:
+    var, coef = rel.vars[0], rel.coefs[0]
+    if coef < 0:
+        implied_val = math.ceil(rel.rhs / coef)
+        bound_type = Bound_Type.LOWER
+    else:
+        implied_val = math.floor(rel.rhs / coef)
+        bound_type = Bound_Type.UPPER
+
+    return (bound_type, var, implied_val)
+
+
+def compute_implied_bound(var: Var, coef: int, bound_rhs: int) -> int:
+    if coef < 0:
+        return math.ceil(bound_rhs  / coef)
+    return math.floor(bound_rhs / coef)
+

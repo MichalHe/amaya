@@ -30,6 +30,7 @@ from amaya.relations_structures import (
     AST_Quantifier,
     ASTp_Node,
     BoolLiteral,
+    Bound_Type,
     Congruence,
     Connective_Type,
     Relation,
@@ -38,6 +39,7 @@ from amaya.relations_structures import (
     Value_Interval,
     ast_get_binding_list,
     ast_get_node_type,
+    get_hard_bound_semantics,
     make_and_node,
     make_exists_node,
     pprint_formula,
@@ -1054,13 +1056,13 @@ def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_V
                     contexter.assert_new_var_value(var, new_interval)
                     continue
 
-                implied_val = math.floor(rhs / coef)
-
                 if coef < 0:  # Lower limit
+                    implied_val = math.ceil(rhs / coef)
                     old_lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
                     new_lower = max(implied_val, old_lower)
                     contexter.assert_new_var_value(var, Value_Interval(new_lower, val_interval.upper_limit))
                 else:  # Upper limit
+                    implied_val = math.floor(rhs / coef)
                     old_upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
                     new_upper = min(implied_val, old_upper)
                     contexter.assert_new_var_value(var, Value_Interval(val_interval.lower_limit, new_upper))
@@ -1133,11 +1135,11 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
         rhs = relation.rhs
 
         if relation.predicate_symbol == '<=':
-            implied_val = math.floor(rhs / coef)
 
             ctx_vals = contexter.lookup_asserted_values(var)
 
             if coef < 0:
+                implied_val = math.ceil(rhs / coef)
                 # Look whether the current bound requires var value to be higher then possible due to parent's constraints
                 parents_upper_limit = ctx_vals.upper_limit if ctx_vals.upper_limit is not None else implied_val + 1
                 if implied_val > parents_upper_limit:  # Parent asserts that x must be <= than 5, child says x must be >= 6
@@ -1152,6 +1154,7 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
                     rhs = -ctx_lower_val   # Because coef is negative -x <= k  <-> x >= -k
                     return Relation(vars=relation.vars, coefs=[-1], rhs=rhs, predicate_symbol='<=')
             else:  # coef > 0
+                implied_val = math.floor(rhs / coef)
                 parents_lower_limit = ctx_vals.lower_limit if ctx_vals.lower_limit is not None else implied_val - 1
                 if implied_val < parents_lower_limit:  # Parent asserts that x must be >= 0, child says x must be <= -1
                     return BoolLiteral(False)
@@ -1242,9 +1245,14 @@ class Var_Monotonicity:
 
 
 def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[Var, Var_Monotonicity]) -> bool:
-    if len(relation.vars) > 1 or relation.predicate_symbol != '<=':
+    if not relation.is_hard_bound():
         return False
+
     var, coef = relation.vars[0], relation.coefs[0]
+
+    if var not in var_info:
+        return True  # The relation is a hard bound (True), but the variable is not considered as interestring
+
     bounds = var_info[var]
     if coef < 0:
         bounds.lower_limit = math.ceil(relation.rhs / coef)  # -3x <= 1 ---> x >= (-1/3) ---> x is in [0, ...]
@@ -1387,9 +1395,43 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         return optimized_tree, quantifier_lingers
     else:
         print('Quantifier CANNOT be simplified!')
-        # pprint_formula(exists_node)
+        pprint_formula(exists_node)
 
     return exists_node, True
+
+
+
+def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,  connective_children: Tuple[ASTp_Node, ...]) -> Tuple[ASTp_Node, ...]:
+    if connective_type != Connective_Type.AND:
+        return connective_children
+
+    var_bounds: Dict[Var, Value_Interval] = defaultdict(Value_Interval)
+
+    untouched_subtrees = []
+    for child in connective_children:
+        if not (isinstance(child, Relation) and child.is_hard_bound()):
+            untouched_subtrees.append(child)
+            continue
+
+        bound_type, var, bound_value = get_hard_bound_semantics(child)
+        bounds = var_bounds[var]
+
+        if bound_type == Bound_Type.LOWER:
+            bounds.try_strengthen_lower(bound_value)
+        else:
+            bounds.try_strengthen_upper(bound_value)
+
+        if bounds.lower_limit is None or bounds.upper_limit is None:
+            continue
+
+        if bounds.lower_limit > bounds.upper_limit:
+            return (BoolLiteral(False), )
+
+    new_bounds = []
+    for var, bound in var_bounds.items():
+        new_bounds.extend(bound.synthetize_atoms(var))
+
+    return tuple(new_bounds) + tuple(untouched_subtrees)
 
 
 def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type, subtrees: Tuple[ASTp_Node]) -> Tuple[ASTp_Node,...]:
@@ -1428,6 +1470,7 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
             is_and_connective = root.type == Connective_Type.AND
             _optimized_subtree = tuple(_optimize_bottom_quantifiers(child) for child in root.children)
             optimized_children = tuple(it[0] for it in _optimized_subtree)
+            optimized_children = _apply_bound_based_theory_reasoning(root.type, optimized_children)
             optimized_children = _use_bool_laws_to_simplify_connective(root.type, optimized_children)
             if len(optimized_children) == 1:
                 return optimized_children[0], False
