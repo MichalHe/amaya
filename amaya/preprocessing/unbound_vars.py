@@ -1239,7 +1239,7 @@ def prune_conjunctions_false_due_to_parent_context(root: ASTp_Node) -> ASTp_Node
 class Var_Monotonicity:
     increasing: bool = False
     decreasing: bool = False
-    congruence_counts: int = 0
+    congruence_coefs: List[int] = field(default_factory=list)
     limits: Value_Interval = field(default_factory=Value_Interval)
 
 
@@ -1300,9 +1300,9 @@ def _determine_monotonicity_of_variables(tree: ASTp_Node, vars: Dict[Var, Var_Mo
                     vars[var].decreasing = True
 
         case Congruence():
-            for var in tree.vars:
+            for var_idx, var in enumerate(tree.vars):
                 if var in vars:
-                    vars[var].congruence_counts += 1
+                    vars[var].congruence_coefs.append(tree.coefs[var_idx])
 
         case BoolLiteral() | Var():
             return
@@ -1573,16 +1573,16 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         if not is_direction_of_optimal_value_known:
             continue  # Some atoms would like the variable to be large, some would like it to be small...
 
-        var_causes_nonlinearities = var_monotonicity.congruence_counts > 0
+        var_causes_nonlinearities = len(var_monotonicity.congruence_coefs) > 0
         if is_direction_of_optimal_value_known and not var_causes_nonlinearities:
             vars_to_instantiate.append(var)
             continue
 
         # Assess whether the variable can be inf in a suitable direction - then we can deal with one Congruence
-        var_has_limited_nonlinearity = var_monotonicity.congruence_counts = 1
+        var_has_limited_nonlinearity = len(var_monotonicity.congruence_coefs) == 1
         can_be_pos_inf = (not var_monotonicity.decreasing) and var_monotonicity.limits.upper_limit is None
         can_be_neg_inf = (not var_monotonicity.increasing) and var_monotonicity.limits.lower_limit is None
-        if can_be_pos_inf or can_be_neg_inf:
+        if (can_be_pos_inf or can_be_neg_inf) and var_has_limited_nonlinearity and abs(var_monotonicity.congruence_coefs[0]) == 1:
             vars_to_instantiate.append(var)
 
     optimized_tree = exists_node.child
