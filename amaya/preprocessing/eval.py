@@ -507,6 +507,18 @@ def add_reminder_single_variable_rewrite_using_congruence(rewrite_instructions: 
 
 
 def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var, int], node: NonlinTermNode, rewrite_instructions: RewriteInstructions):
+    """
+    Linearize mod terms sharing the same linear terms and modulus.
+
+    If there are two terms (mod (+ x k1) M) and (mod (+ x k2) M) with the same linear terms in the body
+    and same modulus, but different offsets then we can express the second modulus as the first
+    one + offset (linearization).
+
+    Params:
+        - emitted_reminder_with_offset: A mod-var that has already been emitted together with its k1
+        - node: A node capturing the (mod (+ x k2) M)
+        - rewrite_instructions: Instructions to put the linearization formulae into.
+    """
     emitted_var, emitted_var_offset = emitted_reminder_with_offset
 
     # both Emitted and New are in [0, M-1] and we have   E + E_offset ~= N + N_offset
@@ -524,7 +536,7 @@ def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var
         if low == high:
             eq = Relation(vars=[emitted_var], coefs=[1], rhs=low, predicate_symbol='=')
             return ['and', eq, fn_dependence]
-        low_bound  = Relation(vars=[emitted_var], coefs=[-1], rhs=low, predicate_symbol='<=')
+        low_bound  = Relation(vars=[emitted_var], coefs=[-1], rhs=-low, predicate_symbol='<=')
         high_bound = Relation(vars=[emitted_var], coefs=[1], rhs=high, predicate_symbol='<=')
         return ['and', low_bound, high_bound, fn_dependence]
 

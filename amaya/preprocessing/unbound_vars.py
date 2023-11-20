@@ -1408,7 +1408,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         rel = exists_node.child
         if rel.predicate_symbol == '=':
             bound_vars_coefs = []
-            for var, coef in rel.linear_terms():
+            for coef, var in rel.linear_terms():
                 if var in bound_vars:
                     bound_vars_coefs.append(coef)
             gcd = math.gcd(*bound_vars_coefs)
@@ -1506,6 +1506,7 @@ def _optimize_exists_tree_using_const_values_only(exists_node: AST_Quantifier) -
 
     result: ASTp_Node = exists_node
     for var, value in substitutions_to_make:
+        print(f'Var value is known: {var}={value}')
         new_node = _substitute_var_with_value(result, var, value)
         result = new_node
 
