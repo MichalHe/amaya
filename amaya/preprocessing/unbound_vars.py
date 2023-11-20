@@ -1394,6 +1394,144 @@ def _do_bounds_imply_conflict(var_info: Var_Monotonicity) -> bool:
     return var_info.limits.upper_limit < var_info.limits.lower_limit
 
 
+@dataclass
+class Rewrite_Info:
+    result: ASTp_Node
+    rewrite_happend: bool = False
+    should_continue: bool = True  # Contains meaningful value only when rewrite_happend=True
+    quantifier_present: bool = True  # Contains meaningful value only when rewrite_happend=True
+
+
+def _rewrite_exists_equations(exists_node: AST_Quantifier) -> Optional[Tuple[ASTp_Node, bool]]:
+    if not isinstance(exists_node.child, Relation):
+        return None
+
+    bound_vars = exists_node.bound_vars
+    rel = exists_node.child
+    if rel.predicate_symbol == '=':
+        bound_vars_coefs = []
+        for coef, var in rel.linear_terms():
+            if var in bound_vars:
+                bound_vars_coefs.append(coef)
+        gcd = math.gcd(*bound_vars_coefs)
+        if not bound_vars_coefs:
+            return rel, False
+        if gcd == 1:
+            return BoolLiteral(True), False
+    else:
+        if any(bound_var in rel.vars for bound_var in bound_vars):
+            return BoolLiteral(True), False
+        else: # Inequation that does not speak about the quantified variable.
+            return exists_node.child, False
+    return None
+
+
+def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_Info:
+    if not isinstance(exists_node.child, AST_Connective) or exists_node.child.type != Connective_Type.AND:
+        return Rewrite_Info(result=exists_node, rewrite_happend=False)
+
+    and_node: AST_Connective = exists_node.child
+
+    if not all(isinstance(subtree, Relation) for subtree in and_node.children):
+        return Rewrite_Info(result=exists_node, rewrite_happend=False)
+
+    # E(x1) (x1 >= 0 /\ x1 - 5x2 \in [0, 4])  <-->  x2 >= 0
+    # E(x1) (x1 >= 0 /\ x1  = 5x2)            <-->  True
+    # E(x1) (x1 >= 0 /\ 5x1 = x2)             <-->  (x2 = 0 mod 5) /\ x2 >= 0
+    Linear_Term = Tuple[int, Var]
+    for bound_var in exists_node.bound_vars:
+
+        bound_var_value = Value_Interval()
+
+        dependencies: Dict[Var, List[int]] = defaultdict(list)
+
+        is_surjection = False
+
+        relations: Tuple[Relation,...] = and_node.children  # type: ignore
+        for subtree_idx, subtree in enumerate(relations):
+            assert isinstance(subtree, Relation)
+            if not bound_var in subtree.vars:
+                continue
+
+            if subtree.is_hard_bound():
+                bound_type, _, bound_val = get_hard_bound_semantics(subtree)
+                if bound_type == Bound_Type.LOWER:
+                    bound_var_value.try_strengthen_lower(bound_val)
+                else:
+                    bound_var_value.try_strengthen_upper(bound_val)
+                continue
+
+            for var in subtree.vars:
+                if var == bound_var:
+                    continue
+                dependencies[var].append(subtree_idx)
+
+        is_fin = (bound_var_value.upper_limit is not None) and (bound_var_value.lower_limit is not None)
+        if is_fin:
+            continue
+
+        rels_to_replace: List[Tuple[List[int], List[ASTp_Node]]] = []
+        for dependent_var, relation_indices in dependencies.items():
+            if not len(relation_indices) == 2:
+                continue
+
+            rel1, rel2 = relations[relation_indices[0]], relations[relation_indices[1]]
+
+            if rel1.predicate_symbol != '<=' or rel2.predicate_symbol != '<=':
+                continue
+
+            rel1_terms = tuple(rel1.linear_terms())
+            rel2_terms = tuple(rel2.linear_terms())
+            rel2_terms_negated = tuple((-it[0], it[1]) for it in rel2_terms)
+
+            are_terms_complementary = rel1_terms == rel2_terms_negated
+            if not are_terms_complementary:
+                continue
+
+            bound_var_idx = rel1.vars.index(bound_var)
+            dep_var_idx = 1 - bound_var_idx
+            pos, neg = rel1, rel2
+
+            if abs(pos.coefs[bound_var_idx]) != 1:
+                continue
+
+            if pos.coefs[bound_var_idx] == -1:
+                pos, neg = neg, pos
+
+            # pos :=  1x + k*<neg> <= Z1,
+            # neg := -1x - k*<neg> <= Z2,
+            value_interval = Value_Interval(lower_limit=neg.rhs, upper_limit=pos.rhs)
+            if value_interval.lower_limit != 0:
+                continue
+
+            other_var_coef = pos.coefs[dep_var_idx]
+
+            if value_interval.upper_limit != (-other_var_coef) - 1:
+                continue
+
+            new_bounds: List[ASTp_Node] = list(bound_var_value.synthetize_atoms(rel1.vars[dep_var_idx]))
+            rels_to_replace.append((relation_indices, new_bounds))
+
+        added_subformulae: List[ASTp_Node] = []
+        removed_subformulae_indices: List[int] = []
+        for thrown_out_atom_indices, new_atoms in rels_to_replace:
+            removed_subformulae_indices.extend(thrown_out_atom_indices)
+            added_subformulae.extend(new_atoms)
+
+        kept_relations: Tuple[ASTp_Node,...] = tuple(subtree for subtree_idx, subtree in enumerate(relations) if subtree_idx not in removed_subformulae_indices)
+        new_node_subtrees = kept_relations + tuple(added_subformulae)
+
+        new_connective = AST_Connective(referenced_vars=and_node.referenced_vars, type=and_node.type, children=new_node_subtrees)
+
+        result = AST_Quantifier(referenced_vars=exists_node.referenced_vars,
+                                bound_vars=exists_node.bound_vars,
+                                child=new_connective)
+
+        return Rewrite_Info(result=result, rewrite_happend=True, should_continue=True, quantifier_present=True)
+
+    return Rewrite_Info(result=exists_node, rewrite_happend=False, should_continue=True, quantifier_present=True)
+
+
 def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]:
     """
     Optimize the structure of exists (X) where X is quantifier free.
@@ -1403,25 +1541,19 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         - True if any quantifier lingers (is still present)
     """
 
-    if isinstance(exists_node.child, Relation):
-        bound_vars = exists_node.bound_vars
-        rel = exists_node.child
-        if rel.predicate_symbol == '=':
-            bound_vars_coefs = []
-            for coef, var in rel.linear_terms():
-                if var in bound_vars:
-                    bound_vars_coefs.append(coef)
-            gcd = math.gcd(*bound_vars_coefs)
-            if not bound_vars_coefs:
-                return rel, False
-            if gcd == 1:
-                return BoolLiteral(True), False
-        else:
-            if any(bound_var in rel.vars for bound_var in bound_vars):
-                return BoolLiteral(True), False
-            else:
-                return exists_node.child, False
+    # Apply specific rewrite rules
+    if (rewrite_info := _rewrite_exists_equations(exists_node)):
+        return rewrite_info
 
+    rewrite_info = _rewrite_surjective_transformations(exists_node)
+    if rewrite_info.rewrite_happend:
+        if not rewrite_info.should_continue:
+            return rewrite_info.result, rewrite_info.quantifier_present
+
+        assert rewrite_info.quantifier_present
+        assert isinstance(rewrite_info.result, AST_Quantifier)
+
+        exists_node = rewrite_info.result
 
     monotonicity_info = {var: Var_Monotonicity() for var in exists_node.bound_vars}
     _determine_monotonicity_of_variables(exists_node.child, monotonicity_info, is_positive=True)
