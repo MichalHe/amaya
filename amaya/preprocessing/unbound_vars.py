@@ -1493,7 +1493,8 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
     if not all(isinstance(subtree, Relation) for subtree in and_node.children):
         return Rewrite_Info(result=exists_node, rewrite_happend=False)
 
-    # E(x1) (x1 >= 0 /\ x1 - 5x2 \in [0, 4])  <-->  x2 >= 0
+    # E(x1) (x1 >= 0 /\ x1 - 5x2 \in [0, 4])    <-->  x2 >= 0    [IMPLEMENTED]
+    # E(x2) (x2 >= 0 /\ x1 - 5x2 \in [K, K+4])  <-->  x1 >= K    [NOT IMPLEMENTED]
     # E(x1) (x1 >= 0 /\ x1  = 5x2)            <-->  True
     # E(x1) (x1 >= 0 /\ 5x1 = x2)             <-->  (x2 = 0 mod 5) /\ x2 >= 0
     Linear_Term = Tuple[int, Var]
@@ -1543,32 +1544,48 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
             rel2_terms_negated = tuple((-it[0], it[1]) for it in rel2_terms)
 
             are_terms_complementary = rel1_terms == rel2_terms_negated
-            if not are_terms_complementary:
+            if not are_terms_complementary or len(rel1_terms) > 2:
                 continue
 
             bound_var_idx = rel1.vars.index(bound_var)
             dep_var_idx = 1 - bound_var_idx
             pos, neg = rel1, rel2
 
-            if abs(pos.coefs[bound_var_idx]) != 1:
-                continue
+            if abs(pos.coefs[bound_var_idx]) == 1:  #  E(x1) (x1 >= 0 /\ x1 - 5x2 \in [0, 4])    <-->  x2 >= 0
+                if pos.coefs[bound_var_idx] == -1:
+                    pos, neg = neg, pos
 
-            if pos.coefs[bound_var_idx] == -1:
-                pos, neg = neg, pos
+                # pos :=  1x + k*<neg> <= Z1,
+                # neg := -1x - k*<neg> <= Z2,
+                value_interval = Value_Interval(lower_limit=neg.rhs, upper_limit=pos.rhs)
+                if value_interval.lower_limit != 0:
+                    continue
 
-            # pos :=  1x + k*<neg> <= Z1,
-            # neg := -1x - k*<neg> <= Z2,
-            value_interval = Value_Interval(lower_limit=neg.rhs, upper_limit=pos.rhs)
-            if value_interval.lower_limit != 0:
-                continue
+                other_var_coef = pos.coefs[dep_var_idx]
 
-            other_var_coef = pos.coefs[dep_var_idx]
+                if value_interval.upper_limit != (-other_var_coef) - 1:
+                    continue
 
-            if value_interval.upper_limit != (-other_var_coef) - 1:
-                continue
+                new_bounds: List[ASTp_Node] = list(bound_var_value.synthetize_atoms(rel1.vars[dep_var_idx]))
+                rels_to_replace.append((relation_indices, new_bounds))
 
-            new_bounds: List[ASTp_Node] = list(bound_var_value.synthetize_atoms(rel1.vars[dep_var_idx]))
-            rels_to_replace.append((relation_indices, new_bounds))
+            elif abs(pos.coefs[dep_var_idx]) == 1:  #  E(x2) (x2 >= 0 /\ x1 - 5x2 \in [K, K+4])  <-->  x1 >= K
+                if pos.coefs[dep_var_idx] == -1:  # Pos looks like 5x2 - x1, swap so pos would be x1 - 5x2
+                    pos, neg = neg, pos
+
+                # pos :=  1x - 5x2 <= Z1,
+                # neg := -1x - 5x2 <= Z2    <=>   1x + 5x2 >= -Z2
+                value_interval_width = pos.rhs + neg.rhs + 1# -(-Z2); +1 because range is inclusive, i.e., [a,a] contains 1 number
+                bound_var_coef = -pos.coefs[bound_var_idx]
+
+                if value_interval_width != bound_var_coef:
+                    continue
+
+                dep_var = pos.vars[dep_var_idx]
+                implied_bound = Relation(vars=[dep_var], coefs=[-1], rhs=neg.rhs, predicate_symbol='<=')
+
+                print(f'Replacing {pos}, {neg} with {implied_bound} at {exists_node}')
+                rels_to_replace.append((relation_indices, [implied_bound]))
 
         added_subformulae: List[ASTp_Node] = []
         removed_subformulae_indices: List[int] = []
@@ -1583,7 +1600,7 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
 
         result = AST_Quantifier(referenced_vars=exists_node.referenced_vars,
                                 bound_vars=exists_node.bound_vars,
-                                child=new_connective)
+                                child=new_connective if len(new_connective.children) > 1 else new_connective.children[0])
 
         return Rewrite_Info(result=result, rewrite_happend=True, should_continue=True, quantifier_present=True)
 
@@ -1743,32 +1760,42 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
 
     var_bounds: Dict[Var, Value_Interval] = defaultdict(Value_Interval)
 
-    untouched_subtrees = []
-    for child in connective_children:
-        if not (isinstance(child, Relation) and child.is_hard_bound()):
-            untouched_subtrees.append(child)
+    untouched_subtrees: List[Tuple[ASTp_Node, bool]] = []
+    for child, does_child_contain_quantifier in connective_children:
+        if not isinstance(child, Relation) or len(child.vars):
+            untouched_subtrees.append((child, does_child_contain_quantifier))
             continue
 
-        bound_type, var, bound_value = get_hard_bound_semantics(child)
+        var = child.vars[0]
         bounds = var_bounds[var]
 
-        if bound_type == Bound_Type.LOWER:
-            bounds.try_strengthen_lower(bound_value)
-        else:
-            bounds.try_strengthen_upper(bound_value)
+        if child.is_hard_bound():
+            bound_type, _, bound_value = get_hard_bound_semantics(child)
+            if bound_type == Bound_Type.LOWER:
+                bounds.try_strengthen_lower(bound_value)
+            else:
+                bounds.try_strengthen_upper(bound_value)
+
+        elif child.specifies_a_single_value_for_var():
+            if child.is_unsat_eq():
+                return ((BoolLiteral(False), False), )
+
+            implied_val = child.rhs // child.coefs[0]
+            bounds.try_strengthen_lower(implied_val)
+            bounds.try_strengthen_upper(implied_val)
 
         if bounds.lower_limit is None or bounds.upper_limit is None:
             continue
 
-        if bounds.lower_limit > bounds.upper_limit:
+        if bounds.implies_contradiction():
             return ((BoolLiteral(False), False), )
 
     new_bounds = []
     for var, bound in var_bounds.items():
-        new_bounds.extend(bound.synthetize_atoms(var))
+        new_bounds.extend((bound, False) for bound in bound.synthetize_atoms(var))
 
-    return tuple(new_bounds) + tuple(untouched_subtrees)
-
+    result = tuple(new_bounds) + tuple(untouched_subtrees)
+    return result
 
 def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type,
                                           subtrees: Tuple[Tuple[ASTp_Node, bool], ...]) -> Tuple[Tuple[ASTp_Node, bool], ...]:

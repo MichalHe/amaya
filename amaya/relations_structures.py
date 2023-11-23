@@ -158,6 +158,13 @@ class Relation(object):
     def specifies_a_single_value_for_var(self) -> bool:
         return len(self.vars) == 1 and self.predicate_symbol == '='
 
+    def is_unsat_eq(self) -> bool:
+        if self.predicate_symbol != '=':
+            return False
+
+        gcd = math.gcd(*self.coefs)
+        return (self.rhs % gcd) != 0
+
 
 @dataclass
 class Congruence:
