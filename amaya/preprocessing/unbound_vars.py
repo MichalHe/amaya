@@ -43,6 +43,7 @@ from amaya.relations_structures import (
     make_and_node,
     make_exists_node,
     pprint_formula,
+    unzip_lin_terms,
 )
 
 from amaya import logger
@@ -1240,7 +1241,7 @@ def prune_conjunctions_false_due_to_parent_context(root: ASTp_Node) -> ASTp_Node
 class Var_Monotonicity:
     increasing: bool = False
     decreasing: bool = False
-    congruence_coefs: List[int] = field(default_factory=list)
+    congruences: List[Congruence] = field(default_factory=list)
     limits: Value_Interval = field(default_factory=Value_Interval)
 
 
@@ -1303,7 +1304,7 @@ def _determine_monotonicity_of_variables(tree: ASTp_Node, vars: Dict[Var, Var_Mo
         case Congruence():
             for var_idx, var in enumerate(tree.vars):
                 if var in vars:
-                    vars[var].congruence_coefs.append(tree.coefs[var_idx])
+                    vars[var].congruences.append(tree)
 
         case BoolLiteral() | Var():
             return
@@ -1616,6 +1617,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
     _determine_monotonicity_of_variables(exists_node.child, monotonicity_info, is_positive=True)
 
     vars_to_instantiate = []
+    stomped_congruences: List[ASTp_Node] = []
     for var, var_monotonicity in monotonicity_info.items():
         if _do_bounds_imply_conflict(var_monotonicity):
             return BoolLiteral(False), False
@@ -1630,17 +1632,34 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         if not is_direction_of_optimal_value_known:
             continue  # Some atoms would like the variable to be large, some would like it to be small...
 
-        var_causes_nonlinearities = len(var_monotonicity.congruence_coefs) > 0
+        var_causes_nonlinearities = len(var_monotonicity.congruences) > 0
         if is_direction_of_optimal_value_known and not var_causes_nonlinearities:
             vars_to_instantiate.append(var)
             continue
 
         # Assess whether the variable can be inf in a suitable direction - then we can deal with one Congruence
-        var_has_limited_nonlinearity = len(var_monotonicity.congruence_coefs) == 1
+        var_has_limited_nonlinearity = len(var_monotonicity.congruences) == 1
         can_be_pos_inf = (not var_monotonicity.decreasing) and var_monotonicity.limits.upper_limit is None
         can_be_neg_inf = (not var_monotonicity.increasing) and var_monotonicity.limits.lower_limit is None
-        if (can_be_pos_inf or can_be_neg_inf) and var_has_limited_nonlinearity and abs(var_monotonicity.congruence_coefs[0]) == 1:
-            vars_to_instantiate.append(var)
+        can_be_inf = can_be_pos_inf or can_be_neg_inf
+        if can_be_inf and var_has_limited_nonlinearity:
+            congruence = var_monotonicity.congruences[0]
+            var_idx = congruence.vars.index(var)
+            coef = (-congruence.coefs[var_idx] + congruence.modulus) % congruence.modulus  # Move x to the other side
+            new_mod = gcd(coef, congruence.modulus)
+            if gcd(coef, congruence.modulus) == 1:
+                vars_to_instantiate.append(var)
+            else:
+                # For example 2x = <TERM> (mod 6) - this says that the value of <TERM> should belong into <2>={0, 2, 4, 6, 8, 10, ...}
+                # Therefore, we can rewrite the atom into (<TERM> = 0 mod 2)
+                vars_to_instantiate.append(var)  # Let var be instantiated as +/- inf, dropping all nodes with that variable
+
+                remaining_lin_terms = [t for t in congruence.linear_terms() if t[1] != var]
+                remaining_coefs, remaining_vars = unzip_lin_terms(remaining_lin_terms)
+                new_rhs =  congruence.rhs % new_mod
+
+                new_congruence = Congruence(vars=remaining_vars, coefs=remaining_coefs, rhs=new_rhs, modulus=new_mod)
+                stomped_congruences.append(new_congruence)
 
     optimized_tree = exists_node.child
     if vars_to_instantiate:
@@ -1653,6 +1672,12 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
             optimized_tree = fixed_tree
 
         quantifier_lingers = len(exists_node.bound_vars) - len(vars_to_instantiate) > 0
+
+        if stomped_congruences:
+            new_subtrees = tuple((optimized_tree, *stomped_congruences))
+            new_node = AST_Connective(type=Connective_Type.AND, children=new_subtrees, variable_bounds=None, referenced_vars=exists_node.referenced_vars)
+            return new_node, quantifier_lingers
+
         return optimized_tree, quantifier_lingers
 
     # print('Quantifier CANNOT be simplified!')

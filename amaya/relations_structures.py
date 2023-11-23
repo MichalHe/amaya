@@ -449,3 +449,10 @@ def compute_implied_bound(var: Var, coef: int, bound_rhs: int) -> int:
         return math.ceil(bound_rhs  / coef)
     return math.floor(bound_rhs / coef)
 
+
+def unzip_lin_terms(terms: Iterable[Tuple[int, Var]]) -> Tuple[List[int], List[Var]]:
+    vars, coefs = [], []
+    for coef, var in terms:
+        vars.append(var)
+        coefs.append(coef)
+    return coefs, vars
