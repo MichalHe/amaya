@@ -287,7 +287,6 @@ benchmark_subparser.add_argument('--execute-times',
 
 benchmark_subparser.add_argument('--output-format',
                                  choices=['json', 'csv'],
-                                 default='json',
                                  metavar='fmt',
                                  dest='output_format',
                                  help='Specifies the output format for the benchmark reports.')
@@ -623,6 +622,7 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
             with open(benchmark_file) as benchmark_input_file:
                 # Clear sylvan cache if running multiple evaluations, so that the measurements do not interfere.
                 if solver_config.backend_type == parse.BackendType.MTBDD:
+                    from amaya.mtbdd_transitions import MTBDDTransitionFn
                     MTBDDTransitionFn.call_clear_cachce()
                     MTBDDTransitionFn.call_sylvan_gc()
 
@@ -653,8 +653,13 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                         failed += 1
                         executed_benchmarks[benchmark_file].failed = True
 
-    print(f'Overall failed tests: {failed}/{len(benchmark_files)}', file=sys.stderr)
-    print(f'Overall failed tests:', ' '.join(b for b, r in executed_benchmarks.items() if r.failed), file=sys.stderr)
+    print(f'Failed: {failed}/{len(benchmark_files)}', file=sys.stderr)
+    if failed:
+        failed_tests = [run_sample.path for run_sample in executed_benchmarks.values()]
+        print(f'Failed tests:', file=sys.stderr)
+        for run_sample in executed_benchmarks.values():
+            print(f'  - {run_sample.path}')
+
     report = list(map(BenchmarkStat.as_dict, executed_benchmarks.values()))
 
     if args.output_format == 'json':
