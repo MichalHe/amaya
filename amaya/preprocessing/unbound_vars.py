@@ -18,7 +18,7 @@ from typing import (
     Tuple,
     Union,
 )
-from amaya.preprocessing.eval import VarInfo, split_lin_terms_into_vars_and_coefs
+from amaya.preprocessing.eval import Scoper, VarInfo, split_lin_terms_into_vars_and_coefs
 
 from amaya.relations_structures import (
     AST_Atom,
@@ -990,6 +990,7 @@ def detect_conflics_on_isomorphic_fragments(ast: AST_Node) -> AST_Node:
 
 @dataclass
 class Parent_Context_Var_Values:
+    """ Keeps track of values asserted in somewhere parent nodes. """
     seen_vars: Set[Var] = field(default_factory=set)
     asserted_var_values: List[Dict[Var, Value_Interval]] = field(default_factory=lambda: [defaultdict(Value_Interval)])
 
@@ -1321,11 +1322,18 @@ def _determine_monotonicity_of_variables(tree: ASTp_Node, vars: Dict[Var, Var_Mo
             raise ValueError(f'Node not handled when determining monotonicity of variable: {tree=}')
 
 
-def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int]) -> ASTp_Node:
+def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], contexter: Parent_Context_Var_Values) -> ASTp_Node:
     """ Substitute a *free* variable with a given value (None=inf). """
     match root:
         case Relation() | Congruence():
             if var not in root.vars:
+                # Just make note about the var values asserted here, as other places where the substitution
+                # was successful might induce a conflict.
+                if isinstance(root, Relation) and len(root.vars) == 1:
+                    other_var = root.vars[0]
+                    value_interval = contexter.lookup_asserted_values(other_var)
+                    value_interval.apply_assertion(root)
+                    contexter.assert_new_var_value(other_var, value_interval)
                 return root
 
             if value is None:
@@ -1340,7 +1348,6 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int]) 
                 new_coefs.append(other_coef)
                 new_vars.append(other_var)
 
-
             new_rhs = root.rhs - var_coef*value
 
             if not new_vars:
@@ -1353,14 +1360,59 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int]) 
 
             if isinstance(root, Congruence):
                 return Congruence(vars=new_vars, coefs=new_coefs, rhs=(new_rhs % root.modulus), modulus=root.modulus)
-            return Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=root.predicate_symbol)
+
+            coefs_gcd = math.gcd(*new_coefs)
+            if root.predicate_symbol == '=' and (new_rhs % coefs_gcd) != 0:
+                # Unsat, e.g., 3x = 4 does not have a solution in integers
+                return BoolLiteral(False)
+
+            new_rhs = math.floor(new_rhs / coefs_gcd)
+            new_coefs = [coef // coefs_gcd for coef in new_coefs]
+            relation = Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=root.predicate_symbol)
+
+            strengthened = False
+            if relation.is_hard_bound():
+                bound_type, affected_var, bound_val = get_hard_bound_semantics(relation)
+                value_interval = contexter.lookup_asserted_values(affected_var)
+                if bound_type == Bound_Type.LOWER:
+                    value_interval.try_strengthen_lower(bound_val)
+                else:
+                    value_interval.try_strengthen_upper(bound_val)
+
+            elif relation.specifies_a_single_value_for_var():
+                affected_var = relation.vars[0]
+                implied_val = relation.rhs // relation.coefs[0]  # We know that coefs divides rhs because otherwise we would already returned False
+                value_interval = contexter.lookup_asserted_values(affected_var)
+                value_interval.try_strengthen_lower(implied_val)
+                value_interval.try_strengthen_upper(implied_val)
+
+            else:
+                return relation
+
+            # We have strengthened the intervals, check whether we did not found any conflict after substitution
+            if value_interval.implies_contradiction():
+                return BoolLiteral(False)
+            return relation
 
         case BoolLiteral() | Var():
             return root
 
         case AST_Connective():
-            _subst_children = (_substitute_var_with_value(child, var, value) for child in root.children)
-            subst_children = tuple(child for child in _subst_children if child is not None)
+            def subst_value_with_separate_context(node: ASTp_Node, var: Var, value: Optional[int], contexter: Parent_Context_Var_Values) -> ASTp_Node:
+                contexter.enter_context()
+                result = _substitute_var_with_value(node, var, value, contexter)
+                contexter.exit_context()
+                return result
+
+            if root.type == Connective_Type.AND:
+                # If we have an AND node then the subtrees can share asserted values (if a subtree asserts that x=5 then x=5 must hold in all other subtrees)
+                contexter.enter_context()
+                _subst_children = (_substitute_var_with_value(child, var, value, contexter) for child in root.children)
+                subst_children = tuple(child for child in _subst_children if child is not None)
+                contexter.exit_context()
+            else:
+                _subst_children = (subst_value_with_separate_context(child, var, value, contexter) for child in root.children)
+                subst_children = tuple(child for child in _subst_children if child is not None)
 
             subst_children = _use_bool_laws_to_simplify_connective_plain(root.type, subst_children)
             if len(subst_children) == 1:
@@ -1369,18 +1421,23 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int]) 
             return root.replace_children(subst_children)
 
         case AST_Quantifier():
-            new_child = _substitute_var_with_value(root.child, var, value)
+            new_child = _substitute_var_with_value(root.child, var, value, contexter)
+            if isinstance(new_child, BoolLiteral):
+                return new_child
             new_bound_vars = root.bound_vars if var not in root.bound_vars else tuple(it for it in root.bound_vars if it != var)
             return AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=new_bound_vars, child=new_child)
 
         case AST_Negation():
-            new_child = _substitute_var_with_value(root.child, var, value)
+            contexter.enter_blocking_context()
+
+            new_child = _substitute_var_with_value(root.child, var, value, contexter)
 
             if new_child == BoolLiteral(True):
                 return BoolLiteral(False)
             elif new_child == BoolLiteral(False):
                 return BoolLiteral(True)
 
+            contexter.exit_context()
             return AST_Negation(referenced_vars=root.referenced_vars, child=new_child)
 
         case _:
@@ -1590,7 +1647,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         for var in vars_to_instantiate:
             var_info   = monotonicity_info[var]
             var_value  = var_info.limits.lower_limit if var_info.decreasing else var_info.limits.upper_limit
-            fixed_tree = _substitute_var_with_value(optimized_tree, var, var_value)
+            fixed_tree = _substitute_var_with_value(optimized_tree, var, var_value, Parent_Context_Var_Values())
             if not fixed_tree:
                 return BoolLiteral(True), False
             optimized_tree = fixed_tree
@@ -1639,7 +1696,7 @@ def _optimize_exists_tree_using_const_values_only(exists_node: AST_Quantifier) -
     result: ASTp_Node = exists_node
     for var, value in substitutions_to_make:
         print(f'Var value is known: {var}={value}')
-        new_node = _substitute_var_with_value(result, var, value)
+        new_node = _substitute_var_with_value(result, var, value, Parent_Context_Var_Values())
         result = new_node
 
     if isinstance(result, AST_Quantifier) and not result.bound_vars:

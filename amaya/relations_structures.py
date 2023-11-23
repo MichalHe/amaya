@@ -276,6 +276,24 @@ class Value_Interval:
             atoms.append(upper_limit)
         return tuple(atoms)
 
+    def implies_contradiction(self) -> bool:
+        if self.lower_limit is None or self.upper_limit is None:
+            return False
+
+        return self.upper_limit < self.lower_limit
+
+    def apply_assertion(self, assertion: Relation):
+        if assertion.is_hard_bound():
+            bound_type, _, bound_val = get_hard_bound_semantics(assertion)
+            if bound_type == Bound_Type.LOWER:
+                self.try_strengthen_lower(bound_val)
+            else:
+                self.try_strengthen_upper(bound_val)
+        elif assertion.specifies_a_single_value_for_var():
+            implied_val = assertion.rhs // assertion.coefs[0]
+            self.try_strengthen_lower(implied_val)
+            self.try_strengthen_upper(implied_val)
+
 
 @dataclass
 class FunctionSymbol:
