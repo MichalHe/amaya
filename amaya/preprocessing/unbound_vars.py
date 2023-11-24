@@ -1437,6 +1437,8 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
                 return BoolLiteral(False)
             elif new_child == BoolLiteral(False):
                 return BoolLiteral(True)
+            elif isinstance(new_child, Relation) and new_child.predicate_symbol == '<=':
+                return new_child.negate()
 
             contexter.exit_context()
             return AST_Negation(referenced_vars=root.referenced_vars, child=new_child)
@@ -1590,7 +1592,7 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
                 dep_var = pos.vars[dep_var_idx]
                 implied_bound = Relation(vars=[dep_var], coefs=[-1], rhs=neg.rhs, predicate_symbol='<=')
 
-                print(f'Replacing {pos}, {neg} with {implied_bound} at {exists_node}')
+                # print(f'Replacing {pos}, {neg} with {implied_bound} at {exists_node}')
                 rels_to_replace.append((relation_indices, [implied_bound]))
 
         added_subformulae: List[ASTp_Node] = []
@@ -1768,7 +1770,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
 
     untouched_subtrees: List[Tuple[ASTp_Node, bool]] = []
     for child, does_child_contain_quantifier in connective_children:
-        if not isinstance(child, Relation) or len(child.vars):
+        if not isinstance(child, Relation) or len(child.vars) > 1:
             untouched_subtrees.append((child, does_child_contain_quantifier))
             continue
 
@@ -1887,6 +1889,9 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
                 return BoolLiteral(False), False
             elif optimized_child == BoolLiteral(False):
                 return BoolLiteral(True), False
+            elif isinstance(optimized_child, Relation) and optimized_child.predicate_symbol == '<=':
+                return optimized_child.negate(), False
+
             new_node = AST_Negation(referenced_vars=root.referenced_vars, child=optimized_child)
 
             return new_node, any_quantifier_present
