@@ -165,6 +165,13 @@ class Relation(object):
         gcd = math.gcd(*self.coefs)
         return (self.rhs % gcd) != 0
 
+    def negate(self) -> Relation:
+        # not(x <= 3)  <=>  x > 3   <=>  x >= 4  <=>  -x <= -4
+        new_coefs = [-coef for coef in self.coefs]
+        new_rhs = -self.rhs - 1
+
+        return Relation(vars=self.vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol='<=')
+
 
 @dataclass
 class Congruence:
