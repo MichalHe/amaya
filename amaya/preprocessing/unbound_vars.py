@@ -1529,6 +1529,12 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
         if is_fin:
             continue
 
+        if len(dependencies) > 1:
+            # @Incomplete: There are multiple variables dependent on this one...
+            # but I am not sure whether there can be any simplification done.
+            # maybe we could do something better than nothing.
+            continue
+
         rels_to_replace: List[Tuple[List[int], List[ASTp_Node]]] = []
         for dependent_var, relation_indices in dependencies.items():
             if not len(relation_indices) == 2:
