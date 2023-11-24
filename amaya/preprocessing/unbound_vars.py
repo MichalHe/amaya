@@ -1589,10 +1589,18 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
                 if value_interval_width != bound_var_coef:
                     continue
 
+                if not bound_var_value.lower_limit and not bound_var_value.upper_limit:
+                    #  E(x2) (x1 - 5x2 \in [K, K+4]) - says nothing about the value of free variable
+                    rels_to_replace.append((relation_indices, []))
+                    continue
+
+                if bound_var_value.lower_limit != 0 or bound_var_value.upper_limit is not None:
+                    continue
+
                 dep_var = pos.vars[dep_var_idx]
                 implied_bound = Relation(vars=[dep_var], coefs=[-1], rhs=neg.rhs, predicate_symbol='<=')
 
-                # print(f'Replacing {pos}, {neg} with {implied_bound} at {exists_node}')
+                print(f'Replacing {pos}, {neg} with {implied_bound} at {exists_node}')
                 rels_to_replace.append((relation_indices, [implied_bound]))
 
         added_subformulae: List[ASTp_Node] = []
@@ -1603,6 +1611,8 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
 
         kept_relations: Tuple[ASTp_Node,...] = tuple(subtree for subtree_idx, subtree in enumerate(relations) if subtree_idx not in removed_subformulae_indices)
         new_node_subtrees = kept_relations + tuple(added_subformulae)
+        if not new_node_subtrees:
+            new_node_subtrees = (BoolLiteral(True),)
 
         new_connective = AST_Connective(referenced_vars=and_node.referenced_vars, type=and_node.type, children=new_node_subtrees)
 
