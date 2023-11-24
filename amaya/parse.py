@@ -392,7 +392,9 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             if solver_config.preprocessing.show_preprocessed_formula:
                 import pprint, sys
+                print(f'AST:')
                 pprint_formula(astp)
+                print(f'Vars in var_table: {len(var_table)}')
                 # pprint.pprint(var_table)
                 sys.exit(0)
 
