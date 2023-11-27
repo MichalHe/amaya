@@ -383,7 +383,7 @@ def perform_whole_evaluation_on_source_text(source_text: str,
 
             const_fn_symbols = [fn_symbol for fn_symbol in function_symbol_to_info_map.values() if fn_symbol.arity == 0]
             ast_to_evaluate, var_table  = preprocessing.preprocess_ast(ast_to_evaluate,  # type: ignore
-                                                                           global_fn_symbols=const_fn_symbols)
+                                                                       global_fn_symbols=const_fn_symbols)
 
             logger.info('Preprocessing resulted in the following AST: %s', ast_to_evaluate)
 
@@ -429,6 +429,15 @@ def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> N
     # so that we can do vizualization properly
     assert ctx.alphabet
 
+    using_mtbdds = (solver_config.backend_type == BackendType.MTBDD)
+    solving_over_ints = (solver_config.solution_domain == SolutionDomain.INTEGERS)
+    if solving_over_ints and using_mtbdds:
+        from amaya import mtbdd_transitions
+        ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_CONGRUENCE, None, None)
+        nfa = mtbdd_transitions.MTBDDTransitionFn.construct_nfa_for_congruence(ordered_congruence, ctx.alphabet)
+        ctx.stats_operation_ends(nfa)
+        return nfa
+
     constr = ctx.get_automaton_class_for_current_backend()
     ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_CONGRUENCE, None, None)
     nfa = relations_to_nfa.build_presburger_congruence_nfa(constr, ctx.alphabet, congruence)
@@ -447,6 +456,21 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
     an an intersection of a complement of an automaton for the same relation but equation and non-sharp
     inequality -> (and (not <REL>[< -> =]) <REL>[< -> <=]).
     """
+    using_mtbdds = (solver_config.backend_type == BackendType.MTBDD)
+    solving_over_ints = (solver_config.solution_domain == SolutionDomain.INTEGERS)
+    if solving_over_ints and using_mtbdds:
+        from amaya import mtbdd_transitions
+        assert ctx.alphabet
+        if relation.predicate_symbol == '=':
+            ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_EQ, None, None)
+            nfa = mtbdd_transitions.MTBDDTransitionFn.construct_nfa_for_eq(relation, ctx.alphabet)
+            ctx.stats_operation_ends(nfa)
+        else:
+            ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_INEQ, None, None)
+            nfa = mtbdd_transitions.MTBDDTransitionFn.construct_nfa_for_ineq(relation, ctx.alphabet)
+            ctx.stats_operation_ends(nfa)
+        return nfa
+
     building_handlers: Dict[SolutionDomain, Dict[str, Tuple[ParsingOperation, Callable]]] = {
         SolutionDomain.INTEGERS: {
             '<=': (ParsingOperation.BUILD_NFA_FROM_INEQ, relations_to_nfa.build_nfa_from_linear_inequality),
@@ -590,6 +614,10 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
 
         captured_subformula = AST_Connective(referenced_vars=tuple(), type=expr.type, children=expr.children[:operand_idx+1])
         reduction_result = minimize_automaton_if_configured(captured_subformula, reduction_result, ctx)
+
+        if solver_config.minimization_method != MinimizationAlgorithms.NONE:
+            if reduction_result.final_states and _depth == 0 and reduction_operation == ParsingOperation.NFA_UNION:
+                return reduction_result
 
         emit_evaluation_progress_info((f' >> {reduction_operation}(lhs, rhs) '
                                        f'(result size: {len(reduction_result.states)}, '

@@ -658,7 +658,8 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
         failed_tests = [run_sample.path for run_sample in executed_benchmarks.values()]
         print(f'Failed tests:', file=sys.stderr)
         for run_sample in executed_benchmarks.values():
-            print(f'  - {run_sample.path}')
+            if run_sample.failed:
+                print(f'  - {run_sample.path}')
 
     report = list(map(BenchmarkStat.as_dict, executed_benchmarks.values()))
 

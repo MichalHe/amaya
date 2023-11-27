@@ -248,6 +248,36 @@ mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.restype = ct.POINTER(Seri
 mtbdd_wrapper.amaya_perform_pad_closure.argtypes = (ct.POINTER(Serialized_NFA), )
 mtbdd_wrapper.amaya_perform_pad_closure.restype = ct.POINTER(Serialized_NFA)
 
+# Serialized_NFA* amaya_construct_nfa_from_congruence(
+#     Serialized_Atom* congruence,
+#     s64  init_val,
+#     u32* vars,
+#     u64  var_cnt)
+
+mtbdd_wrapper.amaya_construct_nfa_from_congruence.argtypes = (
+    ct.POINTER(Serialized_Atom),
+    ct.c_int64,
+    ct.POINTER(ct.c_uint32),
+    ct.c_uint64,
+)
+mtbdd_wrapper.amaya_construct_nfa_from_congruence.restype = ct.POINTER(Serialized_NFA)
+
+mtbdd_wrapper.amaya_construct_nfa_from_ineq.argtypes = (
+    ct.POINTER(Serialized_Atom),
+    ct.c_int64,
+    ct.POINTER(ct.c_uint32),
+    ct.c_uint64,
+)
+mtbdd_wrapper.amaya_construct_nfa_from_ineq.restype = ct.POINTER(Serialized_NFA)
+
+mtbdd_wrapper.amaya_construct_nfa_from_eq.argtypes = (
+    ct.POINTER(Serialized_Atom),
+    ct.c_int64,
+    ct.POINTER(ct.c_uint32),
+    ct.c_uint64,
+)
+mtbdd_wrapper.amaya_construct_nfa_from_eq.restype = ct.POINTER(Serialized_NFA)
+
 # TODO: fix the shared lib - this symbol is not available ct.c_ulong.in_dll(mtbdd_wrapper, 'w_mtbdd_false')
 mtbdd_false = ct.c_ulong(0)
 
@@ -1008,3 +1038,58 @@ class MTBDDTransitionFn():
         free_serialized_nfa(result_ptr)
         dfa.automaton_type = AutomatonType.DFA
         return dfa
+
+    @staticmethod
+    def construct_nfa_for_congruence(congruence: Congruence, alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+        coefs = (ct.c_int64 * len(congruence.coefs))(*congruence.coefs)
+        serialized_congruence = Serialized_Atom(type=Serialized_Atom_Type.CONGRUENCE,
+                                                coefs=coefs,
+                                                coef_cnt=len(congruence.coefs),
+                                                modulus=congruence.modulus)
+
+        var_ids = [var.id for var in congruence.vars]
+        vars = (ct.c_uint32 * len(congruence.vars))(*var_ids)
+
+        rhs = ct.c_int64(congruence.rhs)
+        var_cnt = ct.c_uint64(len(var_ids))
+        res_ptr = mtbdd_wrapper.amaya_construct_nfa_from_congruence(ct.byref(serialized_congruence),
+                                                                    rhs, vars, var_cnt)
+        res = deserialize_nfa(res_ptr.contents, alphabet)
+        return res
+
+
+    @staticmethod
+    def construct_nfa_for_ineq(ineq: Relation, alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+        coefs = (ct.c_int64 * len(ineq.coefs))(*ineq.coefs)
+        serialized_ineq = Serialized_Atom(type=Serialized_Atom_Type.INEQ,
+                                                coefs=coefs,
+                                                coef_cnt=len(ineq.coefs),
+                                                modulus=0)
+
+        var_ids = [var.id for var in ineq.vars]
+        vars = (ct.c_uint32 * len(ineq.vars))(*var_ids)
+
+        rhs = ct.c_int64(ineq.rhs)
+        var_cnt = ct.c_uint64(len(var_ids))
+        res_ptr = mtbdd_wrapper.amaya_construct_nfa_from_ineq(ct.byref(serialized_ineq),
+                                                                       rhs, vars, var_cnt)
+        res = deserialize_nfa(res_ptr.contents, alphabet)
+        return res
+
+    @staticmethod
+    def construct_nfa_for_eq(eq: Relation, alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+        coefs = (ct.c_int64 * len(eq.coefs))(*eq.coefs)
+        serialized_eq = Serialized_Atom(type=Serialized_Atom_Type.EQ,
+                                               coefs=coefs,
+                                               coef_cnt=len(eq.coefs),
+                                               modulus=0)
+
+        var_ids = [var.id for var in eq.vars]
+        vars = (ct.c_uint32 * len(eq.vars))(*var_ids)
+
+        rhs = ct.c_int64(eq.rhs)
+        var_cnt = ct.c_uint64(len(var_ids))
+        res_ptr = mtbdd_wrapper.amaya_construct_nfa_from_eq(ct.byref(serialized_eq),
+                                                                     rhs, vars, var_cnt)
+        res = deserialize_nfa(res_ptr.contents, alphabet)
+        return res
