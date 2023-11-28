@@ -1869,6 +1869,19 @@ def _use_bool_laws_to_simplify_connective_plain(connective_type: Connective_Type
     return result
 
 
+def _shallow_flatten_connective(connective_type: Connective_Type,
+                                connective_children: Tuple[Tuple[ASTp_Node, bool], ...]) -> Tuple[Tuple[ASTp_Node, bool], ...]:
+    flattened_children: List[Tuple[ASTp_Node, bool]] = []
+
+    for child, contains_quantifier in connective_children:
+        if isinstance(child, AST_Connective) and child.type == connective_type:
+            flattened_children.extend((ch, contains_quantifier) for ch in child.children)
+        else:
+            flattened_children.append((child, contains_quantifier))
+
+    return tuple(flattened_children)
+
+
 def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
     match root:
         case Relation() | Congruence() | Var() | BoolLiteral():
@@ -1877,6 +1890,7 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
         case AST_Connective():
             is_and_connective = root.type == Connective_Type.AND
             _optimized_subtrees = tuple(_optimize_bottom_quantifiers(child) for child in root.children)
+            _optimized_subtrees = _shallow_flatten_connective(root.type, _optimized_subtrees)
 
             _optimized_subtrees = _apply_bound_based_theory_reasoning(root.type, _optimized_subtrees)
             _optimized_subtrees = _use_bool_laws_to_simplify_connective(root.type, _optimized_subtrees)
