@@ -1289,7 +1289,7 @@ def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[V
 @dataclass
 class Monotonicity_Info:
     are_bounds_unsure: bool = False
-    seen_vars: Dict[Var, Var_Monotonicity] = field(default_factory=dict)
+    seen_vars: Dict[Var, Var_Monotonicity] = field(default_factory=lambda: defaultdict(Var_Monotonicity))
 
     def should_analyse_var(self, var: Var) -> bool:
         return var in self.seen_vars
