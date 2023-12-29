@@ -1,5 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict
+import fractions
 from dataclasses import (
     dataclass,
     field
@@ -1029,45 +1030,49 @@ class Parent_Context_Var_Values:
         return domains
 
 
+def _insert_all_asserting_bounds_into_current_context(and_connective: AST_Connective, contexter: Parent_Context_Var_Values):
+    children = and_connective.children
+    bounds = (child for child in children if isinstance(child, Relation) and len(child.vars) == 1)
+    for bound in bounds:
+        var, coef = bound.vars[0], bound.coefs[0]
+        rhs = bound.rhs
+
+        val_interval = contexter.lookup_asserted_values(var)
+
+        if bound.predicate_symbol == '=':
+            if (rhs % coef) != 0:
+                return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (3x = 5 AND <Subformula>)
+            implied_val = rhs // coef
+
+            upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
+            lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
+
+            if implied_val < lower or implied_val > upper:
+                return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (x = 0 AND <Subformula>)
+
+            new_interval = Value_Interval(lower_limit=implied_val, upper_limit=implied_val)
+            contexter.assert_new_var_value(var, new_interval)
+            continue
+
+        if coef < 0:  # Lower limit
+            implied_val = math.ceil(rhs / coef)
+            old_lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
+            new_lower = max(implied_val, old_lower)
+            contexter.assert_new_var_value(var, Value_Interval(new_lower, val_interval.upper_limit))
+        else:  # Upper limit
+            implied_val = math.floor(rhs / coef)
+            old_upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
+            new_upper = min(implied_val, old_upper)
+            contexter.assert_new_var_value(var, Value_Interval(val_interval.lower_limit, new_upper))
+
+
 def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_Var_Values) -> ASTp_Node:
     match connective.type:
         case Connective_Type.AND:
             contexter.enter_context()
 
             children = connective.children
-            bounds = (child for child in children if isinstance(child, Relation) and len(child.vars) == 1)
-
-            for bound in bounds:
-                var, coef = bound.vars[0], bound.coefs[0]
-                rhs = bound.rhs
-
-                val_interval = contexter.lookup_asserted_values(var)
-
-                if bound.predicate_symbol == '=':
-                    if (rhs % coef) != 0:
-                        return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (3x = 5 AND <Subformula>)
-                    implied_val = rhs // coef
-
-                    upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
-                    lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
-
-                    if implied_val < lower or implied_val > upper:
-                        return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (x = 0 AND <Subformula>)
-
-                    new_interval = Value_Interval(lower_limit=implied_val, upper_limit=implied_val)
-                    contexter.assert_new_var_value(var, new_interval)
-                    continue
-
-                if coef < 0:  # Lower limit
-                    implied_val = math.ceil(rhs / coef)
-                    old_lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
-                    new_lower = max(implied_val, old_lower)
-                    contexter.assert_new_var_value(var, Value_Interval(new_lower, val_interval.upper_limit))
-                else:  # Upper limit
-                    implied_val = math.floor(rhs / coef)
-                    old_upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
-                    new_upper = min(implied_val, old_upper)
-                    contexter.assert_new_var_value(var, Value_Interval(val_interval.lower_limit, new_upper))
+            _insert_all_asserting_bounds_into_current_context(connective, contexter)
 
             new_bounds = []
             for var, var_values in contexter.asserted_var_values[-1].items():
@@ -1281,43 +1286,62 @@ def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[V
     return False
 
 
-def _determine_monotonicity_of_variables(tree: ASTp_Node, vars: Dict[Var, Var_Monotonicity], is_positive: bool) -> None:
+@dataclass
+class Monotonicity_Info:
+    are_bounds_unsure: bool = False
+    seen_vars: Dict[Var, Var_Monotonicity] = field(default_factory=dict)
+
+    def should_analyse_var(self, var: Var) -> bool:
+        return var in self.seen_vars
+
+
+def _determine_monotonicity_of_variables(tree: ASTp_Node, monotonicity_info: Monotonicity_Info, is_positive: bool) -> None:
     match tree:
         case Relation():
-            if _set_limit_on_interestring_var_if_bound(tree, vars, is_positive):
+            if _set_limit_on_interestring_var_if_bound(tree, monotonicity_info.seen_vars, is_positive):
                 return
 
             for coef, var in tree.linear_terms():
-                if var not in vars:
+                if not monotonicity_info.should_analyse_var(var):
                     continue
 
                 if tree.predicate_symbol == '=':
-                    vars[var].increasing = True
-                    vars[var].decreasing = True
+                    var_monotonicity = monotonicity_info.seen_vars[var]
+                    var_monotonicity.increasing = True
+                    var_monotonicity.decreasing = True
                     continue
 
                 if coef < 0:
-                    vars[var].increasing = True
+                    monotonicity_info.seen_vars[var].increasing = True
                 else:
-                    vars[var].decreasing = True
+                    monotonicity_info.seen_vars[var].decreasing = True
 
         case Congruence():
             for var_idx, var in enumerate(tree.vars):
-                if var in vars:
-                    vars[var].congruences.append(tree)
+                if monotonicity_info.should_analyse_var(var):
+                    monotonicity_info.seen_vars[var].congruences.append(tree)
 
         case BoolLiteral() | Var():
             return
 
         case AST_Connective():
+            # The monotonicity analysis is an underapproximation - although different OR branches might
+            # imply different variable monotonicity, the result is the same as if traversing through AND
             for child in tree.children:
-                _determine_monotonicity_of_variables(child, vars, is_positive)
+                _determine_monotonicity_of_variables(child, monotonicity_info, is_positive)
 
         case AST_Negation():
             # Only thing that we should be able to see at this point is (not <eq>) since all of the negations
             # have been pushed inwards. An equation automatically implies that we do not know the monotonicity
             # of any variable, and therefore, it should be OK to just recurse down.
-            _determine_monotonicity_of_variables(tree.child, vars, is_positive=(not is_positive))
+            _determine_monotonicity_of_variables(tree.child, monotonicity_info, is_positive=(not is_positive))
+
+        case AST_Quantifier():
+            for var in tree.bound_vars:
+                assert var not in monotonicity_info.seen_vars or monotonicity_info.seen_vars[var] == Var_Monotonicity()
+                monotonicity_info.seen_vars[var] = Var_Monotonicity()
+
+            _determine_monotonicity_of_variables(tree.child, monotonicity_info, is_positive=is_positive)
 
         case _:
             raise ValueError(f'Node not handled when determining monotonicity of variable: {tree=}')
@@ -1648,12 +1672,12 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
 
         exists_node = rewrite_info.result
 
-    monotonicity_info = {var: Var_Monotonicity() for var in exists_node.bound_vars}
-    _determine_monotonicity_of_variables(exists_node.child, monotonicity_info, is_positive=True)
+    monotonicity_info = Monotonicity_Info()
+    _determine_monotonicity_of_variables(exists_node, monotonicity_info, is_positive=True)
 
     vars_to_instantiate = []
     stomped_congruences: List[ASTp_Node] = []
-    for var, var_monotonicity in monotonicity_info.items():
+    for var, var_monotonicity in monotonicity_info.seen_vars.items():
         if _do_bounds_imply_conflict(var_monotonicity):
             return BoolLiteral(False), False
 
@@ -1699,7 +1723,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
     optimized_tree = exists_node.child
     if vars_to_instantiate:
         for var in vars_to_instantiate:
-            var_info   = monotonicity_info[var]
+            var_info   = monotonicity_info.seen_vars[var]
             var_value  = var_info.limits.lower_limit if var_info.decreasing else var_info.limits.upper_limit
             fixed_tree = _substitute_var_with_value(optimized_tree, var, var_value, Parent_Context_Var_Values())
             if not fixed_tree:
@@ -1939,3 +1963,241 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
 def optimize_bottom_quantifiers(root: ASTp_Node) -> ASTp_Node:
     optimized_tree, _ = _optimize_bottom_quantifiers(root)
     return optimized_tree
+
+
+def _interval_length(interval: Tuple[int, int]) -> int:
+    return interval[1] - interval[0] + 1
+
+
+def _strenghten_value_intervals(congruence: Congruence, value_intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    if not all(abs(coef) == 1 for coef in congruence.coefs):
+        return value_intervals
+
+    def interval_length(interval: Tuple[int, int]) -> int:
+        return interval[1] - interval[0] + 1
+
+    smaller_i, larger_i = value_intervals
+    smaller_var_i, larger_var_i = 0, 1
+
+    if interval_length(smaller_i) > interval_length(larger_i):
+        smaller_i, larger_i = larger_i, smaller_i
+        smaller_var_i, larger_var_i = larger_var_i, smaller_var_i
+
+    if interval_length(smaller_i) >= congruence.modulus:
+        return value_intervals # The intervals cannot be strenghtened
+
+    def _solve_congruence_for_value(var_idx: int, var_value: int, value_interval: Tuple[int, int]):
+        rhs = congruence.rhs - congruence.coefs[var_idx] * var_value
+        rhs %= congruence.modulus
+        if rhs < 0:
+            rhs += congruence.modulus
+
+        other_var_idx = 1 - var_idx
+        other_var_coef = congruence.coefs[other_var_idx]
+
+        if other_var_coef < 0:  # Multiply the congruence by -1
+            rhs *= -1
+            rhs += congruence.modulus
+
+        # RHS is curently in [0, ... Modulus], shift it into the required interval
+        shift_times = math.floor(value_interval[0]/congruence.modulus)
+        shifted_val = rhs + shift_times*congruence.modulus
+        if shifted_val < value_interval[0]:
+            shifted_val += congruence.modulus
+
+        return shifted_val
+
+    raise NotADirectoryError('Interval strenghtening is not implemented yet.')
+    return []
+
+
+
+@dataclass
+class Linearized_Var_Spec:
+    var: Var
+    idx: int
+    coef: int
+    interval: Tuple[int, int]
+
+
+def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_Context_Var_Values, monotonicity: Monotonicity_Info) -> AST_Connective | None:
+    if len(congruence.vars) != 2:
+        return None
+
+    var_ranges: List[Tuple[int, int]] = []
+
+    can_linearize = True
+    for var in congruence.vars:
+        # Check if the variable domain is explicitely finite
+        var_bounds = contexter.lookup_asserted_values(var)
+        is_fin = var_bounds.lower_limit is not None and var_bounds.upper_limit is not None
+        if is_fin:
+            assert var_bounds.lower_limit is not None
+            assert var_bounds.upper_limit is not None
+
+            var_ranges.append((var_bounds.lower_limit, var_bounds.upper_limit))
+            continue
+
+        # Check if the variable domain is implicitly finite because of monotonicity
+        var_monotonicity = monotonicity.seen_vars.get(var, Var_Monotonicity())
+
+        if var_monotonicity.increasing and var_monotonicity.decreasing:
+            can_linearize = False
+            break
+
+        is_c_best_from_below = var_bounds.upper_limit is not None and var_monotonicity.increasing
+        if is_c_best_from_below:
+            assert var_bounds.upper_limit
+            value_interval = (var_bounds.upper_limit-congruence.modulus+1, var_bounds.upper_limit)
+            var_ranges.append(value_interval)
+            continue
+
+        is_c_best_from_above = var_bounds.lower_limit is not None and var_monotonicity.decreasing
+        if is_c_best_from_above:
+            assert var_bounds.lower_limit
+            value_interval = (var_bounds.lower_limit, var_bounds.lower_limit+congruence.modulus-1)
+            var_ranges.append(value_interval)
+            continue
+
+        can_linearize = False
+        break
+
+    if not can_linearize:
+        print(f'Cannot linearize: {congruence}')
+        return None
+
+    x_var_spec = Linearized_Var_Spec(var=congruence.vars[0], idx=0, coef=congruence.coefs[0], interval=var_ranges[0])
+    y_var_spec = Linearized_Var_Spec(var=congruence.vars[1], idx=1, coef=congruence.coefs[1], interval=var_ranges[1])
+
+    if abs(y_var_spec.coef) != 1:
+        x_var_spec, y_var_spec = y_var_spec, x_var_spec
+
+    if abs(y_var_spec.coef) != 1:
+        return None  # Both variables have a |coefficient| > 1 which requires a complex tiling of the 2D space
+
+    if _interval_length(y_var_spec.interval) > congruence.modulus:
+        return None  # We can linearize, but we give up (likely too many disjuncts would be created)
+
+    if not can_linearize:
+        return None
+
+    # @Note: The following code is written with an image of placing the larger interval on x-axis
+    modulus = congruence.modulus
+    x_alpha = fractions.Fraction(modulus, abs(x_var_spec.coef))  # We need to keep it as float
+
+    # Solve the congruence x = y + c (mod M) for y = 0 to find zero points of the functions
+    zero_point = congruence.rhs
+    if x_var_spec.coef < 0:
+        zero_point = modulus - zero_point
+
+    # If x-values are from [a, b], then shift the zero point z into z' so that a belongs to [z', z'+x_alpha]
+    shifted_zero_point = zero_point + int(math.floor(x_var_spec.interval[0]/x_alpha) * x_alpha)
+
+    # assert x_var_spec.interval[0] <= shifted_zero_point, f'{x_var_spec.interval[0]} <= {shifted_zero_point}'
+    # assert shifted_zero_point <= x_var_spec.interval[1], shifted_zero_point
+
+    # We know that at zero_point_shifted the function has value 0. Therefore, we need to make
+    # b.y = b.f(x) = -a.x + K = 0
+    first_function_offset = -x_var_spec.coef*shifted_zero_point
+
+    # At every iteration [start, end] when we reach end, we need to make it zero again ---> subtract x_alpha
+
+    interval_start_point = fractions.Fraction(shifted_zero_point, 1)
+    linearization_branches: List[Tuple[Relation, Relation, Relation]] = []
+    iter = 0
+    while interval_start_point < x_var_spec.interval[1]:
+        _start = math.ceil(interval_start_point)
+        _end_frac = interval_start_point + x_alpha
+        _end = math.floor(_end_frac) if _end_frac.denominator != 1 else _end_frac.numerator - 1
+
+        lower_bound = Relation(vars=[x_var_spec.var], coefs=[-1], rhs=-_start, predicate_symbol='<=')
+        upper_bound = Relation(vars=[x_var_spec.var], coefs=[1], rhs=_end, predicate_symbol='<=')
+
+        # We have to ensure that the entire equation has only integer terms
+        # a.x + b.y = RHS (mod Modulus) ---> b.y = f(x) = -a.x + K
+        # In a normal form:  b.y = f(x) = -a.x + K   === a.x + b.y = K
+        coefs = [x_var_spec.coef, y_var_spec.coef]
+        coefs = [c*x_alpha.denominator for c in coefs]
+
+        d = x_alpha.denominator
+        rhs = d*first_function_offset - (x_alpha*d).numerator * iter
+
+        fn = Relation(vars=[x_var_spec.var, y_var_spec.var],
+                      coefs=coefs, rhs=rhs, predicate_symbol='=')
+
+        fn.sort_variables()
+
+        linearization_branches.append((lower_bound, upper_bound, fn))
+
+        interval_start_point += x_alpha
+        iter += 1
+
+    # print(f'Linearized {congruence} with {x_var_spec.var}={x_var_spec.interval} and {y_var_spec.var}={y_var_spec.interval} into')
+    # print(linearization_branches)
+
+    _or_node_children = []
+    for linearization_branch in linearization_branches:
+        connective = AST_Connective(
+            referenced_vars=tuple(),  # Todo
+            type=Connective_Type.AND,
+            children=linearization_branch)
+        _or_node_children.append(connective)
+    or_node_children = tuple(_or_node_children)
+
+    or_node = AST_Connective(referenced_vars=tuple(),
+                             type=Connective_Type.OR, children=or_node_children)
+    return or_node
+
+
+def _linearize_congruences(root: ASTp_Node, contexter: Parent_Context_Var_Values, monotonicity: Monotonicity_Info) -> ASTp_Node:
+    match root:
+        case BoolLiteral() | Var() | Relation():
+            return root
+        case Congruence():
+            linearized_congruence = _attempt_congruence_linearization(root, contexter, monotonicity)
+            if linearized_congruence:
+                pass
+            return root
+
+        case AST_Connective():
+            def _linearize_isolated_subtree(subtree: ASTp_Node) -> ASTp_Node:
+                contexter.enter_context()
+                new_subtree = _linearize_congruences(subtree, contexter, monotonicity)
+                contexter.exit_context()
+                return new_subtree
+
+            if root.type == Connective_Type.AND:
+                # @Optimize: Assertions from other trees might be propagated into the current one, but are not at the moment
+                contexter.enter_context()
+
+                _insert_all_asserting_bounds_into_current_context(root, contexter)
+                _optimized_subtrees = tuple(_linearize_congruences(subtree, contexter, monotonicity) for subtree in root.children)
+
+                contexter.exit_context()
+            else:
+                _optimized_subtrees = tuple(_linearize_isolated_subtree(subtree) for subtree in root.children)
+
+            return root.replace_children(_optimized_subtrees)
+
+        case AST_Negation():
+            contexter.enter_context()
+            subtree = _linearize_congruences(root.child, contexter, monotonicity)
+            contexter.exit_context()
+            return AST_Negation(referenced_vars=root.referenced_vars, child=subtree)
+
+        case AST_Quantifier():
+            subtree = _linearize_congruences(root.child, contexter, monotonicity)
+            return AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=root.bound_vars, child=subtree)
+
+        case _:
+            raise NotImplementedError(f'Node {type(root)} not handled when doing congruence linearization.')
+
+
+def linearize_congruences(root: ASTp_Node) -> ASTp_Node:
+    contexter = Parent_Context_Var_Values()
+
+    monotonicity = Monotonicity_Info()
+    _determine_monotonicity_of_variables(root, monotonicity, is_positive=True)
+
+    opt = _linearize_congruences(root, contexter, monotonicity)
+    return opt
