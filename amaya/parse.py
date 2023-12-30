@@ -640,6 +640,9 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
             atoms_aut = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, [], ctx.get_alphabet())
             ctx.stats_operation_ends(atoms_aut)
 
+            node = AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=cast(Tuple[ASTp_Node,...], tuple(atoms)))
+            atoms_aut = minimize_automaton_if_configured(node, atoms_aut, ctx)
+
             reduction_result = atoms_aut
             remaining_subformulae = tuple(non_atoms)
         else:
