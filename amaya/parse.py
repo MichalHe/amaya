@@ -603,14 +603,15 @@ def select_children_to_lazily_evaluate(and_expr: AST_Connective, density_treshol
             continue
         not_atoms.append(child)
 
+    if not atoms:
+        return
+
     # Calculate density
     density = sum(len(atom.vars) for atom in atoms) / len(vars)*len(atoms)
     if density < density_treshold:
         return
 
     return cast(List[AST_Atom], atoms), not_atoms
-
-
 
 
 def evaluate_binary_conjunction_expr(expr: AST_Connective,
