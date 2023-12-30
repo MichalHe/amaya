@@ -413,7 +413,8 @@ def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
                 coefs = [-1 * coef for coef in coefs]
 
             modulus = gcd(*bound_var_coefs)
-            congruence = Congruence(vars=list(vars), coefs=list(coefs), rhs=rel.rhs, modulus=modulus)
+            rhs = rel.rhs % modulus
+            congruence = Congruence(vars=list(vars), coefs=list(coefs), rhs=rhs, modulus=modulus)
             return congruence
         return [node_type, ast[1], _simplify_unbounded_equations(ast[2])]
     else:

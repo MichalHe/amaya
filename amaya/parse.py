@@ -427,7 +427,8 @@ def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> N
         vars.append(var)
         coefs.append(coef)
 
-    ordered_congruence = Congruence(vars=vars, coefs=coefs, rhs=congruence.rhs, modulus=congruence.modulus)
+    normalized_rhs = congruence.rhs % congruence.modulus
+    ordered_congruence = Congruence(vars=vars, coefs=coefs, rhs=normalized_rhs, modulus=congruence.modulus)
 
     logger.debug(f'Reordered congruence from: %s to %s', congruence, ordered_congruence)
 
