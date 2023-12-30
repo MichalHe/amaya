@@ -14,6 +14,7 @@ from typing import (
     Callable,
     Optional,
     Sequence,
+    cast,
 )
 
 from amaya.automatons import (
@@ -584,6 +585,34 @@ def minimize_automaton_if_configured(ast: ASTp_Node, nfa: NFA, ctx: EvaluationCo
     return minimized_dfa
 
 
+def select_children_to_lazily_evaluate(and_expr: AST_Connective, density_treshold: float = 0.5) -> Tuple[List[AST_Atom], List[ASTp_Node]] | None:
+    """
+    Decompose the given and expression into atoms and non-atomic formulae.
+
+    If the atoms do not share a lot of common variables, then None is returned.
+    """
+    atoms: List[Union[Relation, Congruence]] = []
+    not_atoms: List[ASTp_Node] = []
+
+    vars: Set[Var] = set()
+
+    for child in and_expr.children:
+        if isinstance(child, (Relation, Congruence)):
+            atoms.append(child)
+            vars.update(child.vars)
+            continue
+        not_atoms.append(child)
+
+    # Calculate density
+    density = sum(len(atom.vars) for atom in atoms) / len(vars)*len(atoms)
+    if density < density_treshold:
+        return
+
+    return cast(List[AST_Atom], atoms), not_atoms
+
+
+
+
 def evaluate_binary_conjunction_expr(expr: AST_Connective,
                                      ctx: EvaluationContext,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
@@ -600,11 +629,26 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
         # while keeping their connectives intact - for example, a [and, <atom>] might come to exist in the formula
         return get_automaton_for_operand(expr.children[0], ctx, _depth)
 
-    first_operand = expr.children[0]
+    if reduction_operation == ParsingOperation.NFA_INTERSECT and solver_config.optimizations.do_lazy_evaluation:
+        separation = select_children_to_lazily_evaluate(expr)
+        if separation:
+            atoms, non_atoms = separation
 
-    reduction_result = get_automaton_for_operand(first_operand, ctx, _depth)
+            from amaya.mtbdd_transitions import MTBDDTransitionFn
+            ctx.stats_operation_starts(ParsingOperation.LAZY_CONSTRUCT, None, None)
+            atoms_aut = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, [], ctx.get_alphabet())
+            ctx.stats_operation_ends(atoms_aut)
 
-    for operand_idx, next_operand in enumerate(expr.children[1:]):
+            reduction_result = atoms_aut
+            remaining_subformulae = tuple(non_atoms)
+        else:
+            reduction_result = get_automaton_for_operand(expr.children[0], ctx, _depth)
+            remaining_subformulae = expr.children[1:]
+    else:
+        reduction_result = get_automaton_for_operand(expr.children[0], ctx, _depth)
+        remaining_subformulae = expr.children[1:]
+
+    for operand_idx, next_operand in enumerate(remaining_subformulae):
         if reduction_operation == ParsingOperation.NFA_INTERSECT and not reduction_result.final_states:
             return reduction_result
 
@@ -617,9 +661,11 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
         # reduction_result = reduction_result.determinize()
         ctx.stats_operation_ends(reduction_result)
 
-        captured_subformula = AST_Connective(referenced_vars=tuple(), type=expr.type, children=expr.children[:operand_idx+1])
+        captured_subformula = AST_Connective(referenced_vars=tuple(), type=expr.type, children=remaining_subformulae[:operand_idx+1])
         reduction_result = minimize_automaton_if_configured(captured_subformula, reduction_result, ctx)
 
+        # If the top-level of the formula looks like (OR F1 F2 ...) then
+        # terminate if we already see an automaton for Fi with a nonempty language
         if solver_config.minimization_method != MinimizationAlgorithms.NONE:
             if reduction_result.final_states and _depth == 0 and reduction_operation == ParsingOperation.NFA_UNION:
                 return reduction_result
