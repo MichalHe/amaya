@@ -114,12 +114,64 @@ def make_value_interval_intersection(left_intervals: List[Value_Interval], right
     return result
 
 
+def _make_value_interval_union(left_intervals: List[Value_Interval], right_intervals: List[Value_Interval]) -> List[Value_Interval]:
+    intervals = left_intervals + right_intervals
+    min_lower_bound = None
+
+    for interval in intervals:
+        if interval.lower_limit is not None:
+            min_lower_bound = min(min_lower_bound, interval.lower_limit) if min_lower_bound else interval.lower_limit
+
+    if min_lower_bound is None:
+        min_lower_bound = 0
+    else:
+        min_lower_bound = -1
+
+    def get_lower_bound(interval: Value_Interval) -> int:
+        if interval.lower_limit is None:
+            return min_lower_bound
+        return interval.lower_limit
+
+    intervals = sorted(intervals, key=get_lower_bound)
+
+    interval_union = []
+    current_interval = intervals[0]
+    for interval in intervals[1:]:
+        if current_interval.upper_limit is None:
+            interval_union.append(current_interval)
+            return interval_union
+
+        # The intervals are sorted by their lower limits, therefore, the `current_interval`
+        # also has lower limit = -inf
+        if interval.lower_limit is None:
+            if interval.upper_limit is None:
+                current_interval = Value_Interval()
+                continue  # We will return in the next iteration either way
+
+            old_val: int = current_interval.upper_limit
+            new_val: int = interval.upper_limit
+            current_interval.upper_limit = max(old_val, new_val)
+            continue
+
+        if interval.lower_limit <= current_interval.upper_limit:  # The intervals overlap
+            if interval.upper_limit is None:
+                current_interval.upper_limit = None
+            else:
+                current_interval.upper_limit = max(current_interval.upper_limit, interval.upper_limit)
+        else: # The intervals do not overlap
+            interval_union.append(current_interval)
+            current_interval = interval
+
+    return interval_union
+
+
 def make_value_interval_union(left_intervals: List[Value_Interval], right_intervals: List[Value_Interval]):
     if not left_intervals:
         return right_intervals
     if not right_intervals:
         return left_intervals
 
+    # Start = 's', End = 'e'
     def is_less(point_a, point_b):
         if point_a[0] is None:
             return -1 if point_a[1] == 's' else 1
@@ -234,18 +286,18 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
             for var, var_value_intervals in subtree_with_bounds.var_values.items():
                 overall_bounds_info.var_values[var] = make_value_interval_intersection(overall_bounds_info.var_values[var],
                                                                                        var_value_intervals)
-
         return overall_bounds_info
 
     elif node_type == 'or':
         subtrees_with_bounds = [perform_variable_bounds_analysis_on_ast(subtree) for subtree in ast[1:]]
 
         overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type, children=subtrees_with_bounds)
+        overall_bounds_info.var_values = defaultdict(list)
+
         for subtree_with_bounds in subtrees_with_bounds:
             for var, bounds_info in subtree_with_bounds.var_values.items():
                 overall_bounds_info.var_values[var] = make_value_interval_union(overall_bounds_info.var_values[var],
                                                                                 bounds_info)
-
         return overall_bounds_info
 
     elif node_type == 'not':

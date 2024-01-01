@@ -250,7 +250,7 @@ def build_syntax_tree(tokens: Iterable[str]):
 def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
     if solver_config.optimizations.simplify_variable_bounds:
         logger.debug('Simplifying variable bounds of formula: %s', formula_to_evaluate)
-        formula_to_evaluate = var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate)
+        formula_to_evaluate = cast(AST_Node, var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate))
         logger.debug('Simplified formula: %s', formula_to_evaluate)
 
     if solver_config.optimizations.rewrite_existential_equations_via_gcd:
@@ -466,6 +466,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
     using_mtbdds = (solver_config.backend_type == BackendType.MTBDD)
     solving_over_ints = (solver_config.solution_domain == SolutionDomain.INTEGERS)
     if solving_over_ints and using_mtbdds:
+        import pdb; pdb.set_trace()
         from amaya import mtbdd_transitions
         assert ctx.alphabet
         if relation.predicate_symbol == '=':
@@ -608,7 +609,7 @@ def select_children_to_lazily_evaluate(and_expr: AST_Connective, density_treshol
         return
 
     # Calculate density
-    density = sum(len(atom.vars) for atom in atoms) / len(vars)*len(atoms)
+    density = sum(len(atom.vars) for atom in atoms) / (len(vars)*len(atoms))
     if density < density_treshold:
         return
 
@@ -643,6 +644,11 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
 
             node = AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=cast(Tuple[ASTp_Node,...], tuple(atoms)))
             atoms_aut = minimize_automaton_if_configured(node, atoms_aut, ctx)
+
+            if len(atoms_aut.final_states) == 0:
+                import pprint; import sys
+                pprint.pprint(atoms)
+                sys.exit(0)
 
             reduction_result = atoms_aut
             remaining_subformulae = tuple(non_atoms)

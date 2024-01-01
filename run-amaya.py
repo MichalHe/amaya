@@ -389,7 +389,7 @@ for opt in args.optimizations:
         solver_config.optimizations.do_light_sat_reasoning = True
     if opt == 'lazy':
         solver_config.optimizations.do_lazy_evaluation = True
-    if opt == 'miniscoping':
+    if opt == 'miniscope':
         solver_config.optimizations.do_miniscoping = True
     if opt == 'interval-analysis':
         solver_config.optimizations.do_interval_analysis = True
@@ -401,9 +401,10 @@ for opt in args.optimizations:
         solver_config.optimizations.linearize_similar_mod_terms = True
 
 
-for forbidden_opt in args.forbidden_optimizations:
-    if forbidden_opt == 'miniscoping':
-        solver_config.optimizations.do_miniscoping = False
+if 'miniscope' in args.forbidden_optimizations:
+    solver_config.optimizations.do_miniscoping = False
+if 'lazy' in args.forbidden_optimizations:
+    solver_config.optimizations.do_lazy_evaluation = False
 
 
 def ensure_output_destination_valid(output_destination: str):
