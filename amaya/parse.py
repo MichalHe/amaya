@@ -75,6 +75,7 @@ from amaya.stats import (
 )
 
 PRETTY_PRINT_INDENT = ' ' * 2
+UNKNOWN_AUTOMATON_SIZE = 10_000_000
 
 logger.setLevel(INFO)
 
@@ -466,7 +467,6 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
     using_mtbdds = (solver_config.backend_type == BackendType.MTBDD)
     solving_over_ints = (solver_config.solution_domain == SolutionDomain.INTEGERS)
     if solving_over_ints and using_mtbdds:
-        import pdb; pdb.set_trace()
         from amaya import mtbdd_transitions
         assert ctx.alphabet
         if relation.predicate_symbol == '=':
@@ -616,6 +616,62 @@ def select_children_to_lazily_evaluate(and_expr: AST_Connective, density_treshol
     return cast(List[AST_Atom], atoms), not_atoms
 
 
+def estimate_automaton_size(expr: ASTp_Node) -> int:
+    match expr:
+        case Relation():
+            return sum(abs(coef) for coef in expr.coefs)
+        case Congruence():
+            return abs(expr.modulus)
+        case AST_Negation():
+            negated_expr = expr.child
+            match negated_expr:
+                case Relation():
+                    return 2*sum(abs(coef) for coef in negated_expr.coefs)
+                case Congruence():
+                    return 2*abs(negated_expr.modulus)
+                case BoolLiteral():
+                    return 2
+        case BoolLiteral():
+            return 2
+
+    return UNKNOWN_AUTOMATON_SIZE
+
+
+def reorder_conjunction_to_derive_conflict_more_quickly(conj: AST_Connective) -> AST_Connective:
+    # return conj
+    conjuncts_sorted_by_size = sorted(conj.children, key=estimate_automaton_size, reverse=True)
+
+    new_conjunction_children = []
+
+    def get_referenced_vars(node: ASTp_Node) -> Set[Var]:
+        match node:
+            case Relation() | Congruence():
+                return set(node.vars)
+            case BoolLiteral() | Var():
+                return set()
+            case _:
+                return set(node.referenced_vars)
+
+    while len(new_conjunction_children) != len(conj.children):
+        pivot = conjuncts_sorted_by_size.pop(-1)
+        pivot_vars: Set[Var] = get_referenced_vars(pivot)
+
+        overlapping_children = [pivot]
+        popped_indices = []
+        for child_rev_idx, child in enumerate(reversed(conjuncts_sorted_by_size)):
+            child_vars = get_referenced_vars(child)
+            if pivot_vars.intersection(child_vars):
+                overlapping_children.append(child)
+                popped_indices.append(len(conjuncts_sorted_by_size) - 1 - child_rev_idx)
+                pivot_vars.update(child_vars)
+
+        for idx in popped_indices:
+            conjuncts_sorted_by_size.pop(idx)
+
+        new_conjunction_children.extend(overlapping_children)
+    return AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=tuple(new_conjunction_children))
+
+
 def evaluate_binary_conjunction_expr(expr: AST_Connective,
                                      ctx: EvaluationContext,
                                      reduction_fn: Callable[[NFA, NFA], NFA],
@@ -632,6 +688,9 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
         # while keeping their connectives intact - for example, a [and, <atom>] might come to exist in the formula
         return get_automaton_for_operand(expr.children[0], ctx, _depth)
 
+    if reduction_operation == ParsingOperation.NFA_INTERSECT:
+        expr = reorder_conjunction_to_derive_conflict_more_quickly(expr)
+
     if reduction_operation == ParsingOperation.NFA_INTERSECT and solver_config.optimizations.do_lazy_evaluation:
         separation = select_children_to_lazily_evaluate(expr)
         if separation:
@@ -644,11 +703,6 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
 
             node = AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=cast(Tuple[ASTp_Node,...], tuple(atoms)))
             atoms_aut = minimize_automaton_if_configured(node, atoms_aut, ctx)
-
-            if len(atoms_aut.final_states) == 0:
-                import pprint; import sys
-                pprint.pprint(atoms)
-                sys.exit(0)
 
             reduction_result = atoms_aut
             remaining_subformulae = tuple(non_atoms)

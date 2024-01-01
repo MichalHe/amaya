@@ -143,6 +143,7 @@ optimization_choices = [
     'stomp-negations',
     'light-sat',
     'lazy',
+    'reorder-conjunctions',
     'minimize-congruences',
     'interval-analysis',
     'miniscope',
@@ -179,6 +180,8 @@ argparser.add_argument('-O',
                              '      Use interval analysis to prune formula from conflicting subformulae - e.g. parent asserts that x >= 5 and child asserts that x <= 3.\n'
                              '> iso-conflics:\n'
                              '      Detect conflicts in conjunctive clauses (and A (not B)) if A B are ismorphic modulo bound variable renaming (approximate).\n'
+                             '> reorder-conjunctions:\n'
+                             '      Reorder conjunctions to derive conflict more quickly.\n'
                              '> all:\n'
                              '      Enable all above optimizations'))
 
@@ -379,8 +382,11 @@ for opt in args.optimizations:
         solver_config.optimizations.rewrite_congruences_with_unbound_terms = True
         solver_config.optimizations.detect_isomorphic_conflicts = True
         solver_config.optimizations.linearize_similar_mod_terms = True
+        solver_config.optimizations.reorder_conjunctions = True
     if opt == 'gcd-rewrite':
         solver_config.optimizations.rewrite_existential_equations_via_gcd = True
+    if opt == 'reorder-conjunctions':
+        solver_config.optimizations.reorder_conjunctions = True
     if opt == 'var-bounds':
         solver_config.optimizations.simplify_variable_bounds = True
     if opt == 'stomp-negations':
@@ -405,6 +411,8 @@ if 'miniscope' in args.forbidden_optimizations:
     solver_config.optimizations.do_miniscoping = False
 if 'lazy' in args.forbidden_optimizations:
     solver_config.optimizations.do_lazy_evaluation = False
+if 'reorder-conjunctions' in args.forbidden_optimizations:
+    solver_config.optimizations.reorder_conjunctions = False
 
 
 def ensure_output_destination_valid(output_destination: str):

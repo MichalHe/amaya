@@ -66,6 +66,9 @@ class OptimizationsConfig:
     linearize_similar_mod_terms: bool = False
     """Introduce a linear relations between two variables for similar mod terms instead of using congruences."""
 
+    reorder_conjunctions: bool = False
+    """Reorder conjunctions to derive conflict more quickly."""
+
 
 @dataclass
 class PreprocessingConfig:

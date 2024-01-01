@@ -2116,7 +2116,6 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
         break
 
     if not can_linearize:
-        print(f'Cannot linearize: {congruence}')
         return None
 
     x_var_spec = Linearized_Var_Spec(var=congruence.vars[0], idx=0, coef=congruence.coefs[0], interval=var_ranges[0])
