@@ -293,11 +293,18 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
 
         overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type, children=subtrees_with_bounds)
         overall_bounds_info.var_values = defaultdict(list)
+        seen_vars: Dict[Var, int] = defaultdict(int)
 
         for subtree_with_bounds in subtrees_with_bounds:
             for var, bounds_info in subtree_with_bounds.var_values.items():
                 overall_bounds_info.var_values[var] = make_value_interval_union(overall_bounds_info.var_values[var],
                                                                                 bounds_info)
+                seen_vars[var] += 1
+
+        for seen_var, seen_cnt in seen_vars.items():
+            if seen_cnt < len(subtrees_with_bounds):
+                overall_bounds_info.var_values[seen_var] = [Value_Interval()]
+
         return overall_bounds_info
 
     elif node_type == 'not':
