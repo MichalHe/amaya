@@ -2087,6 +2087,7 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
     var_ranges: List[Tuple[int, int]] = []
 
     can_linearize = True
+
     for var in congruence.vars:
         # Check if the variable domain is explicitely finite
         var_bounds = contexter.lookup_asserted_values(var)
@@ -2134,6 +2135,9 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
     if abs(y_var_spec.coef) != 1:
         return None  # Both variables have a |coefficient| > 1 which requires a complex tiling of the 2D space
 
+    if (x_var_spec.interval[1] - x_var_spec.interval[0]) / congruence.modulus > 4:
+        return None  # Linearization would create a very large disjunction
+
     if _interval_length(y_var_spec.interval) > congruence.modulus:
         return None  # We can linearize, but we give up (likely too many disjuncts would be created)
 
@@ -2157,7 +2161,7 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
 
     # We know that at zero_point_shifted the function has value 0. Therefore, we need to make
     # b.y = b.f(x) = -a.x + K = 0
-    first_function_offset = -x_var_spec.coef*shifted_zero_point
+    first_function_offset = x_var_spec.coef*shifted_zero_point
 
     # At every iteration [start, end] when we reach end, we need to make it zero again ---> subtract x_alpha
 
@@ -2205,6 +2209,7 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
 
     or_node = AST_Connective(referenced_vars=tuple(),
                              type=Connective_Type.OR, children=or_node_children)
+
     return or_node
 
 
@@ -2215,7 +2220,7 @@ def _linearize_congruences(root: ASTp_Node, contexter: Parent_Context_Var_Values
         case Congruence():
             linearized_congruence = _attempt_congruence_linearization(root, contexter, monotonicity)
             if linearized_congruence:
-                pass
+                return linearized_congruence
             return root
 
         case AST_Connective():
