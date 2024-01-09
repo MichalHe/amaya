@@ -1735,7 +1735,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
     monotonicity_info = Monotonicity_Info()
     _determine_monotonicity_of_variables(exists_node, monotonicity_info, is_positive=True)
 
-    vars_to_instantiate = []
+    vars_to_instantiate: List[Var] = []
     stomped_congruences: List[ASTp_Node] = []
     for var, var_monotonicity in monotonicity_info.seen_vars.items():
         if _do_bounds_imply_conflict(var_monotonicity):
@@ -1780,12 +1780,12 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
                 new_congruence = Congruence(vars=remaining_vars, coefs=remaining_coefs, rhs=new_rhs, modulus=new_mod)
                 stomped_congruences.append(new_congruence)
 
-    optimized_tree = exists_node.child
+    optimized_tree_child = exists_node.child
     if vars_to_instantiate:
         for var in vars_to_instantiate:
             var_info   = monotonicity_info.seen_vars[var]
             var_value  = var_info.limits.lower_limit if var_info.decreasing else var_info.limits.upper_limit
-            fixed_tree = _substitute_var_with_value(optimized_tree, var, var_value, Parent_Context_Var_Values())
+            fixed_tree = _substitute_var_with_value(optimized_tree_child, var, var_value, Parent_Context_Var_Values())
             if not fixed_tree:
                 return BoolLiteral(True), False
             optimized_tree = fixed_tree
@@ -1793,14 +1793,17 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         quantifier_lingers = len(exists_node.bound_vars) - len(vars_to_instantiate) > 0
 
         if stomped_congruences:
-            new_subtrees = tuple((optimized_tree, *stomped_congruences))
-            new_node = AST_Connective(type=Connective_Type.AND, children=new_subtrees, variable_bounds=None, referenced_vars=exists_node.referenced_vars)
-            return new_node, quantifier_lingers
+            new_subtrees = tuple((optimized_tree_child, *stomped_congruences))
+            optimized_tree_child = AST_Connective(type=Connective_Type.AND, children=new_subtrees, variable_bounds=None, referenced_vars=exists_node.referenced_vars)
+
+        remaining_quantified_vars: Tuple[Var, ...] = tuple(sorted(set(exists_node.bound_vars) - set(vars_to_instantiate)))
+        if remaining_quantified_vars:
+            referenced_vars = tuple(set(exists_node.referenced_vars) - set(vars_to_instantiate))
+            optimized_tree = AST_Quantifier(referenced_vars=referenced_vars, bound_vars=remaining_quantified_vars, child=optimized_tree_child)
+        else:
+            optimized_tree = optimized_tree_child  # All variables have been instantiated; remove the quantifier node
 
         return optimized_tree, quantifier_lingers
-
-    # print('Quantifier CANNOT be simplified!')
-    # pprint_formula(exists_node)
 
     return exists_node, True
 
