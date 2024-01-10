@@ -137,20 +137,23 @@ argparser.add_argument('-p',
                              '- nonlinear-term-use-two-vars: Always use two variables (quotient, reminder) when rewriting a non-linear term\n'
                              '- auto-infer                 : Convert-mode specific - infer preprocessing options from output format.'))
 
-optimization_choices = [
-    'gcd-rewrite',
-    'var-bounds',
-    'stomp-negations',
-    'light-sat',
-    'lazy',
-    'reorder-conjunctions',
-    'minimize-congruences',
-    'interval-analysis',
-    'miniscope',
-    'iso-conflicts',
-    'linearize-similar-mod-terms',
-    'all',
-]
+opt_to_config_field = {
+    'gcd-rewrite': 'rewrite_existential_equations_via_gcd',
+    'var-bounds': 'simplify_variable_bounds',
+    'stomp-negations': 'push_negation_towards_atoms',
+    'light-sat': 'do_light_sat_reasoning',
+    'lazy': 'do_lazy_evaluation',
+    'reorder-conjunctions': 'reorder_conjunctions',
+    'minimize-congruences': 'rewrite_congruences_with_unbound_terms',
+    'interval-analysis': 'do_interval_analysis',
+    'miniscope': 'do_miniscoping',
+    'iso-conflicts': 'detect_isomorphic_conflicts',
+    'linearize-similar-mod-terms': 'linearize_similar_mod_terms',
+    'linearize': 'linearize_congruences',
+    'purge-twice': 'do_interval_reasonining_twice',
+    'opt-bottom-exists': 'optimize_bottom_quantifiers',
+}
+optimization_choices = list(opt_to_config_field.keys()) + ['all']
 
 argparser.add_argument('-O',
                        '--optimize',
@@ -370,50 +373,20 @@ elif args.minimization_method == 'brzozowski':
 elif 'fast' not in args:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
-for opt in args.optimizations:
-    if opt == 'all':
-        solver_config.optimizations.simplify_variable_bounds = True
-        solver_config.optimizations.rewrite_existential_equations_via_gcd = True
-        solver_config.optimizations.push_negation_towards_atoms = True
-        solver_config.optimizations.do_interval_analysis = True
-        solver_config.optimizations.do_light_sat_reasoning = True
-        solver_config.optimizations.do_lazy_evaluation = True
-        solver_config.optimizations.do_miniscoping = True
-        solver_config.optimizations.rewrite_congruences_with_unbound_terms = True
-        solver_config.optimizations.detect_isomorphic_conflicts = True
-        solver_config.optimizations.linearize_similar_mod_terms = True
-        solver_config.optimizations.reorder_conjunctions = True
-    if opt == 'gcd-rewrite':
-        solver_config.optimizations.rewrite_existential_equations_via_gcd = True
-    if opt == 'reorder-conjunctions':
-        solver_config.optimizations.reorder_conjunctions = True
-    if opt == 'var-bounds':
-        solver_config.optimizations.simplify_variable_bounds = True
-    if opt == 'stomp-negations':
-        solver_config.optimizations.push_negation_towards_atoms = True
-    if opt == 'light-sat':
-        solver_config.optimizations.do_light_sat_reasoning = True
-    if opt == 'lazy':
-        solver_config.optimizations.do_lazy_evaluation = True
-    if opt == 'miniscope':
-        solver_config.optimizations.do_miniscoping = True
-    if opt == 'interval-analysis':
-        solver_config.optimizations.do_interval_analysis = True
-    if opt == 'iso-conflicts':
-        solver_config.optimizations.detect_isomorphic_conflicts = True
-    if opt == 'minimize-congruences':
-        solver_config.optimizations.rewrite_existential_equations_via_gcd = True
-    if opt == 'linearize-similar-mod-terms':
-        solver_config.optimizations.linearize_similar_mod_terms = True
 
+if 'all' in args.optimizations:
+    for attr in opt_to_config_field.values():
+        setattr(solver_config.optimizations, attr, True)
+else:
+    for opt in args.optimizations:
+        setattr(solver_config.optimizations, opt_to_config_field[opt], True)
 
-if 'miniscope' in args.forbidden_optimizations:
-    solver_config.optimizations.do_miniscoping = False
-if 'lazy' in args.forbidden_optimizations:
-    solver_config.optimizations.do_lazy_evaluation = False
-if 'reorder-conjunctions' in args.forbidden_optimizations:
-    solver_config.optimizations.reorder_conjunctions = False
-
+if 'all' in args.forbidden_optimizations:
+    for attr in opt_to_config_field.values():
+        setattr(solver_config.optimizations, attr, False)
+else:
+    for opt in args.forbidden_optimizations:
+        setattr(solver_config.optimizations, opt_to_config_field[opt], False)
 
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""

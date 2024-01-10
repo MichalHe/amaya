@@ -290,12 +290,15 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
     if solver_config.optimizations.do_miniscoping:
         astp = antiprenexing.miniscope_quantifiers(astp)
 
-    astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
+    if solver_config.optimizations.optimize_bottom_quantifiers:
+        astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
+
+    if solver_config.optimizations.linearize_congruences:
+        astp = var_bounds_lib.linearize_congruences(astp)
 
     # Do an extra pass as quantifier elimination might have introduced new constraints to prune the tree with
-    # astp = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(astp)
-
-    astp = var_bounds_lib.linearize_congruences(astp)
+    if solver_config.optimizations.do_interval_analysis and solver_config.optimizations.do_interval_reasonining_twice:
+        astp = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(astp)
 
     return astp
 

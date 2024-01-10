@@ -69,6 +69,21 @@ class OptimizationsConfig:
     reorder_conjunctions: bool = False
     """Reorder conjunctions to derive conflict more quickly."""
 
+    do_interval_reasonining_twice: bool = False
+    """If True, and do_interval_analysis is True, then an additional pass of tree pruning will be done at the end of preprocessing."""
+
+    linearize_congruences: bool = False
+    """Convert congruences to linear functions where possible."""
+
+    optimize_bottom_quantifiers: bool = False
+    """
+    Optimize bottom existential quantifiers.
+
+    Optimizations:
+        - remove (exists x PHI) if PHI can be satisfied wlog by setting x to +Inf or -Inf
+        - remove (exists x PHI) if a fixed "best" value can be determined for x
+    """
+
 
 @dataclass
 class PreprocessingConfig:
