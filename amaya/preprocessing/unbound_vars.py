@@ -2089,11 +2089,11 @@ class Linearized_Var_Spec:
     interval: Tuple[int, int]
 
 
-def _should_linearize(x_var_spec: Linearized_Var_Spec, y_var_spec: Linearized_Var_Spec, congruence: Congruence) -> bool:
+def _should_linearize(x_var_spec: Linearized_Var_Spec, y_var_spec: Linearized_Var_Spec, congruence: Congruence, x_stride: fractions.Fraction) -> bool:
     if abs(y_var_spec.coef) != 1:
         return False  # Both variables have a |coefficient| > 1 which requires a complex tiling of the 2D space
 
-    if (x_var_spec.interval[1] - x_var_spec.interval[0]) / congruence.modulus > 4:
+    if abs(x_var_spec.interval[1] - x_var_spec.interval[0]) / x_stride > 4:
         return False  # Linearization would create a very large disjunction
 
     if _interval_length(y_var_spec.interval) > congruence.modulus:
@@ -2153,22 +2153,31 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
     y_var_spec = Linearized_Var_Spec(var=congruence.vars[1], idx=1, coef=congruence.coefs[1], interval=var_ranges[1])
 
     y_coef_inverse = pow(y_var_spec.coef, -1, congruence.modulus)
-    x_coef_inverse = pow(x_var_spec.coef, -1, congruence.modulus)
 
-    if y_coef_inverse == 0 or x_coef_inverse == 0:
+    if y_coef_inverse == 0:
         return None
 
     y_var_spec.coef = 1
     x_var_spec.coef = (x_var_spec.coef * y_coef_inverse) % congruence.modulus
     rhs = (congruence.rhs*y_coef_inverse) % congruence.modulus
 
-    if not _should_linearize(x_var_spec, y_var_spec, congruence):
-        return None
-
     leftmost_x = x_var_spec.interval[0]
     x_stride = fractions.Fraction(congruence.modulus, x_var_spec.coef)
 
-    first_zero = fractions.Fraction(rhs, pow(-x_var_spec.coef, -1, congruence.modulus))
+    if not _should_linearize(x_var_spec, y_var_spec, congruence, x_stride):
+        return None
+
+    print(x_var_spec, congruence.modulus)
+    print(congruence)
+    try:
+        first_zero = fractions.Fraction(rhs, pow(-x_var_spec.coef, -1, congruence.modulus))
+    except ValueError:
+        # -<x_coef>*x = rhs
+        if rhs % (x_var_spec.coef) == 0:
+            first_zero_val = rhs / -x_var_spec.coef
+            first_zero = fractions.Fraction(first_zero_val)
+        else:
+            return None
 
     first_zero_distance = leftmost_x*x_var_spec.coef - first_zero
     strides_from_first_zero = first_zero_distance / x_stride
