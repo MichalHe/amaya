@@ -715,6 +715,12 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
         remaining_subformulae = expr.children[1:]
 
     for operand_idx, next_operand in enumerate(remaining_subformulae):
+        # If the top-level of the formula looks like (OR F1 F2 ...) then
+        # terminate if we already see an automaton for Fi with a nonempty language
+        if solver_config.minimization_method != MinimizationAlgorithms.NONE:
+            if reduction_result.final_states and _depth == 0 and reduction_operation == ParsingOperation.NFA_UNION:
+                return reduction_result
+
         if reduction_operation == ParsingOperation.NFA_INTERSECT and not reduction_result.final_states:
             return reduction_result
 
@@ -729,12 +735,6 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
 
         captured_subformula = AST_Connective(referenced_vars=tuple(), type=expr.type, children=remaining_subformulae[:operand_idx+1])
         reduction_result = minimize_automaton_if_configured(captured_subformula, reduction_result, ctx)
-
-        # If the top-level of the formula looks like (OR F1 F2 ...) then
-        # terminate if we already see an automaton for Fi with a nonempty language
-        if solver_config.minimization_method != MinimizationAlgorithms.NONE:
-            if reduction_result.final_states and _depth == 0 and reduction_operation == ParsingOperation.NFA_UNION:
-                return reduction_result
 
         emit_evaluation_progress_info((f' >> {reduction_operation}(lhs, rhs) '
                                        f'(result size: {len(reduction_result.states)}, '
