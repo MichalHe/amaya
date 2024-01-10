@@ -292,6 +292,7 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
 
     if solver_config.optimizations.optimize_bottom_quantifiers:
         astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
+        pass
 
     if solver_config.optimizations.linearize_congruences:
         astp = var_bounds_lib.linearize_congruences(astp)

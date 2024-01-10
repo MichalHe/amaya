@@ -1356,11 +1356,8 @@ def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[V
 class Monotonicity_Info:
     are_bounds_unsure: bool = False
     seen_vars: Dict[Var, Var_Monotonicity] = field(default_factory=lambda: defaultdict(Var_Monotonicity))
-    analyze_all: bool = False
 
     def should_analyse_var(self, var: Var) -> bool:
-        if self.analyze_all:
-            return True
         return var in self.seen_vars
 
 
@@ -1741,7 +1738,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
 
         exists_node = rewrite_info.result
 
-    monotonicity_info = Monotonicity_Info(analyze_all=True)
+    monotonicity_info = Monotonicity_Info()
     _determine_monotonicity_of_variables(exists_node, monotonicity_info, is_positive=True)
 
     vars_to_instantiate: List[Var] = []
@@ -2261,7 +2258,7 @@ def _linearize_congruences(root: ASTp_Node, contexter: Parent_Context_Var_Values
 def linearize_congruences(root: ASTp_Node) -> ASTp_Node:
     contexter = Parent_Context_Var_Values()
 
-    monotonicity = Monotonicity_Info(analyze_all=True)
+    monotonicity = Monotonicity_Info()
     _determine_monotonicity_of_variables(root, monotonicity, is_positive=True)
 
     opt = _linearize_congruences(root, contexter, monotonicity)
