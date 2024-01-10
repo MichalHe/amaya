@@ -2083,6 +2083,19 @@ class Linearized_Var_Spec:
     interval: Tuple[int, int]
 
 
+def _should_linearize(x_var_spec: Linearized_Var_Spec, y_var_spec: Linearized_Var_Spec, congruence: Congruence) -> bool:
+    if abs(y_var_spec.coef) != 1:
+        return False  # Both variables have a |coefficient| > 1 which requires a complex tiling of the 2D space
+
+    if (x_var_spec.interval[1] - x_var_spec.interval[0]) / congruence.modulus > 4:
+        return False  # Linearization would create a very large disjunction
+
+    if _interval_length(y_var_spec.interval) > congruence.modulus:
+        return False  # We can linearize, but we give up (likely too many disjuncts would be created)
+
+    return True
+
+
 def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_Context_Var_Values, monotonicity: Monotonicity_Info) -> AST_Connective | None:
     if len(congruence.vars) != 2:
         return None
@@ -2129,90 +2142,66 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
     if not can_linearize:
         return None
 
-    x_var_spec = Linearized_Var_Spec(var=congruence.vars[0], idx=0, coef=congruence.coefs[0], interval=var_ranges[0])
+    # y_coef*y + x_coef*x = K --> move X to the other side, and multiply by inverse(y_coef) to get  y =  x_coef' * x + K'
+    x_var_spec = Linearized_Var_Spec(var=congruence.vars[0], idx=0, coef=-congruence.coefs[0], interval=var_ranges[0])
     y_var_spec = Linearized_Var_Spec(var=congruence.vars[1], idx=1, coef=congruence.coefs[1], interval=var_ranges[1])
 
-    if abs(y_var_spec.coef) != 1:
-        x_var_spec, y_var_spec = y_var_spec, x_var_spec
+    y_coef_inverse = pow(y_var_spec.coef, -1, congruence.modulus)
+    x_coef_inverse = pow(x_var_spec.coef, -1, congruence.modulus)
 
-    if abs(y_var_spec.coef) != 1:
-        return None  # Both variables have a |coefficient| > 1 which requires a complex tiling of the 2D space
-
-    if (x_var_spec.interval[1] - x_var_spec.interval[0]) / congruence.modulus > 4:
-        return None  # Linearization would create a very large disjunction
-
-    if _interval_length(y_var_spec.interval) > congruence.modulus:
-        return None  # We can linearize, but we give up (likely too many disjuncts would be created)
-
-    if not can_linearize:
+    if y_coef_inverse == 0 or x_coef_inverse == 0:
         return None
 
-    # @Note: The following code is written with an image of placing the larger interval on x-axis
-    modulus = congruence.modulus
-    x_alpha = fractions.Fraction(modulus, abs(x_var_spec.coef))  # We need to keep it as float
+    y_var_spec.coef = 1
+    x_var_spec.coef = (x_var_spec.coef * y_coef_inverse) % congruence.modulus
+    rhs = (congruence.rhs*y_coef_inverse) % congruence.modulus
 
-    # Solve the congruence x = y + c (mod M) for y = 0 to find zero points of the functions
-    zero_point = congruence.rhs
-    if x_var_spec.coef < 0:
-        zero_point = modulus - zero_point
+    if not _should_linearize(x_var_spec, y_var_spec, congruence):
+        return None
 
-    # If x-values are from [a, b], then shift the zero point z into z' so that a belongs to [z', z'+x_alpha]
-    shifted_zero_point = zero_point + int(math.floor(x_var_spec.interval[0]/x_alpha) * x_alpha)
+    leftmost_x = x_var_spec.interval[0]
+    x_stride = fractions.Fraction(congruence.modulus, x_var_spec.coef)
 
-    # assert x_var_spec.interval[0] <= shifted_zero_point, f'{x_var_spec.interval[0]} <= {shifted_zero_point}'
-    # assert shifted_zero_point <= x_var_spec.interval[1], shifted_zero_point
+    first_zero = fractions.Fraction(rhs, pow(-x_var_spec.coef, -1, congruence.modulus))
 
-    # We know that at zero_point_shifted the function has value 0. Therefore, we need to make
-    # b.y = b.f(x) = -a.x + K = 0
-    first_function_offset = x_var_spec.coef*shifted_zero_point
+    first_zero_distance = leftmost_x*x_var_spec.coef - first_zero
+    strides_from_first_zero = first_zero_distance / x_stride
+
+    x_below = first_zero + math.floor(strides_from_first_zero) * x_stride
+    x_below = fractions.Fraction(x_below, x_var_spec.coef)
+    x_above = x_below + x_stride
+
+    # Calculate the offset as a distance from origin which has offset -rhs'
+    first_offset = -first_zero - math.floor(strides_from_first_zero) * x_stride
+
+    print(f'{first_zero=}')
+    print(f'{x_above=}')
+    print(f'{x_below=}')
+    print(f'{first_offset=}')
+    print(f'{x_var_spec=} {y_var_spec=}')
+
+    def emit_branch(branches: List[AST_Connective], x_start: fractions.Fraction, x_end: fractions.Fraction, offset: fractions.Fraction):
+        lower_bound = Relation(vars=[x_var_spec.var], coefs=[-x_start.denominator], rhs=-x_start.numerator, predicate_symbol='<=')
+        upper_bound = Relation(vars=[x_var_spec.var], coefs=[x_end.denominator], rhs=x_end.numerator-1, predicate_symbol='<=')
+        fn = Relation(vars=[x_var_spec.var, y_var_spec.var], coefs=[x_var_spec.coef*offset.denominator, -1*offset.denominator], rhs=-offset.numerator, predicate_symbol='=')
+        branches.append(AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=(lower_bound, upper_bound, fn)))
+        print(fn)
+
+    branches: List[AST_Connective] = []
+    emit_branch(branches, x_below, x_above, first_offset)
 
     # At every iteration [start, end] when we reach end, we need to make it zero again ---> subtract x_alpha
-
-    interval_start_point = fractions.Fraction(shifted_zero_point, 1)
-    linearization_branches: List[Tuple[Relation, Relation, Relation]] = []
+    branch_x_start = x_above
     iter = 0
-    while interval_start_point < x_var_spec.interval[1]:
-        _start = math.ceil(interval_start_point)
-        _end_frac = interval_start_point + x_alpha
-        _end = math.floor(_end_frac) if _end_frac.denominator != 1 else _end_frac.numerator - 1
+    offset = first_offset
 
-        lower_bound = Relation(vars=[x_var_spec.var], coefs=[-1], rhs=-_start, predicate_symbol='<=')
-        upper_bound = Relation(vars=[x_var_spec.var], coefs=[1], rhs=_end, predicate_symbol='<=')
+    while branch_x_start < x_var_spec.interval[1]:
+        branch_x_end = branch_x_start + x_stride
+        offset -= x_stride
+        emit_branch(branches, branch_x_start, branch_x_end, offset)
+        branch_x_start += x_stride
 
-        # We have to ensure that the entire equation has only integer terms
-        # a.x + b.y = RHS (mod Modulus) ---> b.y = f(x) = -a.x + K
-        # In a normal form:  b.y = f(x) = -a.x + K   === a.x + b.y = K
-        coefs = [x_var_spec.coef, y_var_spec.coef]
-        coefs = [c*x_alpha.denominator for c in coefs]
-
-        d = x_alpha.denominator
-        rhs = d*first_function_offset - (x_alpha*d).numerator * iter
-
-        fn = Relation(vars=[x_var_spec.var, y_var_spec.var],
-                      coefs=coefs, rhs=rhs, predicate_symbol='=')
-
-        fn.sort_variables()
-
-        linearization_branches.append((lower_bound, upper_bound, fn))
-
-        interval_start_point += x_alpha
-        iter += 1
-
-    # print(f'Linearized {congruence} with {x_var_spec.var}={x_var_spec.interval} and {y_var_spec.var}={y_var_spec.interval} into')
-    # print(linearization_branches)
-
-    _or_node_children = []
-    for linearization_branch in linearization_branches:
-        connective = AST_Connective(
-            referenced_vars=tuple(),  # Todo
-            type=Connective_Type.AND,
-            children=linearization_branch)
-        _or_node_children.append(connective)
-    or_node_children = tuple(_or_node_children)
-
-    or_node = AST_Connective(referenced_vars=tuple(),
-                             type=Connective_Type.OR, children=or_node_children)
-
+    or_node = AST_Connective(referenced_vars=tuple(), type=Connective_Type.OR, children=tuple(branches))
     return or_node
 
 
