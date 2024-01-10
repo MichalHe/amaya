@@ -2167,10 +2167,11 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
     if not _should_linearize(x_var_spec, y_var_spec, congruence, x_stride):
         return None
 
-    print(x_var_spec, congruence.modulus)
+    print(x_var_spec, y_var_spec)
     print(congruence)
     try:
-        first_zero = fractions.Fraction(rhs, pow(-x_var_spec.coef, -1, congruence.modulus))
+        _x_inv = pow(-x_var_spec.coef, -1, congruence.modulus) % congruence.modulus
+        first_zero = fractions.Fraction((rhs * _x_inv) % congruence.modulus, 1)
     except ValueError:
         # -<x_coef>*x = rhs
         if rhs % (x_var_spec.coef) == 0:
