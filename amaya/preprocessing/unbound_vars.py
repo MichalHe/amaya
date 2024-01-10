@@ -1748,7 +1748,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
             return BoolLiteral(False), False
 
         if var_monotonicity.limits.upper_limit == var_monotonicity.limits.lower_limit and var_monotonicity.limits.lower_limit is not None:
-            print(f'The variable {var} has a known value {var_monotonicity.limits.upper_limit}')
+            logger.info(f'The variable {var} has a known value {var_monotonicity.limits.upper_limit}')
             # The variable has a known value so we can instantiate it regardless of its context
             vars_to_instantiate.append(var)
             continue
