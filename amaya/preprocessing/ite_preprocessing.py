@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-# @Debug
-import pprint
-
 from dataclasses import dataclass, field
 import copy
 from typing import (
@@ -97,7 +94,11 @@ def mark_and_collect_ite_conditions(ast: Raw_AST, cond_table: ConditionTable) ->
         placeholdered_ast = ['ite', condition_id, pos_branch_marked_ast, neg_branch_marked_ast]
         return placeholdered_ast
 
-    elif node_type in ['+',  '*', '<=', '>=', '>', '<', '=', 'mod', 'div']:
+    elif node_type == '+':  # The sum can be N-ary
+        marked_subtrees = [mark_and_collect_ite_conditions(subtree, cond_table) for subtree in ast[1:]]
+        return ['+'] + marked_subtrees
+
+    elif node_type in ['*', '<=', '>=', '>', '<', '=', 'mod', 'div']:
         left_marked_ast = mark_and_collect_ite_conditions(ast[1], cond_table)
         right_marked_ast = mark_and_collect_ite_conditions(ast[2], cond_table)
 

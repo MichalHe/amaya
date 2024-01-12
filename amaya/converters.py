@@ -78,6 +78,8 @@ def _write_ast_in_smt2(root: ASTp_Node, depth: int) -> str:
         for coef, var in atom.linear_terms():
             coef_str = str(coef) if coef >= 0 else f'(- {abs(coef)})'
             terms.append(f'(* {coef_str} x{var.id})')
+        if len(terms) == 1:
+            return terms[0]
         terms_str = ' '.join(terms)
         return f'(+ {terms_str})'
 
