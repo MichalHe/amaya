@@ -22,6 +22,7 @@ given formula (controlled via the `--backend` option):
               might still be bugs in the evaluation).
 '''
 import argparse as ap
+from collections.abc import Iterable
 from enum import Enum
 import os
 import logging
@@ -40,10 +41,10 @@ from amaya.config import (
     solver_config,
     SolutionDomain,
 )
-from amaya.converters import write_ast_in_lash
+from amaya.converters import write_ast_in_lash, write_ast_in_smt2
 from amaya.preprocessing import preprocess_ast
-from amaya.preprocessing.eval import convert_ast_into_evaluable_form
-from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, FunctionSymbol
+from amaya.preprocessing.eval import VarInfo, convert_ast_into_evaluable_form
+from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, ASTp_Node, FunctionSymbol, Var
 from amaya.stats import RunStats, StatPoint
 from amaya.tokenize import tokenize
 import amaya.utils as utils
@@ -305,7 +306,7 @@ benchmark_subparser.add_argument('--csv-fields',
 
 formula_conversion_subparser = subparsers.add_parser('convert')
 formula_conversion_subparser.add_argument('file_to_convert', help='File containing SMT2 formula to convert to other format.')
-formula_conversion_subparser.add_argument('-f', '--output-format', help='Format to output the formula into.', choices=['lash'], default='lash')
+formula_conversion_subparser.add_argument('-f', '--output-format', help='Format to output the formula into.', choices=['lash', 'smt2'], default='smt2')
 
 args = argparser.parse_args()
 
@@ -664,13 +665,14 @@ def convert_smt_to_other_format(args):
     tokens = tokenize(smt2_text)
     ast: List[AST_Node] = parse.build_syntax_tree(tokens)
 
-    writer_table = {
+    writer_table: Dict[str, Callable[[ASTp_Node, Iterable[Tuple[Var, VarInfo]]], str]] = {
         'lash': write_ast_in_lash,
+        'smt2': write_ast_in_smt2,
     }
 
     function_symbol_table: Dict[str, FunctionSymbol] = {}
     asserted_formulae: List[AST_Node] = []
-    writer: Callable[[AST_Node], str] = writer_table[args.output_format]
+    writer = writer_table[args.output_format]
 
     for top_level_statement in ast:
         if not isinstance(top_level_statement, list):
@@ -685,7 +687,11 @@ def convert_smt_to_other_format(args):
             fn_symbols = sorted(fn_symbols, key=lambda fn_symbol: fn_symbol.name)
             formula_to_emit = ['and', *asserted_formulae]
             formula_to_emit, var_table = preprocess_ast(formula_to_emit, global_fn_symbols=fn_symbols)
-            output = writer(formula_to_emit)
+            astp = parse.optimize_formula_structure(formula_to_emit, var_table)
+
+            formula_parameters = [(var, var_info) for var, var_info in var_table.items() if var_info.is_formula_param]
+            output = writer(astp, formula_parameters)
+
             print(output)
 
             # We are not catching any errors here, if an exception is raised it will kill the interpreter and the exit code

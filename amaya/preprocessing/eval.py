@@ -63,6 +63,7 @@ class VarInfo:
     name: str
     type: VariableType
     comment: Optional[str] = None
+    is_formula_param: bool = False
 
 
 class Scoper:
@@ -78,7 +79,7 @@ class Scoper:
             var = Var(id=self.next_var_id)
             self.next_var_id += 1
             global_scope[var_name] = var
-            self.var_table[var] = VarInfo(name=var_name, type=var_type)
+            self.var_table[var] = VarInfo(name=var_name, type=var_type, is_formula_param=True)
 
     def enter_quantifier(self, quantified_vars: List[Tuple[str, str]]) -> List[Var]:
         new_scope: Dict[str, Var] = {}

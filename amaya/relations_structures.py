@@ -257,6 +257,14 @@ class VariableType(IntEnum):
         }
         return m[type_str]
 
+    def into_smt2_sort(self) -> str:
+        match self.value:
+            case VariableType.INT:
+                return 'Int'
+            case VariableType.BOOL:
+                return 'Bool'
+            case _:
+                raise ValueError(f'Converting unknown variable type into SMT2 sort. Type: {self}')
 
 @dataclass
 class Value_Interval:
