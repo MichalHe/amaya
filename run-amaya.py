@@ -269,6 +269,13 @@ get_sat_subparser.add_argument('--hint-research',
                                default=False,
                                help='Display evaluation phenomena showing optimization potential (e.g. highly effective minimizations).')
 
+get_sat_subparser.add_argument('--max-states',
+                               type=int,
+                               default=None,
+                               metavar='N',
+                               help='Stop evaluating the input formula if an intermediate automaton has more than X states.')
+
+
 benchmark_subparser = subparsers.add_parser('benchmark')
 benchmark_subparser.add_argument('--add-file',
                                  metavar='FILE',
@@ -482,6 +489,7 @@ def run_in_getsat_mode(args) -> bool:
     solver_config.current_formula_path = os.path.abspath(args.input_file)
     solver_config.preprocessing.show_preprocessed_formula = args.show_preprocessed_formula
     solver_config.preprocessing.display_var_table = args.show_var_table
+    solver_config.max_allowed_states = args.max_states
 
     solver_config.report_highly_effective_minimizations = args.hint_research
 

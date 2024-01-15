@@ -153,7 +153,6 @@ class EvaluationContext:
             introspect_data = IntrospectionData(automaton=output, operation_id=operation_id, operation=op_start.op_type)
             self.introspect_handle(introspect_data)
 
-
         runtime = (time.time_ns() - op_start.start_ns) if solver_config.track_operation_runtime else 0
         output_info = AutomatonInfo.from_automaton(output)
         assert output_info
@@ -166,6 +165,13 @@ class EvaluationContext:
 
         logger.info(f"Operation finished: {stat}")
         self.stats.trace.append(stat)
+
+        if solver_config.max_allowed_states is not None:
+            if len(output.states) > solver_config.max_allowed_states:
+                info = 'Manipulated automaton is larger then the configured hard limit: %d > %d'
+                logger.critical(info, len(output.states), solver_config.max_allowed_states)
+                sys.exit(f'Automaton size limit exceeded: {len(output.states)}/{solver_config.max_allowed_states}')
+
         return operation_id
 
     def get_automaton_class_for_current_backend(self):

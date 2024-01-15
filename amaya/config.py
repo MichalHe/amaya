@@ -137,7 +137,10 @@ class SolverConfig(object):
     """String to use when disambiguating quantified variables, producing new var names of the form {old_name}{separator}{scope_id}."""
 
     report_highly_effective_minimizations: bool = False
-    """Log subformula for which was the minimization highly effective (the resuld is smaller than 0.2* original size) """
+    """Log subformula for which was the minimization highly effective (the resuld is smaller than 0.2* original size)."""
+
+    max_allowed_states: int | None = None
+    """Terminate the evaluation if any intermediate automaton gets larger than the given limit."""
 
 
 solver_config = SolverConfig()
