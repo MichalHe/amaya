@@ -260,6 +260,13 @@ get_sat_subparser.add_argument('-s',
                                choices=['csv', 'human'],
                                help='Collect runtime stats and output them in the given format.')
 
+get_sat_subparser.add_argument('-r',
+                               '--show-trace-stats',
+                               dest='show_trace_stats',
+                               default=False,
+                               action='store_true',
+                               help='Collect statistics abount every single intermediate automaton.')
+
 get_sat_subparser.add_argument('--stats-file',
                                dest='stats_file',
                                help='Collect statistics and output them into the specified file (implies --collect-stats).')
@@ -431,10 +438,7 @@ def search_directory_nonrecursive(root_path: str, filter_file_ext='.smt2') -> Li
     )
 
 
-def display_runtime_statistics(output_file: Optional[str], format: Optional[str], result: automatons.NFA, statistics: RunStats):
-    if not output_file and not format:
-        return
-
+def display_runtime_statistics(output_file: Optional[str], format: Optional[str], result: automatons.NFA, statistics: RunStats, show_trace_stats: bool = False):
     output_file_handle = sys.stdout if not output_file else open(output_file, 'w')
     format = 'human' if not format else format
 
@@ -461,10 +465,11 @@ def display_runtime_statistics(output_file: Optional[str], format: Optional[str]
         write_stat(f'############ STATISTICS ############')
         write_stat(f'result_size       : {len(result.states)}')
         write_stat(f'max_automaton_size: {statistics.max_automaton_size}')
-        write_stat(f'### Trace: ')
-        header = ['id', 'operation', 'Operand1 id', 'Operand1 Size', 'Operand2 id', 'Operand2 Size', 'Output Size', 'runtime (ns)']
-        rows = [row_from_stat_point(i, row) for i, row in enumerate(statistics.trace)]
-        write_stat(tabulate.tabulate(rows, headers=header))
+        if show_trace_stats:
+            write_stat(f'### Trace: ')
+            header = ['id', 'operation', 'Operand1 id', 'Operand1 Size', 'Operand2 id', 'Operand2 Size', 'Output Size', 'runtime (ns)']
+            rows = [row_from_stat_point(i, row) for i, row in enumerate(statistics.trace)]
+            write_stat(tabulate.tabulate(rows, headers=header))
     elif format == 'csv':
         import csv
         header = ['id', 'operation', 'operand1_id', 'operand1_size', 'operand2_id', 'operand2_size', 'output_size', 'runtime_ns']
@@ -473,8 +478,8 @@ def display_runtime_statistics(output_file: Optional[str], format: Optional[str]
         writer.writerow(header)
         writer.writerows(rows)
 
-    output_file_handle.close()
-
+    if output_file is not None:
+        output_file_handle.close()
 
 
 def run_in_getsat_mode(args) -> bool:
@@ -518,6 +523,7 @@ def run_in_getsat_mode(args) -> bool:
     else:
         handle_automaton_created_fn = discard_created_automaton
 
+    was_result_correct = True  # If the SMT file provides :status
     with open(args.input_file) as input_file:
         input_text = input_file.read()
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
@@ -539,14 +545,13 @@ def run_in_getsat_mode(args) -> bool:
                 msg = (f'The automaton\'s SAT did not match expected: actual={computed_sat}, '
                        f'expected={expected_sat}')
                 logger.critical(msg)
+                was_result_correct = False
 
-                print('error: computed different SAT as present in the input info :status field')
-                return False
         print('result:', computed_sat)
         if args.should_print_model:
             print('Model:', model)
 
-        display_runtime_statistics(args.stats_file, args.stats_format, nfa, stats)
+        display_runtime_statistics(args.stats_file, args.stats_format, nfa, stats, show_trace_stats=args.show_trace_stats)
 
         if should_output_created_automata:
             # Dump tracefile
@@ -556,7 +561,7 @@ def run_in_getsat_mode(args) -> bool:
                 trace_graph = utils.construct_dot_tree_from_trace(stats.trace)
                 trace_out_file.write(trace_graph)
 
-        return True
+        return was_result_correct
 
 
 def print_benchmark_results_as_csv(results: Dict[str, BenchmarkStat], args, separator=';'):
