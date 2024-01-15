@@ -17,6 +17,7 @@ from typing import (
     Sequence,
     cast,
 )
+import sys
 
 from amaya.automatons import (
     AutomatonType,
@@ -402,12 +403,17 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             assert ast_to_evaluate
             astp = optimize_formula_structure(ast_to_evaluate, var_table)
 
+            should_exit_without_evaluation = False
             if solver_config.preprocessing.show_preprocessed_formula:
-                import pprint, sys
-                print(f'AST:')
+                print(f'----- AST -----')
                 pprint_formula(astp)
-                print(f'Vars in var_table: {len(var_table)}')
-                # pprint.pprint(var_table)
+                should_exit_without_evaluation = True
+            if solver_config.preprocessing.display_var_table:
+                print(f'----- Var table -----')
+                pprint.pprint(var_table)
+                should_exit_without_evaluation = True
+
+            if should_exit_without_evaluation:
                 sys.exit(0)
 
             alphabet = LSBF_Alphabet.from_vars(var_table.keys())

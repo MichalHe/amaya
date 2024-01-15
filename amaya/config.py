@@ -100,7 +100,10 @@ class PreprocessingConfig:
     """Use two variables <d> and <m> as in `K*<d> + <m> = y` when rewriting nonlinear terms."""
 
     show_preprocessed_formula: bool = False
-    """Pretty print the preprocessed formula before evaluating."""
+    """Show preprocessed formula and exit; do not evaluate."""
+
+    display_var_table: bool = False
+    """Print variable table and exit."""
 
 
 @dataclass
