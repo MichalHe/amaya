@@ -491,7 +491,7 @@ def drop_negation_if_holding(ast: AST_Node, holding_negation: bool) -> AST_Node:
 
 
 def _push_negations_towards_atoms(ast: AST_Node, holding_negation: bool) -> AST_Node:
-    if isinstance(ast, str):
+    if isinstance(ast, (Var, str)):
         return drop_negation_if_holding(ast, holding_negation)
 
     if isinstance(ast, Relation):
@@ -511,7 +511,7 @@ def _push_negations_towards_atoms(ast: AST_Node, holding_negation: bool) -> AST_
     if isinstance(ast, BoolLiteral):
         return BoolLiteral(value = not ast.value) if holding_negation else ast
 
-    assert isinstance(ast, list)
+    assert isinstance(ast, list), ast
 
     node_type: str = ast[0]  # type: ignore
     if node_type == AST_Node_Names.EXISTS.value:
