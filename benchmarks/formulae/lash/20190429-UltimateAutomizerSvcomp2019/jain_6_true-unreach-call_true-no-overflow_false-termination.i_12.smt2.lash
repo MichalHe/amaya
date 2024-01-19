@@ -1,0 +1,1 @@
+((((((-8*X3 - 1*X8 + 1*X9 = 0) AND (-2*X1 - 1*X4 + 1*X5 = 0)) AND (EXISTS (X10:  (-1*X6 + 4*X10 = 0) ))) AND (EXISTS (X11:  (-1*X4 + 2*X11 = 0) ))) AND (EXISTS (X12:  (-1*X8 + 8*X12 = 0) ))) AND (NOT (((EXISTS (X14:  (-1*X5 + 2*X14 = 0) )) AND (EXISTS (X15:  (-1*X9 + 8*X15 = 0) ))))))

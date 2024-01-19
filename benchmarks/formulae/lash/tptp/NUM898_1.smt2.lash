@@ -1,0 +1,1 @@
+EXISTS (X1: EXISTS (X2: EXISTS (X3: EXISTS (X4:  (NOT (((1*X1 - 1*xX2 - 1*xX4 = 0) AND (-1*X3 + 1*xX4 <= -1)))) ))))

@@ -1,0 +1,1 @@
+(NOT (EXISTS (X3: EXISTS (X4: EXISTS (X6: EXISTS (X5: EXISTS (X7:  (((((((((-1*X3 <= 0) AND (-1*X6 <= 0)) AND (1*X6 <= 4)) AND (-1*X5 <= 0)) AND (1*X5 <= 299977)) AND (1*X2 - 1*X5 <= 300021)) AND (1*X3 - 5*X4 - 1*X6 = 0)) AND (4*X4 - 1*X5 - 299978*X7 = 0))) )))))))

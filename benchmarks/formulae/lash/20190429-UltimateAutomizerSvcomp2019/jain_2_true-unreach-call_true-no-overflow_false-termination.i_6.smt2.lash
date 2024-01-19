@@ -1,0 +1,1 @@
+((EXISTS (X4:  (-1*X1 + 2*X4 = -1) )) AND (NOT ((EXISTS (X8: EXISTS (X9: EXISTS (X10:  (1*X2 - 2*X8 - 2*X9 - 2*X10 = 1) )))))))

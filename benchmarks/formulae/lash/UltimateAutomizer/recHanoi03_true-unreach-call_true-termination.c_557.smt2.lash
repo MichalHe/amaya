@@ -1,0 +1,1 @@
+((1*X1 - 1*X3 <= 0) AND (NOT (EXISTS (X7: EXISTS (X8: EXISTS (X9:  (((((-1*X8 <= -1) AND (2*X8 - 1*X9 <= -1)) AND (-1*X7 + 2*X9 <= -1)) AND (-1*X2 + 2*X7 <= -1))) ))))))

@@ -1,0 +1,1 @@
+((EXISTS (X5: EXISTS (X6: EXISTS (X7:  (((((-1*X1 + 2*X5 + 2*X6 + 2*X7 <= -1) AND (1*X3 - 1*X6 <= 0)) AND (-1*X5 + 1*X6 <= 0)) AND (1*X5 - 1*X7 <= 0))) )))) AND (NOT (EXISTS (X8: EXISTS (X9: EXISTS (X10:  (((((-1*X1 + 2*X8 + 2*X9 + 2*X10 <= -1) AND (1*X3 - 1*X9 <= 0)) AND (-1*X8 + 1*X9 <= 0)) AND (1*X8 - 1*X10 <= 0))) ))))))

@@ -1,1 +1,0 @@
-((((EXISTS (X2: EXISTS (X3:  (-1 * X0 + 2 * X2 + 2 * X3 = -1) ))) AND (EXISTS (X4: EXISTS (X5:  (-1 * X1 + 2 * X4 + 2 * X5 = -1) ))))) AND (NOT (((EXISTS (X6:  (-1 * X1 + 2 * X6 = -1) )) AND (EXISTS (X7:  (-1 * X0 + 2 * X7 = -1) ))))))

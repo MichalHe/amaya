@@ -1,0 +1,1 @@
+EXISTS (X1: EXISTS (X2:  (NOT (2*X1 - 1*xX2 = 0)) ))

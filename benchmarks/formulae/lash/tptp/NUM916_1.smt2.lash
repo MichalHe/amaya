@@ -1,0 +1,1 @@
+EXISTS (X1: EXISTS (X2:  (NOT (EXISTS (X3:  (1*X1 - 1*xX2 + 1*xX3 = 0) ))) ))
