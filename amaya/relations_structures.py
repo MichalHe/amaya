@@ -185,6 +185,24 @@ class Congruence:
         for term in zip(self.coefs, self.vars):
             yield term
 
+    def is_normalized(self) -> bool:
+        if len(self.coefs) > 1:
+            return False
+        return self.coefs[0] == 1
+
+    def normalize(self) -> Congruence | None:
+        if len(self.coefs) > 1:
+            return None
+
+        coef = self.coefs[0]
+        try:
+            coef_inv = pow(coef, -1, self.modulus)
+        except ValueError:
+            return None
+        rhs = (self.rhs * coef_inv) % self.modulus
+        return Congruence(vars=list(self.vars), coefs=[1], rhs=rhs, modulus=self.modulus)
+
+
 @dataclass
 class BoolLiteral:
     """True or False formula"""
@@ -291,6 +309,9 @@ class Value_Interval:
     def synthetize_atoms(self, var: Var) -> Tuple[Relation, ...]:
         atoms = []
         if self.lower_limit is not None:
+            if self.lower_limit == self.upper_limit:
+                return (Relation(vars=[var], coefs=[1], rhs=self.lower_limit, predicate_symbol='='),)
+
             lower_limit = Relation(vars=[var], coefs=[-1], rhs=-self.lower_limit, predicate_symbol='<=')
             atoms.append(lower_limit)
         if self.upper_limit is not None:

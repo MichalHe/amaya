@@ -18,6 +18,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    cast,
 )
 from amaya.preprocessing.eval import Scoper, VarInfo, split_lin_terms_into_vars_and_coefs
 
@@ -1418,7 +1419,7 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
     match root:
         case Relation() | Congruence():
             if var not in root.vars:
-                # Just make note about the var values asserted here, as other places where the substitution
+                # Just make a note about the var values asserted here, as other places where the substitution
                 # was successful might induce a conflict.
                 if isinstance(root, Relation) and len(root.vars) == 1:
                     other_var = root.vars[0]
@@ -1450,7 +1451,8 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
                     return ret
 
             if isinstance(root, Congruence):
-                return Congruence(vars=new_vars, coefs=new_coefs, rhs=(new_rhs % root.modulus), modulus=root.modulus)
+                new_congruence = Congruence(vars=new_vars, coefs=new_coefs, rhs=(new_rhs % root.modulus), modulus=root.modulus)
+                return new_congruence
 
             coefs_gcd = math.gcd(*new_coefs)
             if root.predicate_symbol == '=' and (new_rhs % coefs_gcd) != 0:
@@ -1690,7 +1692,6 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
                 dep_var = pos.vars[dep_var_idx]
                 implied_bound = Relation(vars=[dep_var], coefs=[-1], rhs=neg.rhs, predicate_symbol='<=')
 
-                print(f'Replacing {pos}, {neg} with {implied_bound} at {exists_node}')
                 rels_to_replace.append((relation_indices, [implied_bound]))
 
         added_subformulae: List[ASTp_Node] = []
@@ -1848,7 +1849,6 @@ def _optimize_exists_tree_using_const_values_only(exists_node: AST_Quantifier) -
 
     result: ASTp_Node = exists_node
     for var, value in substitutions_to_make:
-        print(f'Var value is known: {var}={value}')
         new_node = _substitute_var_with_value(result, var, value, Parent_Context_Var_Values())
         result = new_node
 
@@ -1870,11 +1870,18 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
         return connective_children
 
     var_bounds: Dict[Var, Value_Interval] = defaultdict(Value_Interval)
+    var_singular_congruences: Dict[Var, List[int]] = defaultdict(list)
 
-    untouched_subtrees: List[Tuple[ASTp_Node, bool]] = []
-    for child, does_child_contain_quantifier in connective_children:
+    untouched_subtrees_mask: List[bool] = [True] * len(connective_children)
+
+    for child_idx, child_info in enumerate(connective_children):
+        child, does_child_contain_quantifier = child_info
+        if isinstance(child, Congruence) and len(child.vars) == 1:
+            var = child.vars[0]
+            var_singular_congruences[var].append(child_idx)
+            continue
+
         if not isinstance(child, Relation) or len(child.vars) > 1:
-            untouched_subtrees.append((child, does_child_contain_quantifier))
             continue
 
         var = child.vars[0]
@@ -1886,6 +1893,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
                 bounds.try_strengthen_lower(bound_value)
             else:
                 bounds.try_strengthen_upper(bound_value)
+            untouched_subtrees_mask[child_idx] = False  # The atom has been consumed
 
         elif child.specifies_a_single_value_for_var():
             if child.is_unsat_eq():
@@ -1894,6 +1902,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
             implied_val = child.rhs // child.coefs[0]
             bounds.try_strengthen_lower(implied_val)
             bounds.try_strengthen_upper(implied_val)
+            untouched_subtrees_mask[child_idx] = False  # The atom has been consumed
 
         if bounds.lower_limit is None or bounds.upper_limit is None:
             continue
@@ -1903,8 +1912,54 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
 
     new_bounds = []
     for var, bound in var_bounds.items():
+        is_fin = bound.lower_limit is not None and bound.upper_limit is not None
+        var_congruences = var_singular_congruences[var]
+        if is_fin and var_congruences:
+            upper_bound: int = cast(int, bound.upper_limit)
+            lower_bound: int = cast(int, bound.lower_limit)
+
+            implied_var_values: Tuple[int, int] | None = None
+            for congruence_idx in var_congruences:
+                _congruence, _ = connective_children[congruence_idx]
+                congruence = cast(Congruence, _congruence)
+                if not congruence.is_normalized():
+                    congruence = congruence.normalize()
+                if not congruence:  # The congruence could not be normalized
+                    continue
+
+                # Congruence has the form x = K (mod M)
+                smallest_solution = math.ceil((lower_bound+congruence.rhs)/ congruence.modulus)
+                largest_solution  = math.floor((upper_bound+congruence.rhs)/ congruence.modulus)
+
+                if not implied_var_values:
+                    implied_var_values = (smallest_solution, largest_solution)
+                else:
+                    new_smallest_solution = max(smallest_solution, implied_var_values[0])
+                    new_largest_solution = min(largest_solution, implied_var_values[1])
+                    implied_var_values = (new_smallest_solution, new_largest_solution)
+                logger.debug('Congruence solving for %s - implied var values: %s', var, implied_var_values)
+
+            if not implied_var_values:
+                continue
+
+            if implied_var_values[0] > implied_var_values[1]:
+                logger.info('Detected conflict via congruence solving on variable: %s', var)
+                congruences = [connective_children[congruence_idx][0] for congruence_idx in var_congruences]
+                logger.info('%s has finite range: [%d, %d] and the following congruences: %s', var, lower_bound, upper_bound, congruences)
+                return ((BoolLiteral(False), False),)
+
+            if implied_var_values[0] == implied_var_values[1]:
+                logger.info('Detected only single possible value for variable %s via congruence solving', var)
+                congruences = [connective_children[congruence_idx][0] for congruence_idx in var_congruences]
+                logger.info('%s has finite range: [%d, %d] and the following congruences: %s', var, lower_bound, upper_bound, congruences)
+
+                implied_value = implied_var_values[0]
+                bound.lower_limit = implied_value
+                bound.upper_limit = implied_value
+
         new_bounds.extend((bound, False) for bound in bound.synthetize_atoms(var))
 
+    untouched_subtrees = (child for child_idx, child in enumerate(connective_children) if untouched_subtrees_mask[child_idx])
     result = tuple(new_bounds) + tuple(untouched_subtrees)
     return result
 
@@ -2167,8 +2222,6 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
     if not _should_linearize(x_var_spec, y_var_spec, congruence, x_stride):
         return None
 
-    print(x_var_spec, y_var_spec)
-    print(congruence)
     try:
         _x_inv = pow(-x_var_spec.coef, -1, congruence.modulus) % congruence.modulus
         first_zero = fractions.Fraction((rhs * _x_inv) % congruence.modulus, 1)
@@ -2190,18 +2243,11 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
     # Calculate the offset as a distance from origin which has offset -rhs'
     first_offset = -first_zero - math.floor(strides_from_first_zero) * x_stride
 
-    print(f'{first_zero=}')
-    print(f'{x_above=}')
-    print(f'{x_below=}')
-    print(f'{first_offset=}')
-    print(f'{x_var_spec=} {y_var_spec=}')
-
     def emit_branch(branches: List[AST_Connective], x_start: fractions.Fraction, x_end: fractions.Fraction, offset: fractions.Fraction):
         lower_bound = Relation(vars=[x_var_spec.var], coefs=[-x_start.denominator], rhs=-x_start.numerator, predicate_symbol='<=')
         upper_bound = Relation(vars=[x_var_spec.var], coefs=[x_end.denominator], rhs=x_end.numerator-1, predicate_symbol='<=')
         fn = Relation(vars=[x_var_spec.var, y_var_spec.var], coefs=[x_var_spec.coef*offset.denominator, -1*offset.denominator], rhs=-offset.numerator, predicate_symbol='=')
         branches.append(AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=(lower_bound, upper_bound, fn)))
-        print(fn)
 
     branches: List[AST_Connective] = []
     emit_branch(branches, x_below, x_above, first_offset)
