@@ -8,6 +8,7 @@ from amaya.relations_structures import(
     AST_Node,
     AST_Quantifier,
     ASTp_Node,
+    BoolLiteral,
     Congruence,
     Connective_Type,
     Relation,
@@ -25,7 +26,7 @@ def _write_ast_in_lash(root: ASTp_Node, params: Iterable[Tuple[Var, VarInfo]]) -
         coef, var = term
         if include_sign:
             return f'{coef}*{var_into_var_name(var)}'
-        return f'{abs(coef)}*x{var_into_var_name(var)}'
+        return f'{abs(coef)}*{var_into_var_name(var)}'
 
     match root:
         case str():
@@ -44,6 +45,12 @@ def _write_ast_in_lash(root: ASTp_Node, params: Iterable[Tuple[Var, VarInfo]]) -
             lhs_str = ' '.join(terms)
             return f'{lhs_str} {root.predicate_symbol} {root.rhs}'
         case AST_Connective(): # LASH does not support N-ary ANDs
+            if root.type == Connective_Type.EQUIV:
+                assert len(root.children) == 2
+                left_child = '(' + _write_ast_in_lash(root.children[0], params) + ')'
+                right_child = '(' + _write_ast_in_lash(root.children[1], params) + ')'
+                return f'({left_child} AND {right_child}) OR ((NOT {left_child}) AND (NOT {right_child}))'
+
             connective_type_to_symbol = {
                 Connective_Type.AND: 'AND',
                 Connective_Type.OR: 'OR'
@@ -64,6 +71,13 @@ def _write_ast_in_lash(root: ASTp_Node, params: Iterable[Tuple[Var, VarInfo]]) -
         case AST_Negation():
             subformula = _write_ast_in_lash(root.child, params)
             return f'NOT ({subformula})'
+        case BoolLiteral():
+            if root.value:
+                return 'X = X'
+            else:
+                return 'NOT (X = X)'
+        case Var():
+            return f'-1*{var_into_var_name(root)} <= 0'  # When the Boolean variable is positive, it is True; when negative; False
         case _:
             raise ValueError(f'Unhandled node type when converting ASTp into LASH: {type(root)}')
 
