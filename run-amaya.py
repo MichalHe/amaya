@@ -120,6 +120,12 @@ argparser.add_argument('-m',
                        default=None,
                        help='Minimize the automatons eagerly using the specified minimization algorithm.')
 
+argparser.add_argument('--shard',
+                       dest='sharding_enabled',
+                       action='store_true',
+                       default=False,
+                       help='Perform top-level sharding.')
+
 argparser.add_argument('-p',
                        '--preprocessing',
                        action='append',
@@ -394,6 +400,7 @@ elif args.minimization_method == 'brzozowski':
 elif 'fast' not in args:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
+solver_config.optimizations.shard = args.sharding_enabled
 
 if 'all' in args.optimizations:
     for attr in opt_to_config_field.values():
@@ -438,7 +445,7 @@ def search_directory_nonrecursive(root_path: str, filter_file_ext='.smt2') -> Li
     )
 
 
-def display_runtime_statistics(output_file: Optional[str], format: Optional[str], result: automatons.NFA, statistics: RunStats, show_trace_stats: bool = False):
+def display_runtime_statistics(output_file: Optional[str], format: Optional[str], result: automatons.NFA | None, statistics: RunStats, show_trace_stats: bool = False):
     output_file_handle = sys.stdout if not output_file else open(output_file, 'w')
     format = 'human' if not format else format
 
@@ -527,14 +534,23 @@ def run_in_getsat_mode(args) -> bool:
     with open(args.input_file) as input_file:
         input_text = input_file.read()
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
-        nfa, smt_info, stats = parse.perform_whole_evaluation_on_source_text(input_text,
+        nfa_or_model, smt_info, stats = parse.perform_whole_evaluation_on_source_text(input_text,
                                                                              handle_automaton_created_fn)
 
         expected_sat = smt_info.get(':status', 'sat')
         if ':status' not in smt_info:
             logger.warning('The is missing :status in the smt-info statement, assuming sat.')
 
-        model = nfa.find_model()
+        if isinstance(nfa_or_model, dict):
+            model = nfa_or_model
+            nfa = None
+        elif nfa_or_model is None:
+            model = None
+            nfa = None
+        else:
+            model = nfa_or_model.find_model()
+            nfa = nfa_or_model
+
         computed_sat = 'sat' if model is not None else 'unsat'
         logger.info(f'The SAT value of the result automaton is {computed_sat}')
 
@@ -551,7 +567,7 @@ def run_in_getsat_mode(args) -> bool:
         if args.should_print_model:
             print('Model:', model)
 
-        display_runtime_statistics(args.stats_file, args.stats_format, nfa, stats, show_trace_stats=args.show_trace_stats)
+        # display_runtime_statistics(args.stats_file, args.stats_format, nfa, stats, show_trace_stats=args.show_trace_stats)
 
         if should_output_created_automata:
             # Dump tracefile
@@ -626,8 +642,8 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                 # Clear sylvan cache if running multiple evaluations, so that the measurements do not interfere.
                 if solver_config.backend_type == parse.BackendType.MTBDD:
                     from amaya.mtbdd_transitions import MTBDDTransitionFn
-                    MTBDDTransitionFn.call_clear_cachce()
-                    MTBDDTransitionFn.call_sylvan_gc()
+                    # MTBDDTransitionFn.call_clear_cachce()
+                    # MTBDDTransitionFn.call_sylvan_gc()
 
                 print('Running', benchmark_file, file=sys.stderr)
                 solver_config.export_counter = 0

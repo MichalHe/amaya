@@ -18,13 +18,14 @@ from typing import (
     cast,
 )
 import sys
+from amaya.alphabet import LSBF_AlphabetSymbol
 
 from amaya.automatons import (
     AutomatonType,
     LSBF_Alphabet,
     NFA,
 )
-from amaya import logger
+from amaya import logger, shard_logger
 from amaya.config import (
     BackendType,
     MinimizationAlgorithms,
@@ -343,7 +344,7 @@ def parse_function_symbol_declaration(decl_ast: AST_NaryNode) -> FunctionSymbol:
 # @Cleanup: This should be renamed to something like evaluate_smt2
 def perform_whole_evaluation_on_source_text(source_text: str,
                                             emit_introspect: Optional[IntrospectHandle] = None
-                                            ) -> Tuple[NFA, Dict[str, str], RunStats]:
+                                            ) -> Tuple[NFA | Dict[str, int], Dict[str, str], RunStats]:
     """
     Parses the given SMT2 source code and runs the evaluation procedure.
 
@@ -427,6 +428,11 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet, var_table=var_table)
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
+
+            if isinstance(astp, AST_Connective) and astp.type == Connective_Type.AND and solver_config.optimizations.shard:
+                model = evaluate_using_sharding(astp, eval_ctx)
+                return (model, smt_info, eval_ctx.stats)
+
             nfa = run_evaluation_procedure(astp, eval_ctx)
             eval_result = nfa
         elif statement_root == 'exit':
@@ -758,6 +764,91 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
 
     return reduction_result
 
+
+def split_conjunction_to_shards(and_expr: AST_Connective) -> Tuple[List[Tuple[int, ...]], List[Tuple[Var, ...]]]:
+    variable_partitions: Dict[Var, Tuple[Set[Var], Set[int]]] = {var: ({var}, set()) for var in and_expr.referenced_vars}
+
+    def update_partitions(joining_vars: Iterable[Var], atom_idx: int):
+        partition_union: Set[Var] = set()
+        partition_nodes: Set[int] = {atom_idx}
+        for var in joining_vars:
+            var_partition, var_nodes = variable_partitions[var]
+            partition_union.update(var_partition)
+            partition_nodes.update(var_nodes)
+        for var in partition_union:
+            variable_partitions[var] = (partition_union, partition_nodes)
+
+    for node_idx, node in enumerate(and_expr.children):
+        match node:
+            case Relation() | Congruence():
+                update_partitions(joining_vars=node.vars, atom_idx=node_idx)
+            case AST_Connective() | AST_Negation() | AST_Quantifier():
+                update_partitions(joining_vars=node.referenced_vars, atom_idx=node_idx)
+
+    partitions_and_atom_indices = {}
+    for partition, atom_indices in variable_partitions.values():
+        partitions_and_atom_indices[tuple(sorted(partition))] = tuple(sorted(atom_indices))
+
+    return list(partitions_and_atom_indices.values()), list(partitions_and_atom_indices.keys())
+
+
+def get_model_values(model: Tuple[LSBF_AlphabetSymbol, ...], vars: Tuple[Var,...]) -> List[int]:
+    base = 1
+    var_values: List[int] = [0] * len(vars)
+    for symbol_idx, symbol in enumerate(model):
+        if symbol_idx < len(model) - 1: # Nonsign bits
+            for var_idx, var in enumerate(vars):
+                bit_val = 1 if symbol[var.id-1] == 1 else 0
+                var_values[var_idx] += bit_val * base
+        else: # Sign bit
+            for var_idx, var in enumerate(vars):
+                bit_val = 1 if symbol[var.id-1] == 1 else 0
+                var_values[var_idx] -= bit_val * base
+        base *= 2
+
+    return var_values
+
+
+def construct_automaton_from_var_assignment(assignment: Dict[Var, int], ctx: EvaluationContext) -> NFA:
+    aut = ctx.get_automaton_class_for_current_backend().trivial_accepting(ctx.get_alphabet())
+    for var, var_value in assignment.items():
+        relation = Relation(vars=[var], coefs=[1], rhs=var_value, predicate_symbol='=')
+        var_aut = relations_to_nfa.build_nfa_from_linear_equality(ctx.get_automaton_class_for_current_backend(),
+                                                                  ctx.get_alphabet(),
+                                                                  relation)
+        aut = aut.intersection(var_aut)  # type: ignore
+    return aut
+
+
+def evaluate_using_sharding(and_expr: AST_Connective, ctx: EvaluationContext) -> Dict[Var, int] | None:
+    alphabet = ctx.get_alphabet()
+    shard_logger.info('Performing sharding.')
+    shards, shard_vars = split_conjunction_to_shards(and_expr)
+    shard_automata: List[NFA] = []
+    for shard in shards:
+        shard_logger.info(f'Processing shard: {shard}')
+        shard_automaton = ctx.get_automaton_class_for_current_backend().trivial_accepting(alphabet)
+        for shard_formula_idx in shard:
+            shard_formula = and_expr.children[shard_formula_idx]
+            shard_elem_automaton = run_evaluation_procedure(shard_formula, ctx)
+            shard_automaton = shard_automaton.intersection(shard_elem_automaton)  # type: ignore
+        shard_automata.append(shard_automaton)
+
+    shard_logger.info('Searching for models in individual sharded automata.')
+    var_assignment: Dict[Var, int] = {}
+    for shard_idx, shard_automaton in enumerate(shard_automata):
+        shard = shards[shard_idx]
+        current_shard_vars: Tuple[Var, ...] = shard_vars[shard_idx]
+        model = shard_automaton.find_model()
+        if not model:
+            shard_logger.info(f'The shard {shard} has no model!')
+            return None
+
+        values = get_model_values(model, current_shard_vars)
+        for var, var_value in zip(current_shard_vars, values):
+            var_assignment[var] = var_value
+
+    return var_assignment
 
 def evaluate_and_expr(and_expr: AST_Connective, ctx: EvaluationContext, _depth: int) -> NFA:
     """Construct an automaton corresponding to the given conjuction."""
