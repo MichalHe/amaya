@@ -20,7 +20,7 @@ from typing import (
     Union,
     cast,
 )
-from amaya.preprocessing.eval import Scoper, VarInfo, split_lin_terms_into_vars_and_coefs
+from amaya.preprocessing.eval import LinTerm, Scoper, VarInfo, split_lin_terms_into_vars_and_coefs
 
 from amaya.relations_structures import (
     AST_Atom,
@@ -1307,7 +1307,7 @@ def prune_conjunctions_false_due_to_parent_context(root: ASTp_Node) -> ASTp_Node
 class Var_Monotonicity:
     increasing: bool = False
     decreasing: bool = False
-    congruences: List[Congruence] = field(default_factory=list)
+    congruences: List[Tuple[int, Congruence]] = field(default_factory=list)
     limits: Value_Interval = field(default_factory=Value_Interval)
 
 
@@ -1357,9 +1357,15 @@ def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[V
 class Monotonicity_Info:
     are_bounds_unsure: bool = False
     seen_vars: Dict[Var, Var_Monotonicity] = field(default_factory=lambda: defaultdict(Var_Monotonicity))
+    congruence_counter: int = 0
 
     def should_analyse_var(self, var: Var) -> bool:
         return var in self.seen_vars
+
+    def get_next_congruence_id(self) -> int:
+        congruence_id = self.congruence_counter
+        self.congruence_counter += 1
+        return congruence_id
 
 
 def _determine_monotonicity_of_variables(tree: ASTp_Node, monotonicity_info: Monotonicity_Info, is_positive: bool) -> None:
@@ -1386,7 +1392,8 @@ def _determine_monotonicity_of_variables(tree: ASTp_Node, monotonicity_info: Mon
         case Congruence():
             for var_idx, var in enumerate(tree.vars):
                 if monotonicity_info.should_analyse_var(var):
-                    monotonicity_info.seen_vars[var].congruences.append(tree)
+                    congruence_idx = monotonicity_info.get_next_congruence_id()
+                    monotonicity_info.seen_vars[var].congruences.append((congruence_idx, tree))
 
         case BoolLiteral() | Var():
             return
@@ -1716,7 +1723,64 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
     return Rewrite_Info(result=exists_node, rewrite_happend=False, should_continue=True, quantifier_present=True)
 
 
-def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]:
+@dataclass
+class Exists_Optimization_Result:
+    node: ASTp_Node
+    contains_quantifier: bool
+    contains_rewritable_congruence: bool = False
+    vars_to_rewrite_congruences_with: List[Var] = field(default_factory=list)
+
+
+def _optimize_congruences_on_unbound_vars(root: ASTp_Node, opt_result: Exists_Optimization_Result) -> ASTp_Node:
+    def filter_our_referenced_vars(referenced_vars: Tuple[Var, ...]) -> Tuple[Var, ...]:
+        return tuple(var for var in referenced_vars if var not in opt_result.vars_to_rewrite_congruences_with)
+
+    match root:
+        case Relation():
+            if any(var in root.vars for var in opt_result.vars_to_rewrite_congruences_with):
+                return BoolLiteral(True)
+            return root
+        case Congruence():
+            usable_terms: List[LinTerm] = [LinTerm(coef=term[0], var=term[1]) for term in root.linear_terms() if term[1] in opt_result.vars_to_rewrite_congruences_with]
+            terms_gcd = math.gcd(*(term.coef for term in usable_terms))
+            new_modulus = math.gcd(root.modulus, terms_gcd)
+
+            new_terms = [term for term in root.linear_terms() if term[1] not in opt_result.vars_to_rewrite_congruences_with]
+            coefs = [term[0] for term in new_terms]
+            vars  = [term[1] for term in new_terms]
+
+            if not vars:
+                return BoolLiteral(True)
+
+            return Congruence(vars=vars, coefs=coefs, modulus=new_modulus, rhs=(root.rhs % new_modulus))
+        case Var():
+            return root
+        case AST_Connective():
+            rewritten_children = (_optimize_congruences_on_unbound_vars(child, opt_result) for child in root.children)
+            referenced_vars = filter_our_referenced_vars(root.referenced_vars)
+            return AST_Connective(referenced_vars=referenced_vars, type=Connective_Type.AND, children=tuple(rewritten_children))
+        case AST_Quantifier():
+            optimized_child = _optimize_congruences_on_unbound_vars(root.child, opt_result)
+            bound_vars = tuple(var for var in root.bound_vars if var not in opt_result.vars_to_rewrite_congruences_with)
+            if not bound_vars:
+                return optimized_child
+            referenced_vars = filter_our_referenced_vars(root.referenced_vars)
+            return AST_Quantifier(referenced_vars=referenced_vars, bound_vars=bound_vars, child=optimized_child)
+        case AST_Negation():
+            optimized_child = _optimize_congruences_on_unbound_vars(root.child, opt_result)
+            referenced_vars = filter_our_referenced_vars(root.referenced_vars)
+            return AST_Negation(referenced_vars=referenced_vars, child=optimized_child)
+        case _:
+            raise ValueError('Unhandled node while optimizing congruences on unbound variables.')
+
+
+def optimize_congruences_on_unbound_vars(root: ASTp_Node, opt_result: Exists_Optimization_Result) -> Exists_Optimization_Result:
+    optimized_tree = _optimize_congruences_on_unbound_vars(root, opt_result)
+    contains_quantifier = isinstance(root, AST_Quantifier)
+    return Exists_Optimization_Result(node=optimized_tree, contains_quantifier=contains_quantifier)
+
+
+def _optimize_exists_tree(exists_node: AST_Quantifier) -> Exists_Optimization_Result:
     """
     Optimize the structure of exists (X) where X is quantifier free.
 
@@ -1728,12 +1792,12 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
     # Apply specific rewrite rules
     logger.debug('Optimizing exists tree: %s', exists_node)
     if (rewrite_info := _rewrite_exists_equations(exists_node)):
-        return rewrite_info
+        return Exists_Optimization_Result(node=rewrite_info[0], contains_quantifier=rewrite_info[1])
 
     rewrite_info = _rewrite_surjective_transformations(exists_node)
     if rewrite_info.rewrite_happend:
         if not rewrite_info.should_continue:
-            return rewrite_info.result, rewrite_info.quantifier_present
+            return Exists_Optimization_Result(rewrite_info.result, contains_quantifier=rewrite_info.quantifier_present)
 
         assert rewrite_info.quantifier_present
         assert isinstance(rewrite_info.result, AST_Quantifier)
@@ -1744,10 +1808,11 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
     _determine_monotonicity_of_variables(exists_node, monotonicity_info, is_positive=True)
 
     vars_to_instantiate: List[Tuple[Var, int | None]] = []
-    stomped_congruences: List[ASTp_Node] = []
+    contains_optimizable_congruences: bool = False
+    vars_to_optimize_congruences_with: List[Var] = []
     for var, var_monotonicity in monotonicity_info.seen_vars.items():
         if _do_bounds_imply_conflict(var_monotonicity):
-            return BoolLiteral(False), False
+            return Exists_Optimization_Result(node=BoolLiteral(False), contains_quantifier=False)
 
         if var_monotonicity.limits.upper_limit == var_monotonicity.limits.lower_limit and var_monotonicity.limits.lower_limit is not None:
             logger.info(f'The variable {var} has a known value {var_monotonicity.limits.upper_limit}')
@@ -1771,24 +1836,17 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         can_be_pos_inf = (not var_monotonicity.decreasing) and var_monotonicity.limits.upper_limit is None
         can_be_neg_inf = (not var_monotonicity.increasing) and var_monotonicity.limits.lower_limit is None
         can_be_inf = can_be_pos_inf or can_be_neg_inf
+
         if can_be_inf and var_has_limited_nonlinearity:
-            congruence = var_monotonicity.congruences[0]
+            congruence_idx, congruence = var_monotonicity.congruences[0]
             var_idx = congruence.vars.index(var)
             coef = (-congruence.coefs[var_idx] + congruence.modulus) % congruence.modulus  # Move x to the other side
             new_mod = gcd(coef, congruence.modulus)
             if gcd(coef, congruence.modulus) == 1:
                 vars_to_instantiate.append((var, None))
             else:
-                # For example 2x = <TERM> (mod 6) - this says that the value of <TERM> should belong into <2>={0, 2, 4, 6, 8, 10, ...}
-                # Therefore, we can rewrite the atom into (<TERM> = 0 mod 2)
-                vars_to_instantiate.append((var, None))  # Let var be instantiated as +/- inf, dropping all nodes with that variable
-
-                remaining_lin_terms = [t for t in congruence.linear_terms() if t[1] != var]
-                remaining_coefs, remaining_vars = unzip_lin_terms(remaining_lin_terms)
-                new_rhs =  congruence.rhs % new_mod
-
-                new_congruence = Congruence(vars=remaining_vars, coefs=remaining_coefs, rhs=new_rhs, modulus=new_mod)
-                stomped_congruences.append(new_congruence)
+                contains_optimizable_congruences = True
+                vars_to_optimize_congruences_with.append(var)
 
         if not is_variable_in_other_atoms and len(var_monotonicity.congruences) == 0 and can_be_inf:  # Var has only limits of the type \exists x (x >= 10 AND x >= 20), so it can be instantiated with -infty
             vars_to_instantiate.append((var, None))
@@ -1801,14 +1859,10 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
             fixed_tree = _substitute_var_with_value(optimized_tree_child, var, var_value, Parent_Context_Var_Values())
             logger.debug('Fixed tree: %s', fixed_tree)
             if not fixed_tree:
-                return BoolLiteral(True), False
+                return Exists_Optimization_Result(node=BoolLiteral(True), contains_quantifier=False)
             optimized_tree_child = fixed_tree
 
         quantifier_lingers = len(exists_node.bound_vars) - len(vars_to_instantiate) > 0
-
-        if stomped_congruences:
-            new_subtrees = tuple((optimized_tree_child, *stomped_congruences))
-            optimized_tree_child = AST_Connective(type=Connective_Type.AND, children=new_subtrees, variable_bounds=None, referenced_vars=exists_node.referenced_vars)
 
         instantiated_vars: Set[Var] = set(var for var, _ in vars_to_instantiate)
         remaining_quantified_vars: Tuple[Var, ...] = tuple(sorted(set(exists_node.bound_vars) - instantiated_vars))
@@ -1819,10 +1873,16 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
             optimized_tree = optimized_tree_child  # All variables have been instantiated; remove the quantifier node
 
         logger.debug('Result: %s', optimized_tree)
-        return optimized_tree, quantifier_lingers
+        return Exists_Optimization_Result(node=optimized_tree,
+                                          contains_quantifier=quantifier_lingers,
+                                          contains_rewritable_congruence=contains_optimizable_congruences,
+                                          vars_to_rewrite_congruences_with=vars_to_optimize_congruences_with)
 
     logger.debug('Did not perform any modification to the tree.')
-    return exists_node, True
+    return Exists_Optimization_Result(node=exists_node,
+                                      contains_quantifier=True,
+                                      contains_rewritable_congruence=contains_optimizable_congruences,
+                                      vars_to_rewrite_congruences_with=vars_to_optimize_congruences_with)
 
 
 def _optimize_exists_tree_using_const_values_only(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]:
@@ -2095,8 +2155,10 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
                 new_node, this_quantifier_present = _optimize_exists_tree_using_const_values_only(new_node)
                 return new_node, subtree_contains_quantifiers or this_quantifier_present
 
-            new_node, quantifier_lingers = _optimize_exists_tree(new_node)
-            return new_node, quantifier_lingers
+            exist_opt_result = _optimize_exists_tree(new_node)
+            if exist_opt_result.contains_rewritable_congruence:
+                exist_opt_result = optimize_congruences_on_unbound_vars(exist_opt_result.node, exist_opt_result)
+            return exist_opt_result.node, exist_opt_result.contains_quantifier
 
         case _:
             raise NotImplementedError(f'Unhandled node while optimizing bottom quantifiers {root=}.')

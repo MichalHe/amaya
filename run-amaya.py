@@ -626,8 +626,8 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                 # Clear sylvan cache if running multiple evaluations, so that the measurements do not interfere.
                 if solver_config.backend_type == parse.BackendType.MTBDD:
                     from amaya.mtbdd_transitions import MTBDDTransitionFn
-                    MTBDDTransitionFn.call_clear_cachce()
-                    MTBDDTransitionFn.call_sylvan_gc()
+                    # MTBDDTransitionFn.call_clear_cachce()
+                    # MTBDDTransitionFn.call_sylvan_gc()
 
                 print('Running', benchmark_file, file=sys.stderr)
                 solver_config.export_counter = 0
