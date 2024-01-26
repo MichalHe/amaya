@@ -50,6 +50,18 @@ def merge_dataset(reference, our_results, reference_solvers: List[str], our_solv
     return merged
 
 
+def print_timeouts(df, our_solver: str):
+    our_col = our_solver + '-result'
+    timeouts = (df[our_col] == 'TO')
+
+    print('Timeouts: ')
+    name = 'name'
+    cnt = 0
+    for i, row in df[timeouts].iterrows():
+        print(f' > ({cnt}) {row[name]}')
+        cnt += 1
+
+
 if __name__ == '__main__':
     parser = make_argument_parser()
     args = parser.parse_args()
@@ -59,4 +71,5 @@ if __name__ == '__main__':
 
     df = merge_dataset(reference, ours, args.reference_solvers, args.our_solver)
     any_result_differ = check_for_different_results(df, args.reference_solvers, args.our_solver)
+    print_timeouts(df, args.our_solver)
     sys.exit(any_result_differ)
