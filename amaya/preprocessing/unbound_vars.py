@@ -1755,7 +1755,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
             vars_to_instantiate.append(var)
             continue
 
-        is_direction_of_optimal_value_known = not (var_monotonicity.increasing and var_monotonicity.decreasing)
+        is_direction_of_optimal_value_known = (var_monotonicity.increasing != var_monotonicity.decreasing)
         if not is_direction_of_optimal_value_known:
             continue  # Some atoms would like the variable to be large, some would like it to be small...
 
