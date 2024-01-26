@@ -1726,6 +1726,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
     """
 
     # Apply specific rewrite rules
+    logger.debug('Optimizing exists tree: %s', exists_node)
     if (rewrite_info := _rewrite_exists_equations(exists_node)):
         return rewrite_info
 
@@ -1792,7 +1793,9 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         for var in vars_to_instantiate:
             var_info   = monotonicity_info.seen_vars[var]
             var_value  = var_info.limits.lower_limit if var_info.decreasing else var_info.limits.upper_limit
+            logger.debug('Substituting %s=%s into the exists tree', var, var_value)
             fixed_tree = _substitute_var_with_value(optimized_tree_child, var, var_value, Parent_Context_Var_Values())
+            logger.debug('Fixed tree: %s', fixed_tree)
             if not fixed_tree:
                 return BoolLiteral(True), False
             optimized_tree_child = fixed_tree
@@ -1810,8 +1813,10 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Tuple[ASTp_Node, bool]
         else:
             optimized_tree = optimized_tree_child  # All variables have been instantiated; remove the quantifier node
 
+        logger.debug('Result: %s', optimized_tree)
         return optimized_tree, quantifier_lingers
 
+    logger.debug('Did not perform any modification to the tree.')
     return exists_node, True
 
 
@@ -1927,9 +1932,16 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
                 if not congruence:  # The congruence could not be normalized
                     continue
 
-                # Congruence has the form x = K (mod M)
-                smallest_solution = math.ceil((lower_bound+congruence.rhs)/ congruence.modulus)
-                largest_solution  = math.floor((upper_bound+congruence.rhs)/ congruence.modulus)
+                # Congruence has the form 1*x = K (mod M)                <->  x = M*l + K
+                # Bounds give restriction on x values: x_bound = [a, b]  <->  x >= a AND x <= b
+                # Substitute x in the lower bound:                        ::  M*l + K >= a  <->  l >= (a - K) / M  <->  l >= math.ceil((a - K) / M)
+                # Substitute x in the upper bound:                        ::  M*l + K <= b  <->  l <= (b - K) / M  <->  l <= math.floor((b - K) / M)
+                smallest_solution = math.ceil((lower_bound-congruence.rhs) / congruence.modulus)
+                largest_solution  = math.floor((upper_bound-congruence.rhs) / congruence.modulus)
+
+                # smallest_solution and largest_solution talk in terms of multiplies of M, turn it back into x
+                smallest_solution = smallest_solution*congruence.modulus + congruence.rhs
+                largest_solution  = largest_solution*congruence.modulus + congruence.rhs
 
                 if not implied_var_values:
                     implied_var_values = (smallest_solution, largest_solution)
@@ -1962,6 +1974,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
     untouched_subtrees = (child for child_idx, child in enumerate(connective_children) if untouched_subtrees_mask[child_idx])
     result = tuple(new_bounds) + tuple(untouched_subtrees)
     return result
+
 
 def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type,
                                           subtrees: Tuple[Tuple[ASTp_Node, bool], ...]) -> Tuple[Tuple[ASTp_Node, bool], ...]:
