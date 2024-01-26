@@ -1764,6 +1764,8 @@ def _optimize_congruences_on_unbound_vars(root: ASTp_Node, opt_result: Exists_Op
             bound_vars = tuple(var for var in root.bound_vars if var not in opt_result.vars_to_rewrite_congruences_with)
             if not bound_vars:
                 return optimized_child
+            if isinstance(optimized_child, BoolLiteral):
+                return optimized_child
             referenced_vars = filter_our_referenced_vars(root.referenced_vars)
             return AST_Quantifier(referenced_vars=referenced_vars, bound_vars=bound_vars, child=optimized_child)
         case AST_Negation():
