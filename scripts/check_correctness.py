@@ -53,11 +53,17 @@ def merge_dataset(reference, our_results, reference_solvers: List[str], our_solv
 def print_timeouts(df, our_solver: str):
     our_col = our_solver + '-result'
     timeouts = (df[our_col] == 'TO')
+    errors = (df[our_col] == 'ERR')
 
     print('Timeouts: ')
     name = 'name'
     cnt = 0
     for i, row in df[timeouts].iterrows():
+        print(f' > ({cnt}) {row[name]}')
+        cnt += 1
+
+    print('Errors: ')
+    for i, row in df[errors].iterrows():
         print(f' > ({cnt}) {row[name]}')
         cnt += 1
 
