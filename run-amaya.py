@@ -33,7 +33,7 @@ import time
 import statistics
 
 from amaya import automatons
-from amaya import logger
+from amaya import logger, shard_logger
 from amaya import parse
 from amaya.config import (
     BackendType,
@@ -355,13 +355,16 @@ else:
 logger.debug(f'Chosen runner mode: {runner_mode}')
 
 if args.quiet:
-    logger.setLevel(logging.CRITICAL)
+    log_level = logging.CRITICAL
 elif args.debug:
-    logger.setLevel(logging.DEBUG)
+    log_level = logging.DEBUG
 elif args.verbose:
-    logger.setLevel(logging.INFO)
+    log_level = logging.INFO
 else:
-    logger.setLevel(logging.WARNING)
+    log_level = logging.WARNING
+
+logger.setLevel(log_level)
+shard_logger.setLevel(log_level)
 
 # Initialize the solver configuration
 if args.fast:
