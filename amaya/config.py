@@ -24,7 +24,7 @@ class MinimizationAlgorithms(IntEnum):
 
 @dataclass
 class OptimizationsConfig:
-    shard: bool = False
+    allow_sharding: bool = False
     """ Perform top-level sharding. """
 
     simplify_variable_bounds: bool = False

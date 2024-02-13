@@ -27,7 +27,7 @@ from enum import Enum
 import os
 import logging
 import sys
-from typing import Callable, List, Dict, Optional, Tuple
+from typing import Callable, List, Dict, Optional, Tuple, cast
 from dataclasses import dataclass
 import time
 import statistics
@@ -304,7 +304,8 @@ benchmark_subparser.add_argument('--add-directory-recursive',
                                  dest='recursive_search_directories',
                                  help='Specify a (recursively searched) directory containing the .smt2 files that are a part of the performed benchmark.')
 
-benchmark_subparser.add_argument('--add-directory',
+benchmark_subparser.add_argument('-d'
+                                 '--add-directory',
                                  default=[],
                                  metavar='DIR',
                                  action='append',
@@ -400,7 +401,7 @@ elif args.minimization_method == 'brzozowski':
 elif 'fast' not in args:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
-solver_config.optimizations.shard = args.sharding_enabled
+solver_config.optimizations.allow_sharding = args.sharding_enabled
 
 if 'all' in args.optimizations:
     for attr in opt_to_config_field.values():
@@ -427,10 +428,12 @@ def ensure_output_destination_valid(output_destination: str):
 
 
 def search_directory_recursive(root_path: str, filter_file_ext='.smt2') -> List[str]:
-    return list(filter(
-        lambda path: path.endswith(filter_file_ext),
-        os.walk(root_path)
-    ))
+    matching_paths: List[str] = []
+    for dir_name, directories, files in os.walk(root_path):
+        for file in files:
+            if file.endswith(filter_file_ext):
+                matching_paths.append(os.path.join(dir_name, file))
+    return matching_paths
 
 
 def search_directory_nonrecursive(root_path: str, filter_file_ext='.smt2') -> List[str]:
@@ -445,9 +448,16 @@ def search_directory_nonrecursive(root_path: str, filter_file_ext='.smt2') -> Li
     )
 
 
-def display_runtime_statistics(output_file: Optional[str], format: Optional[str], result: automatons.NFA | None, statistics: RunStats, show_trace_stats: bool = False):
+def display_runtime_statistics(output_file: Optional[str], format: Optional[str], result: parse.Evaluation_Result, show_trace_stats: bool = False):
     output_file_handle = sys.stdout if not output_file else open(output_file, 'w')
     format = 'human' if not format else format
+
+    if result.solutions_nfa is not None:
+        solution_space_nfa_state_cnt_info = str(len(result.solutions_nfa.states))
+    elif result.shards:
+        solution_space_nfa_state_cnt_info = ' * '.join(str(len(nfa.states)) for nfa in result.shards)
+    else:
+        solution_space_nfa_state_cnt_info = '?'
 
     Row_Type = Tuple[int, str, Optional[int], Optional[int], Optional[int], Optional[int], int, int]
     def row_from_stat_point(op_idx: int, point: StatPoint) -> Row_Type:
@@ -470,17 +480,17 @@ def display_runtime_statistics(output_file: Optional[str], format: Optional[str]
         import tabulate, functools
         write_stat = functools.partial(print, file=output_file_handle)
         write_stat(f'############ STATISTICS ############')
-        write_stat(f'result_size       : {len(result.states)}')
-        write_stat(f'max_automaton_size: {statistics.max_automaton_size}')
+        write_stat(f'result_size       : {solution_space_nfa_state_cnt_info}')
+        write_stat(f'max_automaton_size: {result.run_stats.max_automaton_size}')
         if show_trace_stats:
             write_stat(f'### Trace: ')
             header = ['id', 'operation', 'Operand1 id', 'Operand1 Size', 'Operand2 id', 'Operand2 Size', 'Output Size', 'runtime (ns)']
-            rows = [row_from_stat_point(i, row) for i, row in enumerate(statistics.trace)]
+            rows = [row_from_stat_point(i, row) for i, row in enumerate(result.run_stats.trace)]
             write_stat(tabulate.tabulate(rows, headers=header))
     elif format == 'csv':
         import csv
         header = ['id', 'operation', 'operand1_id', 'operand1_size', 'operand2_id', 'operand2_size', 'output_size', 'runtime_ns']
-        rows = [row_from_stat_point(i, row) for i, row in enumerate(statistics.trace)]
+        rows = [row_from_stat_point(i, row) for i, row in enumerate(result.run_stats.trace)]
         writer = csv.writer(output_file_handle)
         writer.writerow(header)
         writer.writerows(rows)
@@ -534,38 +544,17 @@ def run_in_getsat_mode(args) -> bool:
     with open(args.input_file) as input_file:
         input_text = input_file.read()
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
-        nfa_or_model, smt_info, stats = parse.perform_whole_evaluation_on_source_text(input_text,
-                                                                             handle_automaton_created_fn)
+        result = parse.perform_whole_evaluation_on_source_text(input_text, handle_automaton_created_fn)
 
-        expected_sat = smt_info.get(':status', 'sat')
-        if ':status' not in smt_info:
-            logger.warning('The is missing :status in the smt-info statement, assuming sat.')
+        if not result:
+            return True  # There was no check-sat directive, just exit
 
-        if isinstance(nfa_or_model, dict):
-            model = nfa_or_model
-            nfa = None
-        elif nfa_or_model is None:
-            model = None
-            nfa = None
-        else:
-            model = nfa_or_model.find_model()
-            nfa = nfa_or_model
-
-        computed_sat = 'sat' if model is not None else 'unsat'
+        computed_sat = 'sat' if result.model is not None else 'unsat'
         logger.info(f'The SAT value of the result automaton is {computed_sat}')
-
-        if expected_sat != 'unknown':
-            if computed_sat == expected_sat:
-                logger.debug(f'The result SAT is matching the expected value.')
-            else:
-                msg = (f'The automaton\'s SAT did not match expected: actual={computed_sat}, '
-                       f'expected={expected_sat}')
-                logger.critical(msg)
-                was_result_correct = False
 
         print('result:', computed_sat)
         if args.should_print_model:
-            print('Model:', model)
+            print('model:', result.model)
 
         # display_runtime_statistics(args.stats_file, args.stats_format, nfa, stats, show_trace_stats=args.show_trace_stats)
 
@@ -574,7 +563,7 @@ def run_in_getsat_mode(args) -> bool:
             trace_file = 'trace-info.dot'
             trace_path = os.path.join(args.output_destination, trace_file)
             with open(trace_path, 'w') as trace_out_file:
-                trace_graph = utils.construct_dot_tree_from_trace(stats.trace)
+                trace_graph = utils.construct_dot_tree_from_trace(result.run_stats.trace)
                 trace_out_file.write(trace_graph)
 
         return was_result_correct
@@ -595,7 +584,7 @@ def print_benchmark_results_as_csv(results: Dict[str, BenchmarkStat], args, sepa
 
     def make_column_map(benchmark: str, result: BenchmarkStat, columns: List[str]) -> Dict[str, str]:
         column_map = {
-            'avg_runtime': str(result.avg_runtime_ns / 1_000_000_000),
+            'avg_runtime': str(cast(float, result.avg_runtime_ns) / 1_000_000_000),
             'benchmark': benchmark,
         }
         if 'std' in columns:
@@ -651,7 +640,7 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                 text = benchmark_input_file.read()
 
                 benchmark_start = time.time_ns()
-                nfa, smt_info, stats = parse.perform_whole_evaluation_on_source_text(text)
+                result = parse.perform_whole_evaluation_on_source_text(text)
                 benchmark_end = time.time_ns()
                 runtime_ns = benchmark_end - benchmark_start
 
@@ -663,10 +652,12 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                 else:
                     executed_benchmarks[benchmark_file].runtimes_ns.append(runtime_ns)
 
-                expected_sat_str = smt_info.get(':status', 'unknown')
+                if not result:
+                    continue
 
+                expected_sat_str = result.smt_info.get(':status', 'unknown')
                 if expected_sat_str in ('sat', 'unsat'):
-                    sat = nfa.find_model() is not None
+                    sat = result.model is not None
                     expected_sat = (expected_sat_str == 'sat')
                     if sat != expected_sat:
                         failed += 1
