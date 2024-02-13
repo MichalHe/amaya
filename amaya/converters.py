@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 from amaya.preprocessing.eval import VarInfo
 from amaya.relations_structures import(
     AST_Connective,
@@ -13,6 +13,7 @@ from amaya.relations_structures import(
     Connective_Type,
     Relation,
     Var,
+    VariableType,
     ast_get_binding_list
 )
 
@@ -103,10 +104,12 @@ def _write_ast_in_smt2(root: ASTp_Node, depth: int) -> str:
     match root:
         case Relation():
             term_str = generate_str_for_terms(root)
-            return prefix_with_depth(f'({root.predicate_symbol} {term_str} {root.rhs})')
+            rhs = f'(- {abs(root.rhs)})' if root.rhs < 0 else f'{root.rhs}'
+            return prefix_with_depth(f'({root.predicate_symbol} {term_str} {rhs})')
         case Congruence():
             term_str = generate_str_for_terms(root)
-            return prefix_with_depth(f'(= (mod {term_str} {root.modulus}) {root.rhs})')
+            rhs = f'(- {abs(root.rhs)})' if root.rhs < 0 else f'{root.rhs}'
+            return prefix_with_depth(f'(= (mod {term_str} {root.modulus}) {rhs})')
         case AST_Connective():
             connective_type_to_symbol = {
                 Connective_Type.AND: 'and',
@@ -144,7 +147,84 @@ def write_ast_in_smt2(ast: ASTp_Node, global_variables: Iterable[Tuple[Var, VarI
     formula_params = ''.join(f'(declare-fun x{param.id} () {param_info.type.into_smt2_sort()})\n' for param, param_info in global_variables)
 
     head = '(assert\n'
-    serialized_tree =  _write_ast_in_smt2(ast, 1) + '\n'
+    serialized_tree = _write_ast_in_smt2(ast, 1) + '\n'
     tail = ')\n'
     check_sat = '(check-sat)\n'
     return ''.join((preamble, formula_params, head, serialized_tree, tail, check_sat))
+
+
+def _rename_vars(root: ASTp_Node, substitution: Dict[Var, Var]) -> ASTp_Node:
+    match root:
+        case Relation():
+            vars = [substitution.get(var, var) for var in root.vars]
+            return Relation(vars=vars, coefs=root.coefs, rhs=root.rhs, predicate_symbol=root.predicate_symbol)
+        case Congruence():
+            vars = [substitution.get(var, var) for var in root.vars]
+            return Congruence(vars=vars, coefs=root.coefs, rhs=root.rhs, modulus=root.modulus)
+        case Var():
+            return substitution.get(root, root)
+        case AST_Connective():
+            substituted_children = (_rename_vars(child, substitution) for child in root.children)
+            return root.replace_children(tuple(substituted_children))
+        case AST_Quantifier():
+            substituted_child = _rename_vars(root.child, substitution)
+            return AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=root.bound_vars, child=substituted_child)
+        case AST_Negation():
+            substituted_child = _rename_vars(root.child, substitution)
+            return AST_Negation(referenced_vars=root.referenced_vars, child=substituted_child)
+        case _:
+            raise ValueError('Unhandled AST node while performing variable substitution.')
+
+
+def generate_optimization_problem(input_formula: ASTp_Node, var_table: Dict[Var, VarInfo], params: List[Var]) -> ASTp_Node:
+    """
+    Given a formula PHI(x, y, ...) return its optimization variant requiring the model values to be largest among models.
+
+    The optimization variant (result) has the following form:
+        PHI(x, y, ...) AND (FORALL (x', y', ...) (=> PHI(x', y', ...) (<= (x', y', ...) (x, y, ...) )))
+    """
+    if not params:
+        # There is nothing to optimize if the formula has no free variables
+        return input_formula
+
+    var_count = len(var_table)
+    comment = f'Primed version of {0} to represent values of other models in optimization problem.'
+    substitution: Dict[Var, Var] = {}
+    for param_idx, param in enumerate(params):
+        param_idx += 1  # Make sure that we are not overriding variables when param_idx=0
+        param_info = var_table[param]
+        assert param_info.type == VariableType.INT, 'Conversion into an optimization problem supported only for formulae with purely integer parameters.'
+        primed_param = Var(id=var_count+param_idx)
+        var_table[primed_param] = VarInfo(name=f'{param_info.name}_primed', type=param_info.type, comment=comment.format(param_info.name))
+        substitution[param] = primed_param
+
+    if isinstance(input_formula, (AST_Quantifier, AST_Connective, AST_Negation)):
+        referenced_vars = input_formula.referenced_vars
+    elif isinstance(input_formula, (Congruence, Relation)):
+        referenced_vars = tuple(input_formula.vars)
+    else:
+        referenced_vars = tuple()
+
+    primed_referenced_vars = tuple(substitution.get(var, var) for var in referenced_vars)
+    input_property_for_primed_params = _rename_vars(input_formula, substitution)
+    negated_input_property = AST_Negation(referenced_vars=primed_referenced_vars, child=input_property_for_primed_params)
+
+    primed_params_smaller_atoms: List[Relation] = []
+    for param, primed_param in substitution.items():
+        atom = Relation(vars=[param, primed_param], coefs=[-1, 1], rhs=0, predicate_symbol='<=')
+        primed_params_smaller_atoms.append(atom)
+
+    all_primed_params_smaller = AST_Connective(referenced_vars=tuple(substitution.keys()) + tuple(substitution.values()),
+                                               type=Connective_Type.AND,
+                                               children=tuple(primed_params_smaller_atoms))
+
+    rewritten_implication = AST_Connective(referenced_vars=tuple(), type=Connective_Type.OR, children=(negated_input_property, all_primed_params_smaller))
+
+    # Rewrite the universal quantifier as NOT(EXISTS(NOT PHI))
+    negated_implication = AST_Negation(referenced_vars=tuple(), child=rewritten_implication)
+    existential_quantifier = AST_Quantifier(referenced_vars=referenced_vars,
+                                            bound_vars=tuple(substitution.values()),
+                                            child=negated_implication)
+    optimality_constraint = AST_Negation(referenced_vars=tuple(), child=existential_quantifier)
+
+    return AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=(input_formula, optimality_constraint))

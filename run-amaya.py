@@ -41,7 +41,7 @@ from amaya.config import (
     solver_config,
     SolutionDomain,
 )
-from amaya.converters import write_ast_in_lash, write_ast_in_smt2
+from amaya.converters import generate_optimization_problem, write_ast_in_lash, write_ast_in_smt2
 from amaya.preprocessing import preprocess_ast
 from amaya.preprocessing.eval import VarInfo, convert_ast_into_evaluable_form
 from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, ASTp_Node, FunctionSymbol, Var
@@ -327,6 +327,7 @@ benchmark_subparser.add_argument('--csv-fields',
 formula_conversion_subparser = subparsers.add_parser('convert')
 formula_conversion_subparser.add_argument('file_to_convert', help='File containing SMT2 formula to convert to other format.')
 formula_conversion_subparser.add_argument('-f', '--output-format', help='Format to output the formula into.', choices=['lash', 'smt2'], default='smt2')
+formula_conversion_subparser.add_argument('--opt', dest='produce_optimization_problem', help='Create an optimization problem out of the given formula.', action='store_true', default=False)
 
 args = argparser.parse_args()
 
@@ -708,6 +709,10 @@ def convert_smt_to_other_format(args):
             formula_to_emit = ['and', *asserted_formulae]
             formula_to_emit, var_table = preprocess_ast(formula_to_emit, global_fn_symbols=fn_symbols)
             astp = parse.optimize_formula_structure(formula_to_emit, var_table)
+
+            if args.produce_optimization_problem:
+                params = [var for var, var_info in var_table.items() if var_info.is_formula_param]
+                astp = generate_optimization_problem(astp, var_table, params)
 
             formula_parameters = [(var, var_info) for var, var_info in var_table.items() if var_info.is_formula_param]
             output = writer(astp, formula_parameters)
