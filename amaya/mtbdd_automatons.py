@@ -230,7 +230,7 @@ class MTBDD_NFA(NFA):
         nfa.add_final_state(0)  # Just toggle the finality of the rejecting state
         return nfa
 
-    def find_model(self) -> Optional[Tuple[List[LSBF_AlphabetSymbol], List[int]]]:
+    def find_model(self) -> Tuple[LSBF_AlphabetSymbol] | None:
         """
         Check whether the language of this automaton is empty and return the found model if not.
 

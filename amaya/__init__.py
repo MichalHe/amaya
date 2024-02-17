@@ -10,3 +10,7 @@ formatter = logging.Formatter('[%(asctime)s](%(levelname)s): %(message)s', datef
 
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
+
+shard_logger = logging.getLogger('pressburger-solver-sharding')
+shard_logger.setLevel(logging.DEBUG)
+shard_logger.addHandler(console_handler)

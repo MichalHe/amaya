@@ -18,13 +18,14 @@ from typing import (
     cast,
 )
 import sys
+from amaya.alphabet import LSBF_AlphabetSymbol
 
 from amaya.automatons import (
     AutomatonType,
     LSBF_Alphabet,
     NFA,
 )
-from amaya import logger
+from amaya import logger, shard_logger
 from amaya.config import (
     BackendType,
     MinimizationAlgorithms,
@@ -340,10 +341,17 @@ def parse_function_symbol_declaration(decl_ast: AST_NaryNode) -> FunctionSymbol:
     return function_symbol
 
 
+@dataclass
+class Evaluation_Result:
+    run_stats: RunStats
+    model: Optional[Dict[Var, int]] = None
+    shards: List[NFA] = field(default_factory=list)
+    solutions_nfa: Optional[NFA] = None
+    smt_info: Dict[str, str] = field(default_factory=dict)
+
+
 # @Cleanup: This should be renamed to something like evaluate_smt2
-def perform_whole_evaluation_on_source_text(source_text: str,
-                                            emit_introspect: Optional[IntrospectHandle] = None
-                                            ) -> Tuple[NFA, Dict[str, str], RunStats]:
+def perform_whole_evaluation_on_source_text(source_text: str, emit_introspect: Optional[IntrospectHandle] = None) -> Evaluation_Result | None:
     """
     Parses the given SMT2 source code and runs the evaluation procedure.
 
@@ -351,11 +359,13 @@ def perform_whole_evaluation_on_source_text(source_text: str,
     so it contains only one `assert` that is a logical conjunction of all other
     formulas in the other assert trees.
 
-    :param source_text: The SMT2 source text encoding the problem.
-    :param emit_introspect: Introspection handle. If given it will be called with every automaton
-                            produced during the evaluation procedure (in the order they are created).
-    :returns: A tuple of the form (NFA, Dict) where NFA is the result of the evaluation
-              of assert tree, and Dict is the smt-info collected when parsing.
+    Parameters:
+        source_text: The SMT2 source text encoding the problem.
+        emit_introspect: Introspection handle. If given it will be called with every automaton
+                         produced during the evaluation procedure (in the order they are created).
+    Returns:
+        Evaluation result (model + additional information), or
+        None if there was no 'check-sat' directive in the source_text
     """
 
     tokens = tokenize(source_text)
@@ -427,11 +437,26 @@ def perform_whole_evaluation_on_source_text(source_text: str,
             eval_ctx = EvaluationContext(emit_introspect=emit_introspect, alphabet=alphabet, var_table=var_table)
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
+
+            if isinstance(astp, AST_Connective) and astp.type == Connective_Type.AND and solver_config.optimizations.allow_sharding:
+                model = evaluate_using_sharding(astp, eval_ctx)
+                result = Evaluation_Result(run_stats=eval_ctx.stats, model=model, shards=[], solutions_nfa=None)
+                return result
+
             nfa = run_evaluation_procedure(astp, eval_ctx)
-            eval_result = nfa
+            binary_model = nfa.find_model()
+            if binary_model:
+                formula_params = tuple(var for var, var_info in var_table.items() if var_info.is_formula_param)
+                decadic_model = convert_binary_model_into_decadic(binary_model, formula_params)
+            else:
+                decadic_model = None
+
+            result = Evaluation_Result(run_stats=eval_ctx.stats, solutions_nfa=nfa, model=decadic_model)
+            return result
+
         elif statement_root == 'exit':
-            return (nfa, smt_info, eval_ctx.stats)
-    return (nfa, smt_info, eval_ctx.stats)
+            return None
+    return None
 
 
 def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> NFA:
@@ -757,6 +782,101 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
                                        f'automaton_type={reduction_result.automaton_type})'), _depth)
 
     return reduction_result
+
+
+def split_conjunction_to_shards(and_expr: AST_Connective) -> Tuple[List[Tuple[int, ...]], List[Tuple[Var, ...]]]:
+    variable_partitions: Dict[Var, Tuple[Set[Var], Set[int]]] = {var: ({var}, set()) for var in and_expr.referenced_vars}
+
+    def update_partitions(joining_vars: Iterable[Var], atom_idx: int):
+        partition_union: Set[Var] = set()
+        partition_nodes: Set[int] = {atom_idx}
+        for var in joining_vars:
+            var_partition, var_nodes = variable_partitions[var]
+            partition_union.update(var_partition)
+            partition_nodes.update(var_nodes)
+        for var in partition_union:
+            variable_partitions[var] = (partition_union, partition_nodes)
+
+    for node_idx, node in enumerate(and_expr.children):
+        match node:
+            case Relation() | Congruence():
+                update_partitions(joining_vars=node.vars, atom_idx=node_idx)
+            case AST_Connective() | AST_Negation() | AST_Quantifier():
+                update_partitions(joining_vars=node.referenced_vars, atom_idx=node_idx)
+
+    partitions_and_atom_indices = {}
+    for partition, atom_indices in variable_partitions.values():
+        partitions_and_atom_indices[tuple(sorted(partition))] = tuple(sorted(atom_indices))
+
+    return list(partitions_and_atom_indices.values()), list(partitions_and_atom_indices.keys())
+
+
+def convert_binary_model_into_decadic(model: Tuple[LSBF_AlphabetSymbol, ...], vars: Tuple[Var,...]) -> Dict[Var, int]:
+    base = 1
+    var_values: List[int] = [0] * len(vars)
+    for symbol_idx, symbol in enumerate(model):
+        if symbol_idx < len(model) - 1: # Nonsign bits
+            for var_idx, var in enumerate(vars):
+                bit_val = 1 if symbol[var.id-1] == 1 else 0
+                var_values[var_idx] += bit_val * base
+        else: # Sign bit
+            for var_idx, var in enumerate(vars):
+                bit_val = 1 if symbol[var.id-1] == 1 else 0
+                var_values[var_idx] -= bit_val * base
+        base *= 2
+
+    var_assignment: Dict[Var, int] = {}
+    for var, var_value in zip(vars, var_values):
+        var_assignment[var] = var_value
+    return var_assignment
+
+
+def construct_automaton_from_var_assignment(assignment: Dict[Var, int], ctx: EvaluationContext) -> NFA:
+    aut = ctx.get_automaton_class_for_current_backend().trivial_accepting(ctx.get_alphabet())
+    for var, var_value in assignment.items():
+        relation = Relation(vars=[var], coefs=[1], rhs=var_value, predicate_symbol='=')
+        var_aut = relations_to_nfa.build_nfa_from_linear_equality(ctx.get_automaton_class_for_current_backend(),
+                                                                  ctx.get_alphabet(),
+                                                                  relation)
+        aut = aut.intersection(var_aut)  # type: ignore
+    return aut
+
+
+def evaluate_using_sharding(and_expr: AST_Connective, ctx: EvaluationContext) -> Dict[Var, int] | None:
+    alphabet = ctx.get_alphabet()
+    shards, shard_vars = split_conjunction_to_shards(and_expr)
+    shard_logger.info('Performing sharding. Shards created based on vars: %s', shard_vars)
+    shard_automata: List[NFA] = []
+    overall_model: Dict[Var, int] = {}
+
+    # @Incomplete: not sure whether we even need tracing information when sharding
+    dummy_subformula = AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=tuple())
+
+    for shard, shard_vars in zip(shards, shard_vars):
+        shard_logger.info('Processing shard consisting of subformulae with indices: %s', shard)
+
+        shard_automaton = ctx.get_automaton_class_for_current_backend().trivial_accepting(alphabet)
+        for shard_formula_idx in shard:
+            shard_formula = and_expr.children[shard_formula_idx]
+            shard_elem_automaton = run_evaluation_procedure(shard_formula, ctx, _debug_recursion_depth=1)
+            shard_automaton = shard_automaton.intersection(shard_elem_automaton)  # type: ignore
+
+            shard_automaton = minimize_automaton_if_configured(dummy_subformula, shard_automaton, ctx)
+            if (shard_automaton.automaton_type & AutomatonType.DFA) and not shard_automaton.final_states:
+                shard_logger.info(f'The shard {shard} has no model!')
+                return None
+
+        shard_automata.append(shard_automaton)
+
+        model = shard_automaton.find_model()
+        if model is None:
+            shard_logger.info(f'The shard {shard} has no model!')
+            return None
+
+        var_assignment = convert_binary_model_into_decadic(model, shard_vars)
+        overall_model.update(var_assignment)
+
+    return overall_model
 
 
 def evaluate_and_expr(and_expr: AST_Connective, ctx: EvaluationContext, _depth: int) -> NFA:
