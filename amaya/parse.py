@@ -844,29 +844,36 @@ def construct_automaton_from_var_assignment(assignment: Dict[Var, int], ctx: Eva
 
 def evaluate_using_sharding(and_expr: AST_Connective, ctx: EvaluationContext) -> Dict[Var, int] | None:
     alphabet = ctx.get_alphabet()
-    shard_logger.info('Performing sharding.')
     shards, shard_vars = split_conjunction_to_shards(and_expr)
+    shard_logger.info('Performing sharding. Shards created based on vars: %s', shard_vars)
     shard_automata: List[NFA] = []
-    for shard in shards:
-        shard_logger.info(f'Processing shard: {shard}')
+    overall_model: Dict[Var, int] = {}
+
+    # @Incomplete: not sure whether we even need tracing information when sharding
+    dummy_subformula = AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=tuple())
+
+    for shard, shard_vars in zip(shards, shard_vars):
+        shard_logger.info('Processing shard consisting of subformulae with indices: %s', shard)
+
         shard_automaton = ctx.get_automaton_class_for_current_backend().trivial_accepting(alphabet)
         for shard_formula_idx in shard:
             shard_formula = and_expr.children[shard_formula_idx]
-            shard_elem_automaton = run_evaluation_procedure(shard_formula, ctx)
+            shard_elem_automaton = run_evaluation_procedure(shard_formula, ctx, _debug_recursion_depth=1)
             shard_automaton = shard_automaton.intersection(shard_elem_automaton)  # type: ignore
+
+            shard_automaton = minimize_automaton_if_configured(dummy_subformula, shard_automaton, ctx)
+            if (shard_automaton.automaton_type & AutomatonType.DFA) and not shard_automaton.final_states:
+                shard_logger.info(f'The shard {shard} has no model!')
+                return None
+
         shard_automata.append(shard_automaton)
 
-    shard_logger.info('Searching for models in individual sharded automata.')
-    overall_model: Dict[Var, int] = {}
-    for shard_idx, shard_automaton in enumerate(shard_automata):
-        shard = shards[shard_idx]
-        current_shard_vars: Tuple[Var, ...] = shard_vars[shard_idx]
         model = shard_automaton.find_model()
-        if not model:
+        if model is None:
             shard_logger.info(f'The shard {shard} has no model!')
             return None
 
-        var_assignment = convert_binary_model_into_decadic(model, current_shard_vars)
+        var_assignment = convert_binary_model_into_decadic(model, shard_vars)
         overall_model.update(var_assignment)
 
     return overall_model
