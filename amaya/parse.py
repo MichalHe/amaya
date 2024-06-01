@@ -402,8 +402,10 @@ def perform_whole_evaluation_on_source_text(source_text: str, emit_introspect: O
                 raise ValueError('Multiple check-sat commands are not supported!')
 
             logger.debug('Executing amaya (%d asserts collected) with smt-info: %s', len(formulae_to_assert), smt_info)
-            if not formulae_to_assert:
-                raise ValueError('Cannot check-sat without any asserts.')
+            if not formulae_to_assert: # Empty formula
+                alphabet = LSBF_Alphabet.from_vars([])
+                return Evaluation_Result(run_stats=RunStats(), model={}, shards=[],
+                                         solutions_nfa=NFA.trivial_accepting(alphabet))
 
             ctx = EvaluationContext()
 
