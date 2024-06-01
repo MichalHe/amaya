@@ -695,8 +695,14 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
                                      bool_vars: Set[str],
                                      scoper: Scoper) -> Tuple[AST_Node, ASTInfo]:
     if isinstance(ast, str):
-        var = scoper.lookup_var_name(ast)
-        return var, ASTInfo(used_vars={var})
+        match ast:
+            case 'true':
+                return BoolLiteral(True), ASTInfo()
+            case 'false':
+                return BoolLiteral(False), ASTInfo()
+            case _:
+                var = scoper.lookup_var_name(ast)
+                return var, ASTInfo(used_vars={var})
 
     if isinstance(ast, BoolLiteral):
         return ast, ASTInfo(used_vars=set())
