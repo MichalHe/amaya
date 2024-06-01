@@ -556,7 +556,7 @@ def run_in_getsat_mode(args) -> bool:
         computed_sat = 'sat' if result.model is not None else 'unsat'
         logger.info(f'The SAT value of the result automaton is {computed_sat}')
 
-        print('result:', computed_sat)
+        print(computed_sat)
         if args.should_print_model:
             print('model:', result.model)
 
