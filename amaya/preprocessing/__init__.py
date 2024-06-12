@@ -384,6 +384,10 @@ def _flatten_bool_nary_connectives(ast: AST_Node) -> AST_Node:
         new_child = _flatten_bool_nary_connectives(ast[1])
         return [parent_type, new_child]
 
+    if parent_type == AST_Node_Names.BOOL_EQUIV.value:
+        new_node = [parent_type, *(_flatten_bool_nary_connectives(child) for child in ast[1:])]
+        return new_node
+
     logger.warning(f'Node {parent_type} is not explicitly handled when flattening bool connectives.')
     return [parent_type, *(_flatten_bool_nary_connectives(child) for child in ast[1:])]
 

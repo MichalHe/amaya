@@ -749,6 +749,10 @@ def _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) -
         children =  ast[1:]
         return [AST_Node_Names.OR.value, *(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in children)]
 
+    if node_type == AST_Node_Names.BOOL_EQUIV.value:
+        new_children = (_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in ast[1:])
+        return [node_type, *new_children]
+
     logger.warning(f'Unhandled node while converting tree into DNF: %s', ast)
     return [node_type, *(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in ast[1:])]
 
