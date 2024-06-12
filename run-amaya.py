@@ -43,7 +43,7 @@ from amaya.config import (
 )
 from amaya.converters import generate_optimization_problem, write_ast_in_lash, write_ast_in_smt2
 from amaya.preprocessing import preprocess_ast
-from amaya.preprocessing.eval import VarInfo, convert_ast_into_evaluable_form
+from amaya.preprocessing.eval import NonlinearArithmeticError, VarInfo, convert_ast_into_evaluable_form
 from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, ASTp_Node, FunctionSymbol, Var
 from amaya.stats import RunStats, StatPoint
 from amaya.tokenize import tokenize
@@ -548,7 +548,13 @@ def run_in_getsat_mode(args) -> bool:
     with open(args.input_file) as input_file:
         input_text = input_file.read()
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
-        result = parse.perform_whole_evaluation_on_source_text(input_text, handle_automaton_created_fn)
+
+        try:
+            result = parse.perform_whole_evaluation_on_source_text(input_text, handle_automaton_created_fn)
+        except NonlinearArithmeticError as err:
+            logger.debug('Input formula is not a valid LIA formula. Reason: %s', err)
+            print('unknown')
+            sys.exit(0)
 
         if not result:
             return True  # There was no check-sat directive, just exit

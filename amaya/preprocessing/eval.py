@@ -66,6 +66,11 @@ class VarInfo:
     is_formula_param: bool = False
 
 
+class NonlinearArithmeticError(ValueError):
+    """ Error raised when the underlying formula is not a LIA formula. """
+    pass
+
+
 class Scoper:
     def __init__(self, global_symbols: Iterable[Tuple[str, VariableType]]):
         self.scopes: List[Dict[str, Var]] = []
@@ -251,7 +256,7 @@ class Expr:
     def __mul__(self, other: Expr) -> Expr:
         lin_expr, const_expr = (self, other) if not other.linear_terms else (other, self)
         if const_expr.linear_terms:
-            raise ValueError(f'Attempting to multiply two Expressions containing variables {lin_expr} * {const_expr}')
+            raise NonlinearArithmeticError(f'Attempting to multiply two Expressions containing variables {lin_expr} * {const_expr}')
 
         multiplier = const_expr.constant_term
         lin_terms = {var: multiplier*coef for var, coef in lin_expr.linear_terms.items()}
