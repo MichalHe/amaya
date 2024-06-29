@@ -1052,7 +1052,8 @@ def evaluate_bool_equivalence_expr(ast: AST_Connective, ctx: EvaluationContext, 
     branch1 = not_left.union(right_nfa)
     branch2 = not_right.union(left_nfa)
 
-    return branch1.intersection(branch2)
+    equivalence_nfa = branch1.intersection(branch2)
+    return equivalence_nfa
 
 
 def run_evaluation_procedure(ast: ASTp_Node,
@@ -1070,7 +1071,11 @@ def run_evaluation_procedure(ast: ASTp_Node,
     match ast:
         case BoolLiteral():
             automaton_cls = ctx.get_automaton_class_for_current_backend()
-            return automaton_cls.trivial_accepting(ctx.get_alphabet()) if ast.value else automaton_cls.trivial_nonaccepting(ctx.get_alphabet())
+            if ast.value:
+                result = automaton_cls.trivial_accepting(ctx.get_alphabet())
+            else:
+                result = automaton_cls.trivial_nonaccepting(ctx.get_alphabet())
+            return result
 
         case Congruence():
             return make_nfa_for_congruence(ast, ctx)
