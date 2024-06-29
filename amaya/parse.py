@@ -278,7 +278,7 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
         formula_to_evaluate = var_bounds_lib.push_negations_towards_atoms(formula_to_evaluate)
         logger.debug('Negations pushed towards atoms. Result:  %s', formula_to_evaluate)
 
-    # formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
+    formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
 
     if solver_config.optimizations.detect_isomorphic_conflicts:
         logger.debug('Detecting conflicts in conjuctive clauses using formula isomorphism:  %s', formula_to_evaluate)
@@ -348,6 +348,7 @@ class Evaluation_Result:
     shards: List[NFA] = field(default_factory=list)
     solutions_nfa: Optional[NFA] = None
     smt_info: Dict[str, str] = field(default_factory=dict)
+    var_table: Dict[Var, VarInfo] = field(default_factory=dict)
 
 
 # @Cleanup: This should be renamed to something like evaluate_smt2
@@ -442,7 +443,7 @@ def perform_whole_evaluation_on_source_text(source_text: str, emit_introspect: O
 
             if isinstance(astp, AST_Connective) and astp.type == Connective_Type.AND and solver_config.optimizations.allow_sharding:
                 model = evaluate_using_sharding(astp, eval_ctx)
-                result = Evaluation_Result(run_stats=eval_ctx.stats, model=model, shards=[], solutions_nfa=None)
+                result = Evaluation_Result(run_stats=eval_ctx.stats, model=model, shards=[], solutions_nfa=None, var_table=var_table)
                 return result
 
             nfa = run_evaluation_procedure(astp, eval_ctx)
@@ -453,7 +454,7 @@ def perform_whole_evaluation_on_source_text(source_text: str, emit_introspect: O
             else:
                 decadic_model = None
 
-            result = Evaluation_Result(run_stats=eval_ctx.stats, solutions_nfa=nfa, model=decadic_model)
+            result = Evaluation_Result(run_stats=eval_ctx.stats, solutions_nfa=nfa, model=decadic_model, var_table=var_table)
             return result
 
         elif statement_root == 'exit':

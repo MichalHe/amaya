@@ -44,7 +44,7 @@ from amaya.config import (
 from amaya.converters import generate_optimization_problem, write_ast_in_lash, write_ast_in_smt2
 from amaya.preprocessing import preprocess_ast
 from amaya.preprocessing.eval import NonlinearArithmeticError, VarInfo, convert_ast_into_evaluable_form
-from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, ASTp_Node, FunctionSymbol, Var
+from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, ASTp_Node, FunctionSymbol, Var, VariableType
 from amaya.stats import RunStats, StatPoint
 from amaya.tokenize import tokenize
 import amaya.utils as utils
@@ -563,8 +563,19 @@ def run_in_getsat_mode(args) -> bool:
         logger.info(f'The SAT value of the result automaton is {computed_sat}')
 
         print(computed_sat)
-        if args.should_print_model:
-            print('model:', result.model)
+        if args.should_print_model and result.model is not None:
+            print('model:')
+            model = cast(Dict[Var, int], result.model)
+            displayed_model_lines: List[Tuple[str, str]] = []
+
+            for var, var_value in model.items():
+                var_info = result.var_table[var]
+                if var_info.type == VariableType.BOOL:
+                    var_value = 'true' if var_value else 'false'
+                displayed_model_lines.append((var_info.name, str(var_value)))
+
+            for var_name, var_value in sorted(displayed_model_lines, key=lambda pair: pair[0]):
+                print(f' {var_name} = {var_value}')
 
         # display_runtime_statistics(args.stats_file, args.stats_format, nfa, stats, show_trace_stats=args.show_trace_stats)
 
@@ -702,7 +713,7 @@ def convert_smt_to_other_format(args):
     tokens = tokenize(smt2_text)
     ast: List[AST_Node] = parse.build_syntax_tree(tokens)
 
-    writer_table: Dict[str, Callable[[ASTp_Node, Iterable[Tuple[Var, VarInfo]]], str]] = {
+    writer_table: Dict[str, Callable[[ASTp_Node, Iterable[Tuple[Var, VarInfo]], Dict[Var, VarInfo]], str]] = {
         'lash': write_ast_in_lash,
         'smt2': write_ast_in_smt2,
     }
@@ -731,7 +742,7 @@ def convert_smt_to_other_format(args):
                 astp = generate_optimization_problem(astp, var_table, params)
 
             formula_parameters = [(var, var_info) for var, var_info in var_table.items() if var_info.is_formula_param]
-            output = writer(astp, formula_parameters)
+            output = writer(astp, formula_parameters, var_table)
 
             print(output)
 
