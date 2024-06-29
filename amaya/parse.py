@@ -1031,12 +1031,15 @@ def evaluate_exists_expr(exists_expr: AST_Quantifier, ctx: EvaluationContext, _d
 def evaluate_bool_equivalence_expr(ast: AST_Connective, ctx: EvaluationContext, _depth: int = 0) -> NFA:
     """
     Constructs an automaton for the given equivalence of two Booleans.
+
+    The Bool equivalence LEFT <=> RIGHT is evaluated as:
+    LEFT -> RIGHT && RIGHT -> LEFT
+    ((NOT LEFT) OR RIGHT) AND ((NOT RIGHT) OR LEFT)
     """
     assert len(ast.children) == 2, 'Equivalence with more than 2 children is currently not supported.'
 
     left_nfa = get_automaton_for_operand(ast.children[0], ctx, _depth)
     right_nfa = get_automaton_for_operand(ast.children[1], ctx, _depth)
-    positive_branch = left_nfa.intersection(right_nfa)
 
     if left_nfa.automaton_type & AutomatonType.NFA:
         left_nfa = left_nfa.determinize()
@@ -1045,8 +1048,11 @@ def evaluate_bool_equivalence_expr(ast: AST_Connective, ctx: EvaluationContext, 
 
     not_left = left_nfa.complement()
     not_right = right_nfa.complement()
-    negative_branch = not_left.intersection(not_right)
-    return positive_branch.union(negative_branch)
+
+    branch1 = not_left.union(right_nfa)
+    branch2 = not_right.union(left_nfa)
+
+    return branch1.intersection(branch2)
 
 
 def run_evaluation_procedure(ast: ASTp_Node,
