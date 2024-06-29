@@ -20,7 +20,6 @@ from amaya.relations_structures import (
     AST_NaryNode,
     AST_Node,
     AST_Node_Names,
-    BoolLiteral,
     Congruence,
     FunctionSymbol,
     NodeEncounteredHandler,
