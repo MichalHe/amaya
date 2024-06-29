@@ -422,6 +422,10 @@ def is_any_node_of_type(types: Iterable[str], node1, node2):
     return is_node1 or is_node2
 
 
+def is_bool_literal(node):
+    return isinstance(node, str) and node in ['true', 'false']
+
+
 @dataclass
 class RewriteInstructions:
     placeholder_replacements: Dict[Var, Tuple[LinTerm, ...]] = field(default_factory=dict)
@@ -783,7 +787,12 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
     if node_type == '=':
         connectives = {'and', 'or', 'not', 'exists', 'forall'}
 
-        if is_any_member_if_str(bool_vars, ast[1], ast[2]) or is_any_node_of_type(connectives, ast[1], ast[2]):
+        contains_bool_vars = is_any_member_if_str(bool_vars, ast[1], ast[2])
+        contains_nontrivial_subformulae = is_any_node_of_type(connectives, ast[1], ast[2])
+        contains_bool_literals = is_bool_literal(ast[1]) or is_bool_literal(ast[2])
+        is_equivalence = contains_bool_vars or contains_nontrivial_subformulae or contains_bool_literals
+
+        if is_equivalence:
             lhs, lhs_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars, scoper)
             rhs, rhs_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars, scoper)
             lhs_info.used_vars.update(rhs_info.used_vars)
