@@ -160,11 +160,19 @@ class MTBDD_NFA(NFA):
         # dfa = self.determinize()
         assert self.automaton_type & AutomatonType.DFA
 
-        new_final_states = self.states - self.final_states
-        self.final_states = new_final_states
+        result = MTBDD_NFA(
+            alphabet=self.alphabet,
+            state_semantics=self.state_semantics,
+            automaton_type=self.automaton_type,
+            initial_states=self.initial_states,
+            final_states=self.states - self.final_states,
+            states=self.states,
+            used_variables=self.used_variables,
+            applied_operations_info=self.applied_operations_info,
+        )
+        result.transition_fn = self.transition_fn.copy()
+        result.applied_operations_info += ['complement']
 
-        self.applied_operations_info += ['complement']
-        # Do not need to set used_variables here as the determinized automaton already has them set
         return self
 
     def do_projection(self, var: Var, skip_pad_closure: bool = False):

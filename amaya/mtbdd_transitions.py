@@ -12,6 +12,7 @@ from typing import (
     Tuple,
     TYPE_CHECKING,
     Union,
+    cast,
 )
 from collections import defaultdict
 import enum
@@ -855,7 +856,16 @@ class MTBDDTransitionFn():
     def __del__(self):
         # Release all mtbdds stored
         for state, mtbdd in self.mtbdds.items():
-            self.dec_mtbdd_ref(mtbdd)
+            self.dec_mtbdd_ref(cast(int, mtbdd))
+
+    def copy(self) -> MTBDDTransitionFn:
+        """ Construct a copy of the transition function. """
+        copy = MTBDDTransitionFn(self.alphabet_variables)
+        copy.mtbdds = dict(self.mtbdds)
+
+        for state, mtbdd in self.mtbdds.items():
+            self.inc_mtbdd_ref(cast(int, mtbdd))
+        return copy
 
     @staticmethod
     def inc_mtbdd_ref(dd: int):
