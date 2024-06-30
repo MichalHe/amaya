@@ -10,6 +10,7 @@ from typing import (
     Set,
     Tuple,
     Any,
+    Type,
     Union,
     Dict,
     Callable,
@@ -32,6 +33,7 @@ from amaya.config import (
     solver_config,
     SolutionDomain,
 )
+from amaya.mtbdd_automatons import MTBDD_NFA
 import amaya.presburger.constructions.naturals as relations_to_dfa
 import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
@@ -1049,8 +1051,8 @@ def evaluate_bool_equivalence_expr(ast: AST_Connective, ctx: EvaluationContext, 
     not_left = left_nfa.complement()
     not_right = right_nfa.complement()
 
-    branch1 = not_left.union(right_nfa)
-    branch2 = not_right.union(left_nfa)
+    branch1 = not_left.union(right_nfa).determinize()
+    branch2 = not_right.union(left_nfa).determinize()
 
     equivalence_nfa = branch1.intersection(branch2)
     return equivalence_nfa
@@ -1070,11 +1072,12 @@ def run_evaluation_procedure(ast: ASTp_Node,
 
     match ast:
         case BoolLiteral():
+            bool_vars = set(var for var in ctx.get_alphabet().all_vars if ctx.var_table[var].type == VariableType.BOOL)
             automaton_cls = ctx.get_automaton_class_for_current_backend()
             if ast.value:
-                result = automaton_cls.trivial_accepting(ctx.get_alphabet())
+                result = cast(Type[MTBDD_NFA], automaton_cls).mk_tautology_automaton(ctx.get_alphabet(), bool_vars)
             else:
-                result = automaton_cls.trivial_nonaccepting(ctx.get_alphabet())
+                result = cast(Type[MTBDD_NFA], automaton_cls).mk_contradiction_automaton(ctx.get_alphabet(), bool_vars)
             return result
 
         case Congruence():

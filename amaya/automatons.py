@@ -497,7 +497,7 @@ class NFA:
         the variable being False.
         The resulting autmaton is not complete (must be completed before complement).
         """
-        automaton_type = AutomatonType.DFA | AutomatonType.BOOL
+        automaton_type = AutomatonType.NFA | AutomatonType.BOOL
 
         nfa = cls(alphabet=overall_alphabet,
                   automaton_type=automaton_type,

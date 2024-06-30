@@ -30,7 +30,19 @@ from amaya.mtbdd_transitions import (
     mtbdd_false
 )
 from amaya.relations_structures import Var
+from amaya.semantics_tracking import AH_Node
 from amaya.visualization import AutomatonVisRepresentation
+
+
+def prepare_taut_symbol_for_vars(alphabet: LSBF_Alphabet, bool_vars: Set[Var], track_val_if_bool: int) -> Tuple[int|str, ...]:
+    symbol: List[int|str] = []
+    for var in alphabet.all_vars:
+        if var in bool_vars:
+            track_symbol = 1
+        else:
+            track_symbol = '*'
+        symbol.append(track_symbol)
+    return tuple(symbol)
 
 
 @dataclass
@@ -355,3 +367,27 @@ class MTBDD_NFA(NFA):
         """Minimize the underlying automaton using hopcroft's minimization algorithm."""
         assert bool(self.automaton_type & AutomatonType.DFA)
         return MTBDDTransitionFn.minimize_hopcroft(self)
+
+    @staticmethod
+    def mk_tautology_automaton(alphabet: LSBF_Alphabet, bool_vars: Set[Var]) -> MTBDD_NFA:
+        symbol = prepare_taut_symbol_for_vars(alphabet, bool_vars, track_val_if_bool=1)
+        nfa = MTBDD_NFA(alphabet, state_semantics=None, automaton_type=AutomatonType.NFA)
+        nfa.add_state(0)
+        nfa.add_state(1)
+        nfa.add_initial_state(0)
+        nfa.add_final_state(1)
+        nfa.update_transition_fn(0, symbol, 1)
+        nfa.used_variables = list(sorted(bool_vars))
+        return nfa
+
+    @staticmethod
+    def mk_contradiction_automaton(alphabet: LSBF_Alphabet, bool_vars: Set[Var]) -> MTBDD_NFA:
+        symbol = prepare_taut_symbol_for_vars(alphabet, bool_vars, track_val_if_bool=0)
+        nfa = MTBDD_NFA(alphabet, state_semantics=None, automaton_type=AutomatonType.NFA)
+        nfa.add_state(0)
+        nfa.add_state(1)
+        nfa.add_initial_state(0)
+        nfa.add_final_state(1)
+        nfa.update_transition_fn(0, symbol, 1)
+        nfa.used_variables = list(sorted(bool_vars))
+        return nfa
