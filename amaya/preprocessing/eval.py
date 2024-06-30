@@ -371,11 +371,12 @@ def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph,
     norm = lhs - rhs
     new_top_level_support = set(norm.linear_terms.keys())
 
+    # @note: Norm = all terms moved to the left-hand side
     if not new_top_level_support:
         if predicate_symbol == '<=':
-            is_tautology = norm.constant_term >= 0
+            is_tautology = norm.constant_term <= 0
         elif predicate_symbol == '<':
-            is_tautology = norm.constant_term > 0
+            is_tautology = norm.constant_term < 0
         else:
             is_tautology = norm.constant_term == 0
         return BoolLiteral(value=is_tautology), ASTInfo()
