@@ -173,7 +173,7 @@ class MTBDD_NFA(NFA):
         result.transition_fn = self.transition_fn.copy()
         result.applied_operations_info += ['complement']
 
-        return self
+        return result
 
     def do_projection(self, var: Var, skip_pad_closure: bool = False):
         logger.info(f'Performing MTBDD NFA projection on variable: {var}. Currently employed variables: {self.used_variables}')
