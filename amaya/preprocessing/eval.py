@@ -11,14 +11,12 @@ from amaya import logger
 from amaya.config import solver_config
 from amaya.relations_structures import (
     AST_Atom,
-    AST_Language_Literal,
     AST_NaryNode,
     AST_Node,
     AST_Node_Names,
     BoolLiteral,
     Congruence,
     FunctionSymbol,
-    Language_Literal_Type,
     Raw_AST,
     Relation,
     Var,
@@ -330,7 +328,7 @@ def normalize_expr(ast: Raw_AST,
     raise ValueError(f'Cannot reduce unknown expression to evaluable form. {ast=}')
 
 
-def divide_relation_by_gcd(relation: Relation) -> Union[Relation, AST_Language_Literal]:
+def divide_relation_by_gcd(relation: Relation) -> Union[Relation, BoolLiteral]:
     # Divide both sides by GCD if configured
     if not solver_config.optimizations.do_gcd_divide:
         return relation
@@ -348,14 +346,14 @@ def divide_relation_by_gcd(relation: Relation) -> Union[Relation, AST_Language_L
     if unsat:
         msg = 'GCD of relation coefs (%s) is %d, but RHS (=%d) is not divisible -> returning False.'
         logger.info(msg, relation.coefs, gcd, relation.rhs)
-        return AST_Language_Literal.empty()
+        return BoolLiteral(False)
 
     msg = 'GCD of relation coefs (%s) is %d, rewriting coefficients into %s and RHS into %d.'
     logger.info(msg, relation.coefs, gcd, new_coefs, new_rhs)
     return Relation(vars=relation.vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=relation.predicate_symbol)
 
 
-def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, scoper: Scoper) -> Tuple[Relation | AST_Language_Literal, ASTInfo]:
+def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph, scoper: Scoper) -> Tuple[Union[Relation, BoolLiteral], ASTInfo]:
     assert isinstance(ast, list)
     predicate_symbol = ast[0]
     if not isinstance(predicate_symbol, str):
@@ -381,8 +379,7 @@ def convert_relation_to_evaluable_form(ast: Raw_AST, dep_graph: NonlinTermGraph,
             is_tautology = norm.constant_term < 0
         else:
             is_tautology = norm.constant_term == 0
-        lang_literal_type = Language_Literal_Type.UNIVERSAL if is_tautology else Language_Literal_Type.EMPTY
-        return AST_Language_Literal(type=lang_literal_type), ASTInfo()
+        return BoolLiteral(value=is_tautology), ASTInfo()
 
     # Remove variables that are not part of the support after norm has been calculated - diff might have result in some coef=0
     support = support - (top_level_support - new_top_level_support)
@@ -695,7 +692,7 @@ def _replace_placeholders_by_equivalent_lin_terms(ast: AST_Node, rewrite_instruc
         new_vars, new_coefs = apply_substitution(ast.vars, ast.coefs, rewrite_instructions.placeholder_replacements)
         return Congruence(vars=new_vars, coefs=new_coefs, rhs=ast.rhs, modulus=ast.modulus)
 
-    if isinstance(ast, (str, BoolLiteral, Var, AST_Language_Literal)):
+    if isinstance(ast, (str, BoolLiteral, Var)):
         return ast
 
     assert isinstance(ast, list)
@@ -723,7 +720,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
                 var = scoper.lookup_var_name(ast)
                 return var, ASTInfo(used_vars={var})
 
-    if isinstance(ast, (BoolLiteral, AST_Language_Literal)):
+    if isinstance(ast, BoolLiteral):
         return ast, ASTInfo(used_vars=set())
 
     assert isinstance(ast, list), f'Freestanding integer found - not a part of any atom: {ast}'
@@ -743,8 +740,6 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
         child, child_ast_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars, scoper)
         if isinstance(child, BoolLiteral):
             return BoolLiteral(value=not child.value), child_ast_info
-        if isinstance(child, AST_Language_Literal):
-            return child.complement(), child_ast_info
         return ['not', child], child_ast_info
 
     if node_type == 'exists':

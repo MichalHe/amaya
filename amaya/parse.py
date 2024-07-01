@@ -47,7 +47,6 @@ import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
     AST_Atom,
     AST_Connective,
-    AST_Language_Literal,
     AST_Negation,
     AST_Node_Names,
     AST_NaryNode,
@@ -58,7 +57,6 @@ from amaya.relations_structures import (
     Congruence,
     Connective_Type,
     FunctionSymbol,
-    Language_Literal_Type,
     NodeEncounteredHandlerStatus,
     Relation,
     Var,
@@ -1109,13 +1107,6 @@ def run_evaluation_procedure(ast: ASTp_Node,
         case AST_Negation():
             result = evaluate_not_expr(ast, ctx, _debug_recursion_depth)
 
-        case AST_Language_Literal():
-            automaton_cls = ctx.get_automaton_class_for_current_backend()
-            alphabet = ctx.get_alphabet()
-            if ast.type == Language_Literal_Type.UNIVERSAL:
-                return automaton_cls.trivial_accepting(alphabet)
-            else:
-                return automaton_cls.trivial_nonaccepting(alphabet)
         case _:
             raise NotImplementedError(f'Don\'t know how to evaluate {ast}.')
 

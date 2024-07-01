@@ -208,30 +208,9 @@ class BoolLiteral:
     """True or False formula"""
     value: bool
 
-
-@dataclass
-class AST_Language_Literal:
-    type: Language_Literal_Type
-
-    @staticmethod
-    def empty() -> AST_Language_Literal:
-        return AST_Language_Literal(type=Language_Literal_Type.EMPTY)
-
-    @staticmethod
-    def universal() -> AST_Language_Literal:
-        return AST_Language_Literal(type=Language_Literal_Type.UNIVERSAL)
-
-    def complement(self) -> AST_Language_Literal:
-        if self.type == Language_Literal_Type.UNIVERSAL:
-            new_type = Language_Literal_Type.EMPTY
-        else:
-            new_type = Language_Literal_Type.UNIVERSAL
-        return AST_Language_Literal(type=new_type)
-
-
 Frozen_AST = Union[int, str, Tuple['Raw_AST', ...]]
 Raw_AST = Union[int, str, List['Raw_AST']]
-AST_Atom = Union[str, Var, Congruence, Relation, BoolLiteral, AST_Language_Literal]
+AST_Atom = Union[str, Var, Congruence, Relation, BoolLiteral]
 AST_NaryNode = List[Union[AST_Atom, 'AST_NaryNode']]
 AST_Node = Union[AST_Atom, AST_NaryNode]
 
@@ -383,11 +362,6 @@ class AST_Quantifier(ASTp_Node_Base):
     child: ASTp_Node
 
 
-class Language_Literal_Type(IntEnum):
-    EMPTY     = 0x01
-    UNIVERSAL = 0x02
-
-
 class Connective_Type(IntEnum):
     AND   = 0x01
     OR    = 0x02
@@ -406,8 +380,8 @@ class AST_Connective(ASTp_Node_Base):
                               children=new_children,
                               variable_bounds=self.variable_bounds)
 
-ASTp_Leaf_Type_List = (Relation, Congruence, BoolLiteral, Var, AST_Language_Literal)
-ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, AST_Language_Literal, Relation, Congruence, BoolLiteral, Var]
+ASTp_Leaf_Type_List = (Relation, Congruence, BoolLiteral, Var)
+ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral, Var]
 
 
 def _collect_referenced_vars(children: Iterable[ASTp_Node]) -> Tuple[Var, ...]:
@@ -420,7 +394,7 @@ def _collect_referenced_vars(children: Iterable[ASTp_Node]) -> Tuple[Var, ...]:
         if isinstance(child, Var):
             refd_vars.add(child)
             continue
-        if isinstance(child, (BoolLiteral, AST_Language_Literal)):
+        if isinstance(child, BoolLiteral):
             continue
 
         refd_vars.update(child.referenced_vars)
@@ -433,13 +407,13 @@ def _collect_referenced_vars_unary(child: ASTp_Node):
         return tuple(child.vars)
     if isinstance(child, Var):
         return (child,)
-    if isinstance(child, (BoolLiteral, AST_Language_Literal)):
+    if isinstance(child, BoolLiteral):
         return tuple()
     return child.referenced_vars
 
 
 def convert_ast_into_astp(ast: AST_Node) -> ASTp_Node:
-    if isinstance(ast, (AST_Language_Literal, Relation, Congruence, BoolLiteral, Var)):
+    if isinstance(ast, (Relation, Congruence, BoolLiteral, Var)):
         return ast
 
     assert isinstance(ast, list)
@@ -472,7 +446,7 @@ def convert_ast_into_astp(ast: AST_Node) -> ASTp_Node:
 def pprint_formula(ast: ASTp_Node, indent: int = 0):
     indent_str = '   ' * indent
     match ast:
-        case BoolLiteral() | Relation() | Congruence() | Var() | AST_Language_Literal():
+        case BoolLiteral() | Relation() | Congruence() | Var():
             print(f'{indent_str}{ast}')
         case AST_Connective():
             connective_symbol_table = {

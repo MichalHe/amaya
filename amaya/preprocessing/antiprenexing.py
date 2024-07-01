@@ -4,7 +4,6 @@ import functools
 from typing import Dict, Iterable, List, Set
 from amaya.relations_structures import (
     AST_Connective,
-    AST_Language_Literal,
     AST_Negation,
     AST_Quantifier,
     ASTp_Leaf_Type_List,
@@ -24,7 +23,7 @@ def _get_referenced_vars(ast: ASTp_Node) -> Iterable[Var]:
             return (ast,)
         case Relation() | Congruence():
             return ast.vars
-        case BoolLiteral() | AST_Language_Literal():
+        case BoolLiteral():
             return tuple()
         case _:
             return ast.referenced_vars
@@ -104,7 +103,7 @@ def _perform_miniscoping(quantif_node: AST_Quantifier) -> ASTp_Node:
 
 def miniscope_quantifiers(ast: ASTp_Node):
     match ast:
-        case Var() | Congruence() | Relation() | BoolLiteral() | AST_Language_Literal():
+        case Var() | Congruence() | Relation() | BoolLiteral():
             return ast
         case AST_Quantifier():
             result = _perform_miniscoping(ast)
