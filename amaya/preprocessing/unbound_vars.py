@@ -25,6 +25,7 @@ from amaya.preprocessing.eval import LinTerm, Scoper, VarInfo, split_lin_terms_i
 from amaya.relations_structures import (
     AST_Atom,
     AST_Connective,
+    AST_Language_Literal,
     AST_NaryNode,
     AST_Negation,
     AST_Node,
@@ -68,7 +69,7 @@ class AST_Quantifier_Node_With_Bounds_Info:
 
 @dataclass
 class AST_Leaf_Node_With_Bounds_Info:
-    contents: Union[Relation, str, Congruence, Var, BoolLiteral]
+    contents: Union[Relation, str, Congruence, Var, BoolLiteral, AST_Language_Literal]
     var_values: Dict[Var, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
@@ -257,7 +258,7 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
                 bounds_info.var_values[var] = [Value_Interval(None, None)]
         return bounds_info
 
-    elif isinstance(ast, (str, Congruence, BoolLiteral, Var)):
+    elif isinstance(ast, (str, Congruence, BoolLiteral, AST_Language_Literal, Var)):
         return AST_Leaf_Node_With_Bounds_Info(contents=ast)
 
     node_type = ast[0]
@@ -348,7 +349,7 @@ def filter_vars_with_no_info_from_node(vars_with_bounds_rewritten: Set[Var], nod
 
 def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[Var]) -> Optional[AST_Node]:
     if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
-        if isinstance(ast.contents, (Var, Congruence, str, BoolLiteral)):
+        if isinstance(ast.contents, (Var, Congruence, str, BoolLiteral, AST_Language_Literal)):
             return ast.contents
 
         relation: Relation = ast.contents
@@ -462,7 +463,7 @@ def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
             remaining_lin_terms = sorted(remaining_lin_terms, key = lambda var_coef_pair: var_coef_pair[0])
 
             if not remaining_lin_terms:
-                return BoolLiteral(value=True)
+                return AST_Language_Literal.universal()
 
             vars, coefs = [], []
             for var, coef in remaining_lin_terms:
@@ -511,6 +512,9 @@ def _push_negations_towards_atoms(ast: AST_Node, holding_negation: bool) -> AST_
 
     if isinstance(ast, BoolLiteral):
         return BoolLiteral(value = not ast.value) if holding_negation else ast
+
+    if isinstance(ast, AST_Language_Literal):
+        return ast.complement() if holding_negation else ast
 
     assert isinstance(ast, list), ast
 
@@ -610,7 +614,7 @@ def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal
             simplified_clauses.append(simplified_clause)
 
     if not simplified_clauses:
-        return BoolLiteral(value=False)
+        return AST_Language_Literal.empty()
 
 
     def decode_literal(literal: Literal) -> AST_Node:
@@ -630,7 +634,7 @@ def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal
 
 
 def is_atom(ast: AST_Node) -> bool:
-    atom_types = (str, BoolLiteral, Relation, Congruence, Var)
+    atom_types = (str, BoolLiteral, Relation, Congruence, Var, AST_Language_Literal)
     return any(isinstance(ast, atom_type) for atom_type in atom_types)
 
 
@@ -645,7 +649,7 @@ def is_literal(ast: AST_Node) -> bool:
 
 LiteralIds = Tuple[int, ...]
 LiteralIdDecodingTable = Dict[int, Literal]
-FrozenAtom = Union[str, BoolLiteral, FrozenLinAtom, FrozenCongruence]
+FrozenAtom = Union[str, BoolLiteral, AST_Language_Literal, FrozenLinAtom, FrozenCongruence, Var]
 
 def do_and_or_tree_lookahead_and_produce_dnf(ast: AST_Node) -> Optional[AST_Node]:
     if not isinstance(ast, list):
@@ -676,13 +680,13 @@ def do_and_or_tree_lookahead_and_produce_dnf(ast: AST_Node) -> Optional[AST_Node
         elif isinstance(atom, Congruence):
             return FrozenCongruence.from_congruence(atom)
         else:
-            assert isinstance(atom, str) or isinstance(atom, BoolLiteral), atom
+            assert isinstance(atom, (str, BoolLiteral, Var, AST_Language_Literal)), atom
             return atom
 
     # We have a valid AND-OR tree
 
     literal_decoding_table: Dict[int, AST_Atom] = {}
-    literal_table: Dict[Union[FrozenLinAtom, FrozenCongruence, str, BoolLiteral], int] = {}
+    literal_table: Dict[FrozenLinAtom | FrozenCongruence | str | BoolLiteral | AST_Language_Literal | Var, int] = {}
 
     def make_atoms_into_literals(ast: AST_NaryNode) -> List[Literal]:
         literals: List[Literal] = []
@@ -963,6 +967,10 @@ def _are_exists_and_trees_isomorphic(left: AST_Node, right: AST_Node, isomorphis
         assert isinstance(right, BoolLiteral)
         return left.value == right.value
 
+    if isinstance(left, AST_Language_Literal):
+        assert isinstance(right, AST_Language_Literal)
+        return left.type == right.type
+
     if not isinstance(left, list):
         logger.warning('Unhandled branch in isomorphism checking, assumimg that the trees are not isomorphic')
         return False
@@ -1041,7 +1049,7 @@ def _detect_conflics_on_isomorphic_fragments(ast: AST_Node) -> AST_Node:
                 continue
 
             if _check_if_children_are_conflicting(children_with_same_free_vars, free_vars):
-                return BoolLiteral(value=False)
+                return AST_Language_Literal.empty()
 
         # No clauses were found conflicting
         return ['and', *rewritten_children]
@@ -1106,14 +1114,14 @@ def _insert_all_asserting_bounds_into_current_context(and_connective: AST_Connec
 
         if bound.predicate_symbol == '=':
             if (rhs % coef) != 0:
-                return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (3x = 5 AND <Subformula>)
+                return AST_Language_Literal.empty()  # e.g. x >= 3, and we are in a child: (3x = 5 AND <Subformula>)
             implied_val = rhs // coef
 
             upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
             lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
 
             if implied_val < lower or implied_val > upper:
-                return BoolLiteral(False)  # e.g. x >= 3, and we are in a child: (x = 0 AND <Subformula>)
+                return AST_Language_Literal.empty()  # e.g. x >= 3, and we are in a child: (x = 0 AND <Subformula>)
 
             new_interval = Value_Interval(lower_limit=implied_val, upper_limit=implied_val)
             contexter.assert_new_var_value(var, new_interval)
@@ -1156,16 +1164,16 @@ def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_V
                 return isinstance(node, Relation) and len(node.vars) == 1
 
             _new_rich_children = (_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in children if not is_bound(child))
-            new_rich_children = tuple((child for child in _new_rich_children if child != BoolLiteral(True)))
+            new_rich_children = tuple((child for child in _new_rich_children if child != AST_Language_Literal.universal()))
 
-            if any(child == BoolLiteral(False) for child in new_rich_children):
-                return BoolLiteral(False)
+            if any(child == AST_Language_Literal.empty() for child in new_rich_children):
+                return AST_Language_Literal.empty()
 
             contexter.exit_context()
 
             new_subtree = (*new_bounds, *new_rich_children)
             if len(new_subtree) == 0:
-                return BoolLiteral(False)
+                return AST_Language_Literal.empty()
             if len(new_subtree) == 1:
                 return new_subtree[0]
 
@@ -1178,13 +1186,13 @@ def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_V
 
         case Connective_Type.OR:
             _new_children = (_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in connective.children)
-            new_children = tuple(child for child in _new_children if child != BoolLiteral(False))
+            new_children = tuple(child for child in _new_children if child != AST_Language_Literal.empty())
 
-            if any(child == BoolLiteral(True) for child in new_children):
-                return BoolLiteral(True)
+            if any(child == AST_Language_Literal.universal() for child in new_children):
+                return AST_Language_Literal.universal()
 
             if len(new_children) == 0:
-                return BoolLiteral(False)
+                return AST_Language_Literal.empty()
             if len(new_children) == 1:
                 return new_children[0]
 
@@ -1215,7 +1223,7 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
                 # Look whether the current bound requires var value to be higher then possible due to parent's constraints
                 parents_upper_limit = ctx_vals.upper_limit if ctx_vals.upper_limit is not None else implied_val + 1
                 if implied_val > parents_upper_limit:  # Parent asserts that x must be <= than 5, child says x must be >= 6
-                    return BoolLiteral(False)
+                    return AST_Language_Literal.empty()
 
                 # Look whether we are strengthening the lower bound or not
                 ctx_lower_val = ctx_vals.lower_limit
@@ -1229,7 +1237,7 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
                 implied_val = math.floor(rhs / coef)
                 parents_lower_limit = ctx_vals.lower_limit if ctx_vals.lower_limit is not None else implied_val - 1
                 if implied_val < parents_lower_limit:  # Parent asserts that x must be >= 0, child says x must be <= -1
-                    return BoolLiteral(False)
+                    return AST_Language_Literal.empty()
 
                 ctx_upper_val = ctx_vals.upper_limit
                 if not ctx_upper_val:
@@ -1241,7 +1249,7 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
 
         # relation is an equation
         if (relation.rhs % coef) != 0:  # -2x = 5
-            return BoolLiteral(False)
+            return AST_Language_Literal.empty()
 
         implied_val = relation.rhs // coef  # x = +/- implied_value
         val_interval = contexter.lookup_asserted_values(var)
@@ -1250,11 +1258,11 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
         lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
 
         if implied_val < lower or implied_val > upper:
-            return BoolLiteral(False)
+            return AST_Language_Literal.empty()
 
         return Relation(vars=[var], coefs=[1], rhs=implied_val, predicate_symbol='=')
 
-    if isinstance(node, (Congruence, Var, BoolLiteral)):  # Congruences, BoolLiterals etc
+    if isinstance(node, (Congruence, Var, BoolLiteral, AST_Language_Literal)):  # Congruences, BoolLiterals etc
         return node
 
     match node:
@@ -1268,7 +1276,7 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
                 eq = child
                 var, coef, rhs = eq.vars[0], eq.coefs[0], eq.rhs
                 if (rhs % coef) != 0:
-                    return BoolLiteral(True)
+                    return AST_Language_Literal.universal()
                 implied_val = rhs // coef
 
                 val_interval = contexter.lookup_asserted_values(var)
@@ -1277,7 +1285,7 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
 
                 # If the implied_value is not included in the interval, then we can just ignore it
                 if implied_val < lower or implied_val > upper:
-                    return BoolLiteral(True)
+                    return AST_Language_Literal.universal()
 
             # Once we've passed through a negation we forget everything about parent context.
             # alternatively, we would need a ritcher interval domain to precisely handle nagations.
@@ -1399,7 +1407,7 @@ def _determine_monotonicity_of_variables(tree: ASTp_Node, monotonicity_info: Mon
                     congruence_idx = monotonicity_info.get_next_congruence_id()
                     monotonicity_info.seen_vars[var].congruences.append((congruence_idx, tree))
 
-        case BoolLiteral() | Var():
+        case BoolLiteral() | Var() | AST_Language_Literal():
             return
 
         case AST_Connective():
@@ -1440,7 +1448,7 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
                 return root
 
             if value is None:
-                return BoolLiteral(True)
+                return AST_Language_Literal.universal()
 
             new_coefs, new_vars = [], []
             var_coef = 1
@@ -1455,10 +1463,10 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
 
             if not new_vars:
                 if isinstance(root, Relation):
-                    ret = BoolLiteral(True) if new_rhs >= 0 else BoolLiteral(False)
+                    ret = AST_Language_Literal.universal() if new_rhs >= 0 else AST_Language_Literal.empty()
                     return ret
                 else:  # root is a Congruence
-                    ret = BoolLiteral(True) if (new_rhs % root.modulus) == 0 else BoolLiteral(False)
+                    ret = AST_Language_Literal.universal() if (new_rhs % root.modulus) == 0 else AST_Language_Literal.empty()
                     return ret
 
             if isinstance(root, Congruence):
@@ -1468,7 +1476,7 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
             coefs_gcd = math.gcd(*new_coefs)
             if root.predicate_symbol == '=' and (new_rhs % coefs_gcd) != 0:
                 # Unsat, e.g., 3x = 4 does not have a solution in integers
-                return BoolLiteral(False)
+                return AST_Language_Literal.empty()
 
             new_rhs = math.floor(new_rhs / coefs_gcd)
             new_coefs = [coef // coefs_gcd for coef in new_coefs]
@@ -1495,10 +1503,10 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
 
             # We have strengthened the intervals, check whether we did not found any conflict after substitution
             if value_interval.implies_contradiction():
-                return BoolLiteral(False)
+                return AST_Language_Literal.empty()
             return relation
 
-        case BoolLiteral() | Var():
+        case BoolLiteral() | Var() | AST_Language_Literal():
             return root
 
         case AST_Connective():
@@ -1526,7 +1534,7 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
 
         case AST_Quantifier():
             new_child = _substitute_var_with_value(root.child, var, value, contexter)
-            if isinstance(new_child, BoolLiteral):
+            if isinstance(new_child, (BoolLiteral, AST_Language_Literal)):
                 return new_child
             new_bound_vars = root.bound_vars if var not in root.bound_vars else tuple(it for it in root.bound_vars if it != var)
             return AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=new_bound_vars, child=new_child)
@@ -1536,10 +1544,10 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
 
             new_child = _substitute_var_with_value(root.child, var, value, contexter)
 
-            if new_child == BoolLiteral(True):
-                return BoolLiteral(False)
-            elif new_child == BoolLiteral(False):
-                return BoolLiteral(True)
+            if isinstance(new_child, BoolLiteral):
+                return BoolLiteral(value=not new_child.value)
+            elif isinstance(new_child, AST_Language_Literal):
+                return new_child.complement()
             elif isinstance(new_child, Relation) and new_child.predicate_symbol == '<=':
                 return new_child.negate()
 
@@ -1580,10 +1588,10 @@ def _rewrite_exists_equations(exists_node: AST_Quantifier) -> Optional[Tuple[AST
         if not bound_vars_coefs:
             return rel, False
         if gcd == 1:
-            return BoolLiteral(True), False
+            return AST_Language_Literal.universal(), False
     else:
         if any(bound_var in rel.vars for bound_var in bound_vars):
-            return BoolLiteral(True), False
+            return AST_Language_Literal.universal(), False
         else: # Inequation that does not speak about the quantified variable.
             return exists_node.child, False
     return None
@@ -1714,7 +1722,7 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
         kept_relations: Tuple[ASTp_Node,...] = tuple(subtree for subtree_idx, subtree in enumerate(relations) if subtree_idx not in removed_subformulae_indices)
         new_node_subtrees = kept_relations + tuple(added_subformulae)
         if not new_node_subtrees:
-            new_node_subtrees = (BoolLiteral(True),)
+            new_node_subtrees = (AST_Language_Literal.universal(),)
 
         new_connective = AST_Connective(referenced_vars=and_node.referenced_vars, type=and_node.type, children=new_node_subtrees)
 
@@ -1742,7 +1750,7 @@ def _optimize_congruences_on_unbound_vars(root: ASTp_Node, opt_result: Exists_Op
     match root:
         case Relation():
             if any(var in root.vars for var in opt_result.vars_to_rewrite_congruences_with):
-                return BoolLiteral(True)
+                return AST_Language_Literal.universal()
             return root
         case Congruence():
             usable_terms: List[LinTerm] = [LinTerm(coef=term[0], var=term[1]) for term in root.linear_terms() if term[1] in opt_result.vars_to_rewrite_congruences_with]
@@ -1754,7 +1762,7 @@ def _optimize_congruences_on_unbound_vars(root: ASTp_Node, opt_result: Exists_Op
             vars  = [term[1] for term in new_terms]
 
             if not vars:
-                return BoolLiteral(True)
+                return AST_Language_Literal.universal()
 
             return Congruence(vars=vars, coefs=coefs, modulus=new_modulus, rhs=(root.rhs % new_modulus))
         case Var():
@@ -1768,7 +1776,7 @@ def _optimize_congruences_on_unbound_vars(root: ASTp_Node, opt_result: Exists_Op
             bound_vars = tuple(var for var in root.bound_vars if var not in opt_result.vars_to_rewrite_congruences_with)
             if not bound_vars:
                 return optimized_child
-            if isinstance(optimized_child, BoolLiteral):
+            if isinstance(optimized_child, (BoolLiteral, AST_Language_Literal)):
                 return optimized_child
             referenced_vars = filter_our_referenced_vars(root.referenced_vars)
             return AST_Quantifier(referenced_vars=referenced_vars, bound_vars=bound_vars, child=optimized_child)
@@ -1818,7 +1826,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Exists_Optimization_Re
     vars_to_optimize_congruences_with: List[Var] = []
     for var, var_monotonicity in monotonicity_info.seen_vars.items():
         if _do_bounds_imply_conflict(var_monotonicity):
-            return Exists_Optimization_Result(node=BoolLiteral(False), contains_quantifier=False)
+            return Exists_Optimization_Result(node=AST_Language_Literal.empty(), contains_quantifier=False)
 
         if var_monotonicity.limits.upper_limit == var_monotonicity.limits.lower_limit and var_monotonicity.limits.lower_limit is not None:
             logger.info(f'The variable {var} has a known value {var_monotonicity.limits.upper_limit}')
@@ -1865,7 +1873,7 @@ def _optimize_exists_tree(exists_node: AST_Quantifier) -> Exists_Optimization_Re
             fixed_tree = _substitute_var_with_value(optimized_tree_child, var, var_value, Parent_Context_Var_Values())
             logger.debug('Fixed tree: %s', fixed_tree)
             if not fixed_tree:
-                return Exists_Optimization_Result(node=BoolLiteral(True), contains_quantifier=False)
+                return Exists_Optimization_Result(node=AST_Language_Literal.universal(), contains_quantifier=False)
             optimized_tree_child = fixed_tree
 
         quantifier_lingers = len(exists_node.bound_vars) - len(vars_to_instantiate) > 0
@@ -1915,7 +1923,7 @@ def _optimize_exists_tree_using_const_values_only(exists_node: AST_Quantifier) -
         coef = subtree.coefs[0]
 
         if (subtree.rhs % coef) != 0:
-            return BoolLiteral(False), False
+            return AST_Language_Literal.empty(), False
 
         implied_val = subtree.rhs // coef
         substitutions_to_make.append((var, implied_val))
@@ -1973,7 +1981,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
 
         elif child.specifies_a_single_value_for_var():
             if child.is_unsat_eq():
-                return ((BoolLiteral(False), False), )
+                return ((AST_Language_Literal.empty(), False), )
 
             implied_val = child.rhs // child.coefs[0]
             bounds.try_strengthen_lower(implied_val)
@@ -1984,7 +1992,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
             continue
 
         if bounds.implies_contradiction():
-            return ((BoolLiteral(False), False), )
+            return ((AST_Language_Literal.empty(), False), )
 
     new_bounds = []
     for var, bound in var_bounds.items():
@@ -2029,7 +2037,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
                 logger.info('Detected conflict via congruence solving on variable: %s', var)
                 congruences = [connective_children[congruence_idx][0] for congruence_idx in var_congruences]
                 logger.info('%s has finite range: [%d, %d] and the following congruences: %s', var, lower_bound, upper_bound, congruences)
-                return ((BoolLiteral(False), False),)
+                return ((AST_Language_Literal.empty(), False),)
 
             if implied_var_values[0] == implied_var_values[1]:
                 logger.info('Detected only single possible value for variable %s via congruence solving', var)
@@ -2062,11 +2070,11 @@ def _use_bool_laws_to_simplify_connective(connective_type: Connective_Type,
         return subtrees
 
     if connective_type == Connective_Type.AND:
-        neutral_elem = BoolLiteral(True)
-        zero_elem    = BoolLiteral(False)
+        neutral_elem = AST_Language_Literal.universal()
+        zero_elem    = AST_Language_Literal.empty()
     else:
-        neutral_elem = BoolLiteral(False)
-        zero_elem    = BoolLiteral(True)
+        neutral_elem = AST_Language_Literal.empty()
+        zero_elem    = AST_Language_Literal.universal()
 
     if any(it[0] == zero_elem for it in subtrees):
         return (zero_elem, False),
@@ -2086,11 +2094,11 @@ def _use_bool_laws_to_simplify_connective_plain(connective_type: Connective_Type
         return subtrees
 
     if connective_type == Connective_Type.AND:
-        neutral_elem = BoolLiteral(True)
-        zero_elem = BoolLiteral(False)
+        neutral_elem = AST_Language_Literal.universal()
+        zero_elem    = AST_Language_Literal.empty()
     else:
-        neutral_elem = BoolLiteral(False)
-        zero_elem = BoolLiteral(True)
+        neutral_elem = AST_Language_Literal.empty()
+        zero_elem    = AST_Language_Literal.universal()
 
     if zero_elem in subtrees:
         return (zero_elem,)
@@ -2116,7 +2124,7 @@ def _shallow_flatten_connective(connective_type: Connective_Type,
 
 def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
     match root:
-        case Relation() | Congruence() | Var() | BoolLiteral():
+        case Relation() | Congruence() | Var() | BoolLiteral() | AST_Language_Literal():
             return root, False
 
         case AST_Connective():
@@ -2141,10 +2149,11 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
 
         case AST_Negation():
             optimized_child, any_quantifier_present = _optimize_bottom_quantifiers(root.child)
-            if optimized_child == BoolLiteral(True):
-                return BoolLiteral(False), False
-            elif optimized_child == BoolLiteral(False):
-                return BoolLiteral(True), False
+
+            if isinstance(optimized_child, BoolLiteral):
+                return BoolLiteral(value=not optimized_child.value), False
+            elif isinstance(optimized_child, AST_Language_Literal):
+                return optimized_child.complement(), False
             elif isinstance(optimized_child, Relation) and optimized_child.predicate_symbol == '<=':
                 return optimized_child.negate(), False
 
@@ -2355,7 +2364,7 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
 
 def _linearize_congruences(root: ASTp_Node, contexter: Parent_Context_Var_Values, monotonicity: Monotonicity_Info) -> ASTp_Node:
     match root:
-        case BoolLiteral() | Var() | Relation():
+        case BoolLiteral() | Var() | Relation() | AST_Language_Literal():
             return root
         case Congruence():
             linearized_congruence = _attempt_congruence_linearization(root, contexter, monotonicity)

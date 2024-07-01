@@ -862,7 +862,6 @@ class MTBDDTransitionFn():
         """ Construct a copy of the transition function. """
         copy = MTBDDTransitionFn(self.alphabet_variables)
         copy.mtbdds = dict(self.mtbdds)
-
         for state, mtbdd in self.mtbdds.items():
             self.inc_mtbdd_ref(cast(int, mtbdd))
         return copy

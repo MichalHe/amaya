@@ -73,7 +73,13 @@ def read_results_csv(path: str, timeout_secs=60, sep=';') -> Dataset:
     coin_weights = [extract_coin_weights_from_formula_name(f) for f in dataset['name']]
 
     runtime_columns = [c for c in dataset.columns if '-runtime' in c]
-    tools = [c.rstrip('-runtime') for c in runtime_columns]
+
+    def strip_runtime(name):
+        if name.endswith('-runtime'):
+            return name[:-len('-runtime')]
+        return name
+
+    tools = [strip_runtime(c) for c in runtime_columns]
 
     solver_runtimes = {}
     for tool, runtime_column in zip(tools, runtime_columns):
@@ -84,12 +90,14 @@ def read_results_csv(path: str, timeout_secs=60, sep=';') -> Dataset:
 
 
 def format_weights(weights: Tuple[int, ...]) -> str:
+    return str(weights[0])
     weight_fmt = ','.join(str(weight) for weight in weights)
     return f'{weight_fmt}'
 
 
 def plot_solver_runtimes(dataset: Dataset, interpolate: bool = True, draw_patch: bool = True, timeout_secs: float = 60.0):
-    figsize = (7, 3.5)
+    figsize_scale = 0.9
+    figsize = (figsize_scale*7, figsize_scale*3.5)
     scale = 1.5
     fig, ax = plt.subplots(figsize=tuple(scale*dim for dim in figsize))
 
@@ -98,13 +106,13 @@ def plot_solver_runtimes(dataset: Dataset, interpolate: bool = True, draw_patch:
 
     plt.axhline(y=0, color='gray', linestyle='-', linewidth=0.5)
 
-    plt.xticks(x_values, labels=x_tick_labels, rotation=70)
+    plt.xticks(x_values, labels=x_tick_labels)
 
-    plt.xlabel('Coin denominations', fontsize=12)
+    plt.xlabel('Coin denominations (w[0])', fontsize=12)
     plt.ylabel('Runtime [s]', fontsize=12)
 
     marker_counter = 0
-    markers = ['1', '+', 'x', '2', '3']
+    markers = ['1', '+', 'x', '2', '3', '*']
     for solver, runtimes in dataset.solver_runtimes.items():
         marker = markers[marker_counter]
         marker_counter += 1
@@ -121,6 +129,10 @@ def plot_solver_runtimes(dataset: Dataset, interpolate: bool = True, draw_patch:
         rectangle = Rectangle(rectangle_left_bottom, width, height, color='orange', alpha=0.2)
         ax.add_patch(rectangle)
 
+    for i, label in enumerate(ax.xaxis.get_ticklabels()):
+        if i % 3:
+            label.set_visible(False)
+
     plt.axhline(y=timeout_secs, color='black', linestyle='--', linewidth=0.5)
     plt.text((x_values[0] + x_values[-1])/2, timeout_secs+3, f'Timeout={timeout_secs} [s]', ha='center', fontsize=8)
 
@@ -129,17 +141,18 @@ def plot_solver_runtimes(dataset: Dataset, interpolate: bool = True, draw_patch:
     # plt.legend()  # To specify legend position manually: plt.legend(bbox_to_anchor=(0.73, 0.1))
     plt.legend(bbox_to_anchor=(0.8, 0.1))
     plt.tight_layout()
-    plt.subplots_adjust(left=0.08,
-                        bottom=0.2,
-                        right=0.92,
-                        top=0.98,
-                        wspace=0.4,
-                        hspace=0.4)
+    # plt.subplots_adjust(left=0.08,
+    #                     bottom=0.2,
+    #                     right=0.92,
+    #                     top=0.98,
+    #                     wspace=0.4,
+    #                     hspace=0.4)
 
 if __name__ == '__main__':
     parser = make_arg_parser()
     args = parser.parse_args()
     data = read_results_csv(args.results_csv, timeout_secs=args.timeout)
+    print(data)
     plot_solver_runtimes(data, interpolate=args.interpolate, draw_patch=args.draw_patch, timeout_secs=args.timeout)
     print(data)
 
