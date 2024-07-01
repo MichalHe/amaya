@@ -301,8 +301,9 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
         astp = antiprenexing.miniscope_quantifiers(astp)
 
     if solver_config.optimizations.optimize_bottom_quantifiers:
+        logger.debug('Optimizing bottom quantifier:  %s', astp)
         astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
-        pass
+        logger.debug('Bottom quantifiers optimized. Result:  %s', astp)
 
     if solver_config.optimizations.linearize_congruences:
         astp = var_bounds_lib.linearize_congruences(astp)
@@ -1075,9 +1076,9 @@ def run_evaluation_procedure(ast: ASTp_Node,
             bool_vars = set(var for var in ctx.get_alphabet().all_vars if ctx.var_table[var].type == VariableType.BOOL)
             automaton_cls = ctx.get_automaton_class_for_current_backend()
             if ast.value:
-                result = cast(Type[MTBDD_NFA], automaton_cls).mk_tautology_automaton(ctx.get_alphabet(), bool_vars)
+                result = cast(Type[MTBDD_NFA], automaton_cls).trivial_accepting(ctx.get_alphabet())
             else:
-                result = cast(Type[MTBDD_NFA], automaton_cls).mk_contradiction_automaton(ctx.get_alphabet(), bool_vars)
+                result = cast(Type[MTBDD_NFA], automaton_cls).trivial_nonaccepting(ctx.get_alphabet())
             return result
 
         case Congruence():
