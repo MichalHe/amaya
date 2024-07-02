@@ -1165,7 +1165,7 @@ def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_V
 
             new_subtree = (*new_bounds, *new_rich_children)
             if len(new_subtree) == 0:
-                return BoolLiteral(False)
+                return BoolLiteral(True)
             if len(new_subtree) == 1:
                 return new_subtree[0]
 
