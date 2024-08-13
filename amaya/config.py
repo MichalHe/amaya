@@ -87,6 +87,9 @@ class OptimizationsConfig:
         - remove (exists x PHI) if a fixed "best" value can be determined for x
     """
 
+    flatten_connectives: bool = False
+    """ Convert sequances of (binary) ANDs/ORs into one N-ary node. """
+
 
 @dataclass
 class PreprocessingConfig:

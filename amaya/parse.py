@@ -280,7 +280,10 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
         formula_to_evaluate = var_bounds_lib.push_negations_towards_atoms(formula_to_evaluate)
         logger.debug('Negations pushed towards atoms. Result:  %s', formula_to_evaluate)
 
-    formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
+    if solver_config.optimizations.flatten_connectives:
+        logger.debug('Flattening bool connectives into N-ary nodes.')
+        import pdb; pdb.set_trace()
+        formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
 
     if solver_config.optimizations.detect_isomorphic_conflicts:
         logger.debug('Detecting conflicts in conjuctive clauses using formula isomorphism:  %s', formula_to_evaluate)

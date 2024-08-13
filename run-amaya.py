@@ -159,6 +159,7 @@ opt_to_config_field = {
     'linearize': 'linearize_congruences',
     'purge-twice': 'do_interval_reasonining_twice',
     'opt-bottom-exists': 'optimize_bottom_quantifiers',
+    'flatten-connectives': 'flatten_connectives'
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
 
@@ -192,6 +193,8 @@ argparser.add_argument('-O',
                              '      Detect conflicts in conjunctive clauses (and A (not B)) if A B are ismorphic modulo bound variable renaming (approximate).\n'
                              '> reorder-conjunctions:\n'
                              '      Reorder conjunctions to derive conflict more quickly.\n'
+                             '> flatten-connectives:\n'
+                             '      Convert sequences of conjunctions (disjunctions) into one N-ary node. .\n'
                              '> all:\n'
                              '      Enable all above optimizations'))
 
