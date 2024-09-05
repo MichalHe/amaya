@@ -221,6 +221,7 @@ class AST_Node_Names(Enum):
     CHECK_SAT = 'check-sat'
     EXISTS = 'exists'
     BOOL_EQUIV = '='
+    SET_INFO = 'set-info'
     AND = 'and'
     OR = 'or'
     NOT = 'not'

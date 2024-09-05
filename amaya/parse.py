@@ -282,7 +282,6 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
 
     if solver_config.optimizations.flatten_connectives:
         logger.debug('Flattening bool connectives into N-ary nodes.')
-        import pdb; pdb.set_trace()
         formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
 
     if solver_config.optimizations.detect_isomorphic_conflicts:

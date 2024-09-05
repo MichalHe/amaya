@@ -86,7 +86,7 @@ def _write_ast_in_lash(root: ASTp_Node, params: Iterable[Tuple[Var, VarInfo]]) -
             raise ValueError(f'Unhandled node type when converting ASTp into LASH: {type(root)}')
 
 
-def write_ast_in_lash(ast: ASTp_Node, params: Iterable[Tuple[Var, VarInfo]], var_table: Dict[Var, VarInfo]) -> str:
+def write_ast_in_lash(ast: ASTp_Node, params: Iterable[Tuple[Var, VarInfo]], var_table: Dict[Var, VarInfo], smt_info: Dict[str, str]) -> str:
     return _write_ast_in_lash(ast, params)
 
 
@@ -162,10 +162,20 @@ def _write_ast_in_smt2(root: ASTp_Node,
 
 def write_ast_in_smt2(ast: ASTp_Node,
                       global_variables: Iterable[Tuple[Var, VarInfo]],
-                      var_table: Dict[Var, VarInfo]) -> str:
-    preamble = (
-        '(set-logic LIA)\n'
-    )
+                      var_table: Dict[Var, VarInfo],
+                      smt_info: Dict[str, str]) -> str:
+    preamble_lines = [
+        '(set-logic LIA)'
+    ]
+
+    preserved_smtinfo = ['license', 'status', 'smt-lib-version']
+
+    for preserved_field in preserved_smtinfo:
+        if preserved_field in smt_info:
+            field_value = smt_info[preserved_field]
+            preamble_lines.append(f'(set-info :{preserved_field} "{field_value}")')
+
+    preamble = '\n'.join(preamble_lines) + '\n'
 
     def var_formatter(var: Var, var_table: Dict[Var, VarInfo]):
         return var_table[var].name
