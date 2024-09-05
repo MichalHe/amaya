@@ -631,7 +631,7 @@ def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal
 
 def is_atom(ast: AST_Node) -> bool:
     atom_types = (str, BoolLiteral, Relation, Congruence, Var)
-    return any(isinstance(ast, atom_type) for atom_type in atom_types)
+    return isinstance(ast, atom_types)
 
 
 def is_literal(ast: AST_Node) -> bool:
@@ -723,7 +723,6 @@ def _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) -
 
     if is_atom(ast):
         return ast
-
     assert isinstance(ast, list)
     node_type: str = ast[0]  # type: ignore
 
@@ -767,8 +766,10 @@ def _collect_variables_present_in_formula(ast: AST_Node) -> Set[Var]:
         return set(ast.vars)
     if isinstance(ast, Var):
         return set([ast])
+    if isinstance(ast, BoolLiteral):
+        return set()
 
-    assert isinstance(ast, list)
+    assert isinstance(ast, list), ast
 
     node_type = ast_get_node_type(ast)
     if node_type == 'exists':
