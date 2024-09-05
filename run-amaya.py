@@ -120,6 +120,12 @@ argparser.add_argument('-m',
                        default=None,
                        help='Minimize the automatons eagerly using the specified minimization algorithm.')
 
+argparser.add_argument('--use-bit-sets',
+                       action='store_true',
+                       dest='use_bit_sets',
+                       default=False,
+                       help='Use bit sets when performing padding closure.')
+
 argparser.add_argument('--shard',
                        dest='sharding_enabled',
                        action='store_true',
@@ -407,6 +413,9 @@ elif args.minimization_method == 'brzozowski':
         sys.exit(1)
 elif 'fast' not in args:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
+
+if args.use_bit_sets:
+    solver_config.backend.use_bit_set_pad_closure = True
 
 solver_config.optimizations.allow_sharding = args.sharding_enabled
 
@@ -716,7 +725,8 @@ def convert_smt_to_other_format(args):
     tokens = tokenize(smt2_text)
     ast: List[AST_Node] = parse.build_syntax_tree(tokens)
 
-    writer_table: Dict[str, Callable[[ASTp_Node, Iterable[Tuple[Var, VarInfo]], Dict[Var, VarInfo]], str]] = {
+    Writer_Type = Callable[[ASTp_Node, Iterable[Tuple[Var, VarInfo]], Dict[Var, VarInfo], Dict[str, str]], str]
+    writer_table: Dict[str, Writer_Type] = {
         'lash': write_ast_in_lash,
         'smt2': write_ast_in_smt2,
     }
@@ -724,6 +734,8 @@ def convert_smt_to_other_format(args):
     function_symbol_table: Dict[str, FunctionSymbol] = {}
     asserted_formulae: List[AST_Node] = []
     writer = writer_table[args.output_format]
+
+    smt_info: Dict[str, str] = {}
 
     for top_level_statement in ast:
         if not isinstance(top_level_statement, list):
@@ -745,13 +757,18 @@ def convert_smt_to_other_format(args):
                 astp = generate_optimization_problem(astp, var_table, params)
 
             formula_parameters = [(var, var_info) for var, var_info in var_table.items() if var_info.is_formula_param]
-            output = writer(astp, formula_parameters, var_table)
+            output = writer(astp, formula_parameters, var_table, smt_info)
 
             print(output)
 
             # We are not catching any errors here, if an exception is raised it will kill the interpreter and the exit code
             # will be non-zero
             return True
+        elif top_level_statement[0] == AST_Node_Names.SET_INFO.value:
+            field = cast(str, top_level_statement[1])
+            field = field[1:]  # strip the leading ':' from :category 
+            field_value = cast(str, top_level_statement[2])
+            smt_info[field] = field_value
 
 running_modes_procedure_table = {
     RunnerMode.BENCHMARK: run_in_benchmark_mode,

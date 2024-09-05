@@ -249,6 +249,9 @@ mtbdd_wrapper.amaya_construct_dfa_for_atom_conjunction.restype = ct.POINTER(Seri
 mtbdd_wrapper.amaya_perform_pad_closure.argtypes = (ct.POINTER(Serialized_NFA), )
 mtbdd_wrapper.amaya_perform_pad_closure.restype = ct.POINTER(Serialized_NFA)
 
+mtbdd_wrapper.amaya_perform_pad_closure_using_bit_sets.argtypes = (ct.POINTER(Serialized_NFA), )
+mtbdd_wrapper.amaya_perform_pad_closure_using_bit_sets.restype = ct.POINTER(Serialized_NFA)
+
 # Serialized_NFA* amaya_construct_nfa_from_congruence(
 #     Serialized_Atom* congruence,
 #     s64  init_val,
@@ -608,6 +611,14 @@ class MTBDDTransitionFn():
     def do_pad_closure(nfa: MTBDD_NFA) -> MTBDD_NFA:
         serialized_nfa = serialize_nfa(nfa)
         serialized_result = mtbdd_wrapper.amaya_perform_pad_closure(serialized_nfa)
+        result = deserialize_nfa(serialized_result.contents, nfa.alphabet)
+        free_serialized_nfa(serialized_result)
+        return result
+
+    @staticmethod
+    def do_pad_closure_using_bit_sets(nfa: MTBDD_NFA) -> MTBDD_NFA:
+        serialized_nfa = serialize_nfa(nfa)
+        serialized_result = mtbdd_wrapper.amaya_perform_pad_closure_using_bit_sets(serialized_nfa)
         result = deserialize_nfa(serialized_result.contents, nfa.alphabet)
         free_serialized_nfa(serialized_result)
         return result

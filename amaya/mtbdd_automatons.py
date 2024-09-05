@@ -145,7 +145,10 @@ class MTBDD_NFA(NFA):
         return result
 
     def perform_pad_closure(self):
-        result = MTBDDTransitionFn.do_pad_closure(self)
+        if solver_config.backend.use_bit_set_pad_closure:
+            result = MTBDDTransitionFn.do_pad_closure_using_bit_sets(self)
+        else:
+            result = MTBDDTransitionFn.do_pad_closure(self)
         if len(result.states) > len(self.states):  # Was a new final state added?
             self.states = result.states
             self.final_states = result.final_states

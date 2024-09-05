@@ -23,6 +23,11 @@ class MinimizationAlgorithms(IntEnum):
 
 
 @dataclass
+class BackendConfig(object):
+    use_bit_set_pad_closure: bool = False
+
+
+@dataclass
 class OptimizationsConfig:
     allow_sharding: bool = False
     """ Perform top-level sharding. """
@@ -123,6 +128,8 @@ class SolverConfig(object):
     track_state_semantics: bool = False
 
     optimizations: OptimizationsConfig = field(default_factory=OptimizationsConfig)
+
+    backend: BackendConfig = field(default_factory=BackendConfig)
 
     vis_display_only_free_vars: bool = False
     """Export transition symbols with bits only for the free variables in the corresponding automaton."""
