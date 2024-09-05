@@ -431,7 +431,7 @@ def is_bool_literal(node):
 class RewriteInstructions:
     placeholder_replacements: Dict[Var, Tuple[LinTerm, ...]] = field(default_factory=dict)
     new_formulae: List[AST_Node] = field(default_factory=list)
-    vars_to_quantify: List[Var] = field(default_factory=list)
+    vars_to_quantify: Set[Var] = field(default_factory=set)
 
 
 def add_two_var_rewrite_instructions(rewrite_instructions: RewriteInstructions, node: NonlinTermNode, reminder: Var, quotient: Var):
@@ -581,7 +581,7 @@ def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var
         result_fn = ['or', fn_case(0, zero_point-1, fn), fn_case(zero_point, modulus-1, shifted_fn)]
 
     rewrite_instructions.new_formulae.append(result_fn)
-    rewrite_instructions.vars_to_quantify.append(new_var)
+    rewrite_instructions.vars_to_quantify.add(new_var)
 
     lower_bound = Relation(vars=[new_var], coefs=[-1], rhs=0, predicate_symbol='<=')
     upper_bound = Relation(vars=[new_var], coefs=[1], rhs=modulus-1, predicate_symbol='<=')
@@ -615,16 +615,16 @@ def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNod
             reminder, quotient = node.mod_rewrite_var, node.div_rewrite_var
             add_two_var_rewrite_instructions(rewrite_instructions, node, reminder=reminder, quotient=quotient)
 
-            rewrite_instructions.vars_to_quantify.extend((reminder, quotient))
+            rewrite_instructions.vars_to_quantify.update((reminder, quotient))
 
         elif node.div_rewrite_var is not None:
             quotient = node.div_rewrite_var
-            rewrite_instructions.vars_to_quantify.append(quotient)
+            rewrite_instructions.vars_to_quantify.add(quotient)
 
             if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
                 reminder = scoper.put_var_into_current_scope('dummy_reminder', add_id_to_name=True)  # Make a new var
                 add_two_var_rewrite_instructions(rewrite_instructions, node, reminder=reminder, quotient=quotient)
-                rewrite_instructions.vars_to_quantify.append(reminder)
+                rewrite_instructions.vars_to_quantify.add(reminder)
                 continue
 
             add_quotient_single_variable_rewrite_instructions(rewrite_instructions, node, quotient=quotient)
@@ -640,7 +640,7 @@ def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNod
 
             reminder = node.mod_rewrite_var
 
-            rewrite_instructions.vars_to_quantify.append(reminder)
+            rewrite_instructions.vars_to_quantify.add(reminder)
 
             # Store info in case there will be nonlinear terms that can be linearized
             offset = (-node.body.lin_term_constant % node.body.nonlin_constant)
@@ -649,7 +649,7 @@ def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNod
             if solver_config.preprocessing.use_two_vars_when_rewriting_nonlin_terms:
                 quotient = scoper.put_var_into_current_scope('dummy_quotient', add_id_to_name=True)  # Make a new var
                 add_two_var_rewrite_instructions(rewrite_instructions, node, reminder=reminder, quotient=quotient)
-                rewrite_instructions.vars_to_quantify.append(quotient)
+                rewrite_instructions.vars_to_quantify.add(quotient)
                 continue
 
             if solver_config.preprocessing.use_congruences_when_rewriting_modulo:
@@ -657,7 +657,7 @@ def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNod
                 continue
 
             add_reminder_single_variable_rewrite_using_quotient(rewrite_instructions, node, reminder)  # Use the variable as congruence
-            rewrite_instructions.vars_to_quantify.append(reminder)
+            rewrite_instructions.vars_to_quantify.add(reminder)
 
     return rewrite_instructions
 
