@@ -224,6 +224,8 @@ mtbdd_wrapper.amaya_mtbdd_deref.argtypes = (
 
 mtbdd_wrapper.amaya_sylvan_gc.argtypes = ()
 
+mtbdd_wrapper.amaya_enable_bit_sets.argtypes = ()
+
 mtbdd_wrapper.amaya_get_states_in_mtbdd_leaves.argtypes = (
     ct.POINTER(ct.c_ulong),   # Array of MTBBDs
     ct.c_uint32,              # The number of passed MTBDDs
@@ -1114,3 +1116,7 @@ class MTBDDTransitionFn():
                                                                      rhs, vars, var_cnt)
         res = deserialize_nfa(res_ptr.contents, alphabet)
         return res
+
+    @staticmethod
+    def enable_bit_sets():
+        mtbdd_wrapper.amaya_enable_bit_sets()

@@ -415,6 +415,8 @@ elif 'fast' not in args:
     solver_config.minimization_method = MinimizationAlgorithms.NONE
 
 if args.use_bit_sets:
+    from amaya.mtbdd_transitions import MTBDDTransitionFn
+    MTBDDTransitionFn.enable_bit_sets()
     solver_config.backend.use_bit_set_pad_closure = True
 
 solver_config.optimizations.allow_sharding = args.sharding_enabled
