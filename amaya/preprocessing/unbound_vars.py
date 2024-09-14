@@ -49,6 +49,7 @@ from amaya.relations_structures import (
 )
 
 from amaya import logger
+from amaya.config import solver_config
 
 
 @dataclass
@@ -1197,11 +1198,72 @@ def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_V
         case _:
             raise NotImplementedError(f'Connective not handled when doing interval analysis: {connective=}')
 
+
+def three_value_logic_mult(value: int | None, scalar: int) -> int | None:
+    return value * scalar if value is not None else None
+
+
+def three_value_add(value: int | None, other_val: int | None) -> int | None:
+    if value is None or other_val is None:
+        return None
+    return value + other_val
+
+
+def compute_lin_term_expr_bound(rel: Relation, contexter: Parent_Context_Var_Values) -> Value_Interval:
+    var_coefs_iterator = zip(rel.vars, rel.coefs)
+    var, coef = next(var_coefs_iterator)
+
+    lin_term_bounds = contexter.lookup_asserted_values(var).copy()
+    lin_term_bounds.lower_limit = three_value_logic_mult(lin_term_bounds.lower_limit, coef)
+    lin_term_bounds.upper_limit = three_value_logic_mult(lin_term_bounds.upper_limit, coef)
+    if coef < 0:
+        lin_term_bounds.lower_limit, lin_term_bounds.upper_limit = lin_term_bounds.upper_limit, lin_term_bounds.lower_limit
+
+    for var, coef in var_coefs_iterator:
+        var_bounds = contexter.lookup_asserted_values(var)
+        lower_limit = three_value_logic_mult(var_bounds.lower_limit, coef)
+        upper_limit = three_value_logic_mult(var_bounds.upper_limit, coef)
+        if coef < 0:
+            lower_limit, upper_limit = upper_limit, lower_limit
+
+        lin_term_bounds.lower_limit = three_value_add(lin_term_bounds.lower_limit, lower_limit)
+        lin_term_bounds.upper_limit = three_value_add(lin_term_bounds.upper_limit, upper_limit)
+
+    return lin_term_bounds
+
+def rewrite_using_bounds_on_lhs_lin_term(relation: Relation, contexter: Parent_Context_Var_Values) -> ASTp_Node | None:
+    """
+    Rewrite given relation by computing overapproximation of LHS values and checking its feasability.
+
+    Enabled if solver_config.optimizations.rewrite_by_overapprox_relation_rhs is True.
+    """
+    if not solver_config.optimizations.rewrite_existential_equations_via_gcd:
+        return None
+
+    if relation.predicate_symbol == '<=':
+        lhs_expr_bound = compute_lin_term_expr_bound(relation, contexter)
+        if lhs_expr_bound.lower_limit is not None and lhs_expr_bound.lower_limit > relation.rhs:
+            return BoolLiteral(False)
+        elif lhs_expr_bound.upper_limit is not None and lhs_expr_bound.upper_limit <= relation.rhs:
+            return BoolLiteral(True)
+    elif relation.predicate_symbol == '=':
+        lhs_expr_bound = compute_lin_term_expr_bound(relation, contexter)
+        higher_than_lower_lim = relation.rhs >= lhs_expr_bound.lower_limit if lhs_expr_bound.lower_limit is not None else True
+        lower_than_upper_lim = relation.rhs <= lhs_expr_bound.upper_limit if lhs_expr_bound.upper_limit is not None else True
+        can_be_satisfied = higher_than_lower_lim and lower_than_upper_lim
+        if not can_be_satisfied:
+            return BoolLiteral(False)
+    return None
+
+
 def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: Parent_Context_Var_Values) -> ASTp_Node:
     if isinstance(node, Relation):
         relation: Relation = node
 
         if len(relation.vars) > 1:
+            rel_rewritten_using_bounds = rewrite_using_bounds_on_lhs_lin_term(relation, contexter)
+            if rel_rewritten_using_bounds is not None:
+                return rel_rewritten_using_bounds
             return node
 
         var, coef = relation.vars[0], relation.coefs[0]
@@ -1282,10 +1344,10 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
 
             # Once we've passed through a negation we forget everything about parent context.
             # alternatively, we would need a ritcher interval domain to precisely handle nagations.
-            contexter.enter_blocking_context()
+            # contexter.enter_blocking_context()
             new_child = _prune_conjunctions_false_due_to_parent_context(child, contexter)
             new_node = AST_Negation(referenced_vars=node.referenced_vars, child=new_child)
-            contexter.exit_context()
+            # contexter.exit_context()
             return new_node
 
         case AST_Quantifier():

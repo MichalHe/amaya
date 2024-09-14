@@ -61,6 +61,9 @@ class OptimizationsConfig:
     do_gcd_divide: bool = True
     """ Divide atoms by the GCD of their coefficients. """
 
+    rewrite_by_overapprox_relation_rhs: bool = False
+    """ Compute overapproximation of relation's RHS and check whether the relation is always True/False. """
+
     rewrite_congruences_with_unbound_terms: bool = False
     """ Rewrite congruences a.x + b.y ~ k into a.x + gcd(b).y' ~ k """
 

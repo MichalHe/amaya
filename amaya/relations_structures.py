@@ -338,6 +338,9 @@ class Value_Interval:
             self.try_strengthen_lower(implied_val)
             self.try_strengthen_upper(implied_val)
 
+    def copy(self) -> Value_Interval:
+        return Value_Interval(self.lower_limit, self.upper_limit)
+
 
 @dataclass
 class FunctionSymbol:

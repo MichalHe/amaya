@@ -165,7 +165,8 @@ opt_to_config_field = {
     'linearize': 'linearize_congruences',
     'purge-twice': 'do_interval_reasonining_twice',
     'opt-bottom-exists': 'optimize_bottom_quantifiers',
-    'flatten-connectives': 'flatten_connectives'
+    'flatten-connectives': 'flatten_connectives',
+    'overapprox-rhs': 'rewrite_by_overapprox_relation_rhs'
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
 
@@ -200,7 +201,9 @@ argparser.add_argument('-O',
                              '> reorder-conjunctions:\n'
                              '      Reorder conjunctions to derive conflict more quickly.\n'
                              '> flatten-connectives:\n'
-                             '      Convert sequences of conjunctions (disjunctions) into one N-ary node. .\n'
+                             '      Convert sequences of conjunctions (disjunctions) into one N-ary node.\n'
+                             '> overapprox-rhs:\n'
+                             '      overapproximate relation RHS and check whether they are always True/False.\n'
                              '> all:\n'
                              '      Enable all above optimizations'))
 
