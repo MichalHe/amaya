@@ -9,16 +9,16 @@ RUN git checkout v1.5.0
 RUN sed -i 's/-Werror//g' CMakeLists.txt
 WORKDIR build
 RUN cmake ..
-RUN make -j2
+RUN make -j`nproc`
 RUN make install
 
 WORKDIR /
 RUN git clone https://github.com/MichalHe/amaya-mtbdd.git amaya-mtbdd
 WORKDIR amaya-mtbdd
-RUN make -j2 shared-lib
+RUN make -j`nproc` shared-lib
 
 WORKDIR /
-RUN git clone https://github.com/MichalHe/amaya.git amaya
+COPY . /amaya
 WORKDIR amaya
 RUN cp /amaya-mtbdd/build/amaya-mtbdd.so /amaya/amaya/
 RUN pip3 install -r requirements.txt --break-system-packages
