@@ -1160,10 +1160,11 @@ def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_V
             _new_rich_children = (_prune_conjunctions_false_due_to_parent_context(child, contexter) for child in children if not is_bound(child))
             new_rich_children = tuple((child for child in _new_rich_children if child != BoolLiteral(True)))
 
-            if any(child == BoolLiteral(False) for child in new_rich_children):
-                return BoolLiteral(False)
 
             contexter.exit_context()
+
+            if any(child == BoolLiteral(False) for child in new_rich_children):
+                return BoolLiteral(False)
 
             new_subtree = (*new_bounds, *new_rich_children)
             if len(new_subtree) == 0:
