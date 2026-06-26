@@ -279,7 +279,7 @@ struct Chunked_Array {
         }
 
         difference_type operator-(Iterator const& r) const {
-            return (current_elem.items - r.items) / arr->chunk_size;
+            return (current_elem.items - r.current_elem.items) / arr->chunk_size;
         }
 
         bool operator<(Iterator const& r)  const {
@@ -303,7 +303,7 @@ struct Chunked_Array {
         }
 
         bool operator==(const Iterator &r) const {
-            return current_elem.items == r.items;
+            return current_elem.items == r.current_elem.items;
         }
     };
 
