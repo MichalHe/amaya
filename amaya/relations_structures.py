@@ -466,7 +466,7 @@ def pprint_formula(ast: ASTp_Node, indent: int = 0):
             print(f'{indent_str}NOT')
             pprint_formula(ast.child,  indent=indent+1)
         case AST_Quantifier():
-            _var_list = [f'x{var.id}' for var in ast.bound_vars]
+            _var_list = [f'{var}' for var in ast.bound_vars]
             var_list = ','.join(_var_list)
             print(f'{indent_str}exists ({var_list})')
             pprint_formula(ast.child,  indent=indent+1)
