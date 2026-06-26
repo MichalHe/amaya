@@ -6,3 +6,4 @@ benchmarks/**
 **/results/**
 scripts/**
 amaya/*.so
+mtbdd-backend/build/*
