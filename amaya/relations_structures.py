@@ -158,6 +158,16 @@ class Relation(object):
     def specifies_a_single_value_for_var(self) -> bool:
         return len(self.vars) == 1 and self.predicate_symbol == '='
 
+    def is_true_or_false(self) -> bool | None:
+        all_coefs_zero = self.are_all_coefficients_zero()
+        if not all_coefs_zero:
+            return None
+
+        if self.predicate_symbol == '=':
+            return self.rhs == 0
+
+        return self.rhs >= 0
+
     def is_unsat_eq(self) -> bool:
         if self.predicate_symbol != '=':
             return False
@@ -383,6 +393,35 @@ class AST_Connective(ASTp_Node_Base):
                               type=self.type,
                               children=new_children,
                               variable_bounds=self.variable_bounds)
+
+    def remove_idempotent_children(self) -> ASTp_Node:
+        if self.type == Connective_Type.EQUIV:
+            return self
+
+        idempotent_child = BoolLiteral(False) if self.type == Connective_Type.OR else BoolLiteral(True)
+
+        new_children = tuple(child for child in self.children if child != idempotent_child)
+
+        if not new_children:
+            return idempotent_child
+
+        if len(new_children) == 1:
+            return new_children[0]
+
+        return self.replace_children(new_children)
+
+    def simplify_on_anihilators(self) -> ASTp_Node:
+        if self.type == Connective_Type.EQUIV:
+            return self
+
+        anihilator = BoolLiteral(True) if self.type == Connective_Type.OR else BoolLiteral(False)
+
+        if any(child == anihilator for child in self.children):
+            return anihilator
+
+        return self
+
+
 
 ASTp_Leaf_Type_List = (Relation, Congruence, BoolLiteral, Var)
 ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral, Var]
