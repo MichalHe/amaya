@@ -98,6 +98,9 @@ class OptimizationsConfig:
     flatten_connectives: bool = False
     """ Convert sequances of (binary) ANDs/ORs into one N-ary node. """
 
+    reason_about_models: bool = False
+    """ Reason about models of a superformula to simplify subformulae. """
+
 
 @dataclass
 class PreprocessingConfig:

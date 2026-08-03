@@ -2,7 +2,7 @@ CXX=g++
 CC=gcc
 CXXLIBS=$(shell pkg-config --libs sylvan)
 
-COMMON_FLAGS := -O2 -g
+COMMON_FLAGS := -O2 -g -I /home/mhecko/.local/include
 SHARED_LIB_FLAGS=-shared -fPIC
 
 CXXFLAGS=$(COMMON_FLAGS) --std=c++20 $(SHARED_LIB_FLAGS)

@@ -166,7 +166,8 @@ opt_to_config_field = {
     'purge-twice': 'do_interval_reasonining_twice',
     'opt-bottom-exists': 'optimize_bottom_quantifiers',
     'flatten-connectives': 'flatten_connectives',
-    'overapprox-rhs': 'rewrite_by_overapprox_relation_rhs'
+    'overapprox-rhs': 'rewrite_by_overapprox_relation_rhs',
+    'model-reasoning': 'reason_about_models'
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
 
@@ -204,6 +205,8 @@ argparser.add_argument('-O',
                              '      Convert sequences of conjunctions (disjunctions) into one N-ary node.\n'
                              '> overapprox-rhs:\n'
                              '      overapproximate relation RHS and check whether they are always True/False.\n'
+                             '> model-reasoning:\n'
+                             '      reason about models of the superformula to simplify subformulae.\n'
                              '> all:\n'
                              '      Enable all above optimizations'))
 

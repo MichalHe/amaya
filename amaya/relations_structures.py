@@ -182,6 +182,14 @@ class Relation(object):
 
         return Relation(vars=self.vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol='<=')
 
+    def multiply_by_num(self, multiplier: int) -> Relation:
+        new_relation = Relation(
+            vars=list(self.vars),
+            coefs=[multiplier * coef for coef in self.coefs],
+            rhs=multiplier * self.rhs,
+            predicate_symbol=self.predicate_symbol
+        )
+        return new_relation
 
 @dataclass
 class Congruence:
@@ -410,7 +418,7 @@ class AST_Connective(ASTp_Node_Base):
 
         return self.replace_children(new_children)
 
-    def simplify_on_anihilators(self) -> ASTp_Node:
+    def simplify_on_anihilators(self) -> AST_Connective | BoolLiteral:
         if self.type == Connective_Type.EQUIV:
             return self
 

@@ -31,6 +31,7 @@ from amaya.config import (
     SolutionDomain,
 )
 from amaya.mtbdd_automatons import MTBDD_NFA
+from amaya.preprocessing.theory_reasoning import Asserted_Model_Properties, Variable_Use_Info, remove_atoms_satisfied_by_unconstrained_vars, scan_variable_use, simplify_formula_using_model_properties
 import amaya.presburger.constructions.naturals as relations_to_dfa
 import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
@@ -58,7 +59,6 @@ from amaya.relations_structures import (
     convert_ast_into_astp,
     pprint_formula,
 )
-from amaya.sat import construct_bdd_with_models_of_bool_formula
 from amaya.tokenize import tokenize
 from amaya.stats import (
     ParsingOperation,
@@ -204,6 +204,16 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
     # Do an extra pass as quantifier elimination might have introduced new constraints to prune the tree with
     if solver_config.optimizations.do_interval_analysis and solver_config.optimizations.do_interval_reasonining_twice:
         astp = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(astp)
+
+    if solver_config.optimizations.reason_about_models:
+        model_properties = Asserted_Model_Properties()
+        astp = simplify_formula_using_model_properties(astp, model_properties)
+
+        var_uses = Variable_Use_Info()
+        scan_variable_use(astp, var_uses)
+        astp = remove_atoms_satisfied_by_unconstrained_vars(astp, var_uses, desired_polarity=True)
+        pprint_formula(astp)
+        sys.exit(0)
 
     return astp
 
