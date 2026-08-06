@@ -20,6 +20,7 @@ from amaya.config import (
 )
 from amaya.preprocessing.eval import VarInfo
 from amaya.relations_structures import (
+    ASTp_Node,
     Var,
 )
 from amaya.stats import (
@@ -33,7 +34,9 @@ from amaya.stats import (
 
 @dataclass
 class IntrospectionData:
-    automaton: NFA
+    result: NFA
+    operand1: NFA | None
+    operand2: NFA | None
     operation_id: int
     operation: ParsingOperation
 
@@ -72,19 +75,27 @@ class EvaluationContext:
             raise ValueError('Requesting the overall alphabet from the evaluation context when None has been set.')
         return self.alphabet
 
-    def stats_operation_starts(self, operation: ParsingOperation, input1: Optional[NFA], input2: Optional[NFA]):
+    def stats_operation_starts(self, operation: ParsingOperation, input1: Optional[NFA], input2: Optional[NFA], subformula: ASTp_Node | None = None):
         """Notify the context that an operation has started (statistics tracking)."""
         start = time.time_ns() if solver_config.track_operation_runtime else 0
 
         operand1_info = AutomatonInfo.from_automaton(input1)
         operand2_info = AutomatonInfo.from_automaton(input2)
-        startpoint = OperationStartEntry(op_type=operation, operand1=operand1_info, operand2=operand2_info, start_ns=start)
+        startpoint = OperationStartEntry(
+            op_type=operation,
+            operand1=operand1_info,
+            operand2=operand2_info,
+            subformula=subformula,
+            start_ns=start
+        )
 
         self.pending_operations_stack.append(startpoint)
 
-    def stats_operation_ends(self, output: NFA) -> int:
+    def stats_operation_ends(self, operand1: NFA | None, operand2: NFA | None, output: NFA) -> int:
         """
         Notify the context that an operation ended an a automaton has been produced.
+
+        The details of what kind of operation was performed are track on an internal stack.
 
         Returns:
             ID of the finished operation.
@@ -98,9 +109,14 @@ class EvaluationContext:
         output.operation_id = operation_id
         self.operations_performed += 1
 
-        if self.introspect_handle:
-            introspect_data = IntrospectionData(automaton=output, operation_id=operation_id, operation=op_start.op_type)
-            self.introspect_handle(introspect_data)
+        introspect_data = IntrospectionData(
+            result=output,
+            operand1=operand1,
+            operand2=operand2,
+            operation_id=operation_id,
+            operation=op_start.op_type
+        )
+        self.introspect_handle(introspect_data)
 
         runtime = (time.time_ns() - op_start.start_ns) if solver_config.track_operation_runtime else 0
         output_info = AutomatonInfo.from_automaton(output)

@@ -32,8 +32,8 @@ from dataclasses import dataclass
 import time
 import statistics
 
-from amaya import automatons
 from amaya import logger, shard_logger
+from amaya import solver_core as core
 from amaya import parse
 from amaya.config import (
     BackendType,
@@ -167,7 +167,7 @@ opt_to_config_field = {
     'opt-bottom-exists': 'optimize_bottom_quantifiers',
     'flatten-connectives': 'flatten_connectives',
     'overapprox-rhs': 'rewrite_by_overapprox_relation_rhs',
-    'model-reasoning': 'reason_about_models'
+    # 'model-reasoning': 'reason_about_models'
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
 
@@ -472,6 +472,9 @@ def search_directory_nonrecursive(root_path: str, filter_file_ext='.smt2') -> Li
     )
 
 
+Row_Type = Tuple[int, str, Optional[int], Optional[int], Optional[int], Optional[int], int, int]
+
+
 def display_runtime_statistics(output_file: Optional[str], format: Optional[str], result: parse.Evaluation_Result, show_trace_stats: bool = False):
     output_file_handle = sys.stdout if not output_file else open(output_file, 'w')
     format = 'human' if not format else format
@@ -483,7 +486,6 @@ def display_runtime_statistics(output_file: Optional[str], format: Optional[str]
     else:
         solution_space_nfa_state_cnt_info = '?'
 
-    Row_Type = Tuple[int, str, Optional[int], Optional[int], Optional[int], Optional[int], int, int]
     def row_from_stat_point(op_idx: int, point: StatPoint) -> Row_Type:
         id = op_idx
         op_type = point.operation.value
@@ -539,11 +541,11 @@ def run_in_getsat_mode(args) -> bool:
 
     solver_config.report_highly_effective_minimizations = args.hint_research
 
-    def write_created_automaton_to_folder(introspection_info: parse.IntrospectionData):
+    def write_created_automaton_to_folder(introspection_info: core.IntrospectionData):
         filename = f'{introspection_info.operation_id}-{introspection_info.operation.value}.{args.output_format}'
         output_path = os.path.join(args.output_destination, filename)
         with open(output_path, 'w') as output_file:
-            vis_representation = introspection_info.automaton.get_visualization_representation().compress_symbols()
+            vis_representation = introspection_info.result.get_visualization_representation().compress_symbols()
             output_contents = ''
             if args.output_format == 'dot':
                 output_contents = str(vis_representation.into_graphviz(highlight_sccs=args.colorize_dot))
@@ -553,7 +555,7 @@ def run_in_getsat_mode(args) -> bool:
                 output_contents = vis_representation.into_mata()
             output_file.write(output_contents)
 
-    def discard_created_automaton(info: parse.IntrospectionData):
+    def discard_created_automaton(_: core.IntrospectionData):
         pass
 
     should_output_created_automata = bool(args.output_destination)
@@ -723,6 +725,9 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
     return not failed
 
 
+Writer_Type = Callable[[ASTp_Node, Iterable[Tuple[Var, VarInfo]], Dict[Var, VarInfo], Dict[str, str]], str]
+
+
 def convert_smt_to_other_format(args):
     if not os.path.exists(args.file_to_convert):
         sys.exit(f'The specified input file {args.file_to_convert} does not exists!')
@@ -733,7 +738,6 @@ def convert_smt_to_other_format(args):
     tokens = tokenize(smt2_text)
     ast: List[AST_Node] = parse.build_syntax_tree(tokens)
 
-    Writer_Type = Callable[[ASTp_Node, Iterable[Tuple[Var, VarInfo]], Dict[Var, VarInfo], Dict[str, str]], str]
     writer_table: Dict[str, Writer_Type] = {
         'lash': write_ast_in_lash,
         'smt2': write_ast_in_smt2,

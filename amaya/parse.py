@@ -392,13 +392,13 @@ def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> N
         from amaya import mtbdd_transitions
         ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_CONGRUENCE, None, None)
         nfa = mtbdd_transitions.MTBDDTransitionFn.construct_nfa_for_congruence(ordered_congruence, ctx.alphabet)
-        ctx.stats_operation_ends(nfa)
+        ctx.stats_operation_ends(operand1=None, operand2=None, output=nfa)
         return nfa
 
     constr = ctx.get_automaton_class_for_current_backend()
     ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_CONGRUENCE, None, None)
     nfa = relations_to_nfa.build_presburger_congruence_nfa(constr, ctx.alphabet, congruence)
-    ctx.stats_operation_ends(nfa)
+    ctx.stats_operation_ends(operand1=None, operand2=None, output=nfa)
 
     return nfa
 
@@ -421,11 +421,11 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
         if relation.predicate_symbol == '=':
             ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_EQ, None, None)
             nfa = mtbdd_transitions.MTBDDTransitionFn.construct_nfa_for_eq(relation, ctx.alphabet)
-            ctx.stats_operation_ends(nfa)
+            ctx.stats_operation_ends(operand1=None, operand2=None, output=nfa)
         else:
             ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_INEQ, None, None)
             nfa = mtbdd_transitions.MTBDDTransitionFn.construct_nfa_for_ineq(relation, ctx.alphabet)
-            ctx.stats_operation_ends(nfa)
+            ctx.stats_operation_ends(operand1=None, operand2=None, output=nfa)
         return nfa
 
     building_handlers: Dict[SolutionDomain, Dict[str, Tuple[ParsingOperation, Callable]]] = {
@@ -454,7 +454,7 @@ def build_automaton_from_presburger_relation_ast(relation: Relation, ctx: Evalua
 
     ctx.stats_operation_starts(operation, None, None)
     nfa = automaton_building_function(automaton_constr, ctx.alphabet, relation)
-    ctx.stats_operation_ends(nfa)
+    ctx.stats_operation_ends(operand1=None, operand2=None, output=nfa)
 
     emit_evaluation_progress_info(
         f' >> {operation.value}({relation}) (result size: {len(nfa.states)}, automaton_type={nfa.automaton_type})',
@@ -516,16 +516,19 @@ def minimize_automaton_if_configured(ast: ASTp_Node, nfa: NFA, ctx: EvaluationCo
     ctx.stats_operation_starts(ParsingOperation.MINIMIZE, nfa, None)
     if solver_config.minimization_method == MinimizationAlgorithms.BRZOZOWSKI:
         minimized_dfa = nfa.minimize_brzozowski()
+        dfa = nfa  # Technically, this is wrong. We just set it here so that we can emit introspection info. Brzozowski is not used, anyway.
     else:
-        if nfa.automaton_type != AutomatonType.DFA:
+        if nfa.automaton_type == AutomatonType.DFA:
+            dfa = nfa
+        else:
             ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, nfa, None)
-            nfa = nfa.determinize()
+            dfa = nfa.determinize()
             input_automaton_size = max(len(nfa.states), input_automaton_size)
-            ctx.stats_operation_ends(nfa)
-        minimized_dfa = nfa.minimize_hopcroft()
+            ctx.stats_operation_ends(operand1=nfa, operand2=None, output=dfa)
+        minimized_dfa = dfa.minimize_hopcroft()
 
-    logger.info('Minimization applied - inputs has %d states, result %d.', len(nfa.states), len(minimized_dfa.states))
-    ctx.stats_operation_ends(minimized_dfa)
+    logger.info('Minization applied - inputs has %d states, result %d.', len(nfa.states), len(minimized_dfa.states))
+    ctx.stats_operation_ends(operand1=dfa, operand2=None, output=minimized_dfa)
 
     if solver_config.report_highly_effective_minimizations:
         if len(minimized_dfa.states) / input_automaton_size < 0.2:
@@ -648,7 +651,7 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
             from amaya.mtbdd_transitions import MTBDDTransitionFn
             ctx.stats_operation_starts(ParsingOperation.LAZY_CONSTRUCT, None, None)
             atoms_aut = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, [], ctx.get_alphabet())
-            ctx.stats_operation_ends(atoms_aut)
+            ctx.stats_operation_ends(operand1=None, operand2=None, output=atoms_aut)
 
             node = AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=cast(Tuple[ASTp_Node,...], tuple(atoms)))
             atoms_aut = minimize_automaton_if_configured(node, atoms_aut, ctx)
@@ -676,10 +679,11 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
 
         # Apply the provided reduction function.
         ctx.stats_operation_starts(reduction_operation, reduction_result, next_operand_automaton)
-        reduction_result = reduction_fn(reduction_result, next_operand_automaton)
+        next_reduction_result = reduction_fn(reduction_result, next_operand_automaton)
 
         # reduction_result = reduction_result.determinize()
-        ctx.stats_operation_ends(reduction_result)
+        ctx.stats_operation_ends(operand1=reduction_result, operand2=next_operand_automaton, output=next_reduction_result)
+        reduction_result = next_reduction_result
 
         captured_subformula = AST_Connective(referenced_vars=tuple(), type=expr.type, children=remaining_subformulae[:operand_idx+1])
         reduction_result = minimize_automaton_if_configured(captured_subformula, reduction_result, ctx)
@@ -826,35 +830,21 @@ def evaluate_not_expr(not_expr: AST_Negation, ctx: EvaluationContext, _depth: in
         logger.debug('Complementing an automaton for a bool variable {variable_id}, returninig direct complement.')
         ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
         result = ctx.get_automaton_class_for_current_backend().for_bool_variable(ctx.get_alphabet(), variable_id, not variable_value)
-        ctx.stats_operation_ends(result)
+        ctx.stats_operation_ends(operand1=operand, operand2=None, output=result)
         return result
 
     if (operand.automaton_type & AutomatonType.NFA):
-        if False:
-            import os
-            output_folder = '/tmp/ondra-nfas-mata/UltimateAutomizer'
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder)
-            if operand.check_nondeterminism():
-                assert solver_config.current_formula_path
-                formula_basename = os.path.basename(solver_config.current_formula_path)
-                formula_basename = formula_basename.rsplit('.', 1)[0]
-                formula_basename = f'{formula_basename}.{solver_config.export_counter}.mata'
-                output_filepath = os.path.join(output_folder, formula_basename)
-                solver_config.export_counter += 1
-                with open(output_filepath, 'w') as output_file:
-                    mata_text = operand.get_visualization_representation().into_mata()
-                    output_file.write(mata_text)
-
         ctx.stats_operation_starts(ParsingOperation.NFA_DETERMINIZE, operand, None)
-        operand = operand.determinize()
-        ctx.stats_operation_ends(operand)
+        result = operand.determinize()
+        ctx.stats_operation_ends(operand1=operand, operand2=None, output=result)
+        operand = result
         emit_evaluation_progress_info(f' >> determinize into DFA (result size: {len(operand.states)})', _depth)
 
     ctx.stats_operation_starts(ParsingOperation.NFA_COMPLEMENT, operand, None)
     assert operand.automaton_type & AutomatonType.DFA, f'{operand.automaton_type} {not_expr}'
-    operand = operand.complement()
-    ctx.stats_operation_ends(operand)
+    result = operand.complement()
+    ctx.stats_operation_ends(operand1=operand, operand2=None, output=result)
+    operand=result
 
     operand = minimize_automaton_if_configured(not_expr, operand, ctx)
 
@@ -888,7 +878,7 @@ def try_lazy_construct_conjunction(exists_node: AST_Quantifier, ctx: EvaluationC
 
     ctx.stats_operation_starts(ParsingOperation.LAZY_CONSTRUCT, None, None)
     nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(new_atoms, list(exists_node.bound_vars), ctx.get_alphabet())
-    ctx.stats_operation_ends(nfa)
+    ctx.stats_operation_ends(operand1=None, operand2=None, output=nfa)
 
     logger.info("Lazy construnction done, result has %d states", len(nfa.states))
     nfa = minimize_automaton_if_configured(exists_node, nfa, ctx)
@@ -922,8 +912,8 @@ def evaluate_exists_expr(exists_expr: AST_Quantifier, ctx: EvaluationContext, _d
 
         projection_result = nfa.do_projection(var, skip_pad_closure=skip_pad_closure)
         assert projection_result
+        ctx.stats_operation_ends(operand1=nfa, operand2=None, output=nfa)
         nfa = projection_result
-        ctx.stats_operation_ends(nfa)
         logger.debug(f'Variable {var} projected away.')
 
     nfa = minimize_automaton_if_configured(exists_expr, nfa, ctx)
