@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
 
+from amaya.relations_structures import ASTp_Node
+
 
 class ParsingOperation(Enum):
     BUILD_NFA_FROM_INEQ = 'build_nfa_from_ineq'
@@ -36,9 +38,16 @@ class AutomatonInfo:
 
 @dataclass
 class OperationStartEntry:
+    """
+    Marks a start of an opreration.
+
+    Note: We do not store entire NFAs here, because at places where we would actually want NFAs, they might not be available,
+          for example, when starting to evaluate a conjunction (there are no NFAs for subformulae)
+    """
     op_type: ParsingOperation
-    operand1: Optional[AutomatonInfo]
-    operand2: Optional[AutomatonInfo]
+    operand1: AutomatonInfo | None  # Might be None if we are, e.g., evaluating the very first atom in a conjunction.
+    operand2: AutomatonInfo | None
+    subformula: ASTp_Node | None
     start_ns: int
 
 

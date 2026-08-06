@@ -27,10 +27,8 @@ from amaya.config import (
 )
 from amaya.mtbdd_transitions import (
     MTBDDTransitionFn,
-    mtbdd_false
 )
 from amaya.relations_structures import Var
-from amaya.semantics_tracking import AH_Node
 from amaya.visualization import AutomatonVisRepresentation
 
 
