@@ -42,10 +42,11 @@ from amaya.config import (
     SolutionDomain,
 )
 from amaya.converters import generate_optimization_problem, write_ast_in_lash, write_ast_in_smt2
+from amaya.mtbdd_automatons import MTBDD_NFA
 from amaya.preprocessing import preprocess_ast
 from amaya.preprocessing.eval import NonlinearArithmeticError, VarInfo, convert_ast_into_evaluable_form
 from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, ASTp_Node, FunctionSymbol, Var, VariableType
-from amaya.stats import RunStats, StatPoint
+from amaya.stats import ParsingOperation, RunStats, StatPoint
 from amaya.tokenize import tokenize
 import amaya.utils as utils
 
@@ -572,7 +573,7 @@ def run_in_getsat_mode(args) -> bool:
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
 
         try:
-            result = parse.perform_whole_evaluation_on_source_text(input_text, handle_automaton_created_fn)
+            result = parse.perform_whole_evaluation_on_source_text(input_text, _inspect_performed_intersection)
         except NonlinearArithmeticError as err:
             logger.debug('Input formula is not a valid LIA formula. Reason: %s', err)
             print('unknown')
@@ -584,7 +585,7 @@ def run_in_getsat_mode(args) -> bool:
         computed_sat = 'sat' if result.model is not None else 'unsat'
         logger.info(f'The SAT value of the result automaton is {computed_sat}')
 
-        print(computed_sat)
+        # print(computed_sat)
         if args.should_print_model and result.model is not None:
             print('model:')
             model = cast(Dict[Var, int], result.model)
@@ -708,7 +709,6 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
 
     print(f'Failed: {failed}/{len(benchmark_files)}', file=sys.stderr)
     if failed:
-        failed_tests = [run_sample.path for run_sample in executed_benchmarks.values()]
         print(f'Failed tests:', file=sys.stderr)
         for run_sample in executed_benchmarks.values():
             if run_sample.failed:
@@ -723,6 +723,26 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
         print_benchmark_results_as_csv(executed_benchmarks, args)
 
     return not failed
+
+
+def _inspect_performed_intersection(op_data: core.IntrospectionData):
+    if op_data.operation != ParsingOperation.NFA_INTERSECT:
+        return
+
+    op1 = cast(MTBDD_NFA, op_data.operand1)
+    op2 = cast(MTBDD_NFA, op_data.operand2)
+    r = cast(MTBDD_NFA, op_data.result)
+
+    data = [
+        len(op1.states),
+        2**len(op1.used_variables),
+        len(op2.states),
+        2**len(op2.used_variables),
+        len(r.states),
+        2**len(r.used_variables),
+    ]
+
+    print(','.join(map(str, data)))
 
 
 Writer_Type = Callable[[ASTp_Node, Iterable[Tuple[Var, VarInfo]], Dict[Var, VarInfo], Dict[str, str]], str]
