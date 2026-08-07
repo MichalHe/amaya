@@ -725,6 +725,13 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
     return not failed
 
 
+def _determine_nfa_transition_cnt(nfa: MTBDD_NFA) -> int:
+    cnt = 0
+    for _ in nfa.transition_fn.iter([var.id for var in nfa.used_variables]):
+        cnt += 1
+    return cnt
+
+
 def _inspect_performed_intersection(op_data: core.IntrospectionData):
     if op_data.operation != ParsingOperation.NFA_INTERSECT:
         return
@@ -735,11 +742,11 @@ def _inspect_performed_intersection(op_data: core.IntrospectionData):
 
     data = [
         len(op1.states),
-        2**len(op1.used_variables),
+        _determine_nfa_transition_cnt(op1),
         len(op2.states),
-        2**len(op2.used_variables),
+        _determine_nfa_transition_cnt(op2),
         len(r.states),
-        2**len(r.used_variables),
+        _determine_nfa_transition_cnt(r),
     ]
 
     print(','.join(map(str, data)))

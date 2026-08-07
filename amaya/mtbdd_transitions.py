@@ -686,7 +686,7 @@ class MTBDDTransitionFn():
 
     def iter_compressed(self, variables: Optional[List[int]] = None):
         for origin in self.mtbdds:
-            yield from self.iter_single_state(origin)
+            yield from self.iter_single_state(origin, variables=variables)
 
     def iter(self, variables: Optional[List[int]] = None):
         '''Iterates over all transitions stored within this transition function.
@@ -696,7 +696,7 @@ class MTBDDTransitionFn():
             - Destination is a **single** destination state.
         '''
         for origin in self.mtbdds:
-            for compact_symbol in self.iter_single_state(origin):
+            for compact_symbol in self.iter_single_state(origin, variables=variables):
                 yield from MTBDDTransitionFn._iter_unpack_transition(compact_symbol)
 
     @staticmethod
