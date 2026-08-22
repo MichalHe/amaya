@@ -9,6 +9,7 @@ CXXFLAGS=$(COMMON_FLAGS) --std=c++20 $(SHARED_LIB_FLAGS)
 CFLAGS=$(COMMON_FLAGS) $(SHARED_LIB_FLAGS)
 
 .PHONY := clean
+.DEFAULT_GOAL := shared-lib
 
 lazy-tests: build/lazy-tests.o build/lazy.o build/base.o build/custom_leaf.o build/operations.o build/sylvan-extra.o build/pareto_set.o build/tfa_leaf.o build/rewrites.o build/bit_set.o build/bit_set_leaf.o build/algorithms.o
 	$(CXX) -o $@ $^ $(CXXLIBS)
