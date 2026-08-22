@@ -212,8 +212,8 @@ def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Va
         var_uses = Variable_Use_Info()
         scan_variable_use(astp, var_uses)
         astp = remove_atoms_satisfied_by_unconstrained_vars(astp, var_uses, desired_polarity=True)
-        pprint_formula(astp)
-        sys.exit(0)
+        # pprint_formula(astp)
+        # sys.exit(0)
 
     return astp
 

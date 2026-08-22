@@ -46,6 +46,8 @@ class Relation(object):
     rhs: int
     predicate_symbol: str
 
+    id: int = -1
+
     def are_all_coefficients_zero(self) -> bool:
         """Returns true if all relation variable coefficients are zero."""
         return all(coef == 0 for coef in self.coefs)

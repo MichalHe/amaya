@@ -226,9 +226,26 @@ class Variable_Use_Info:
     relation_uses: dict[Var, list[Relation]] = field(default_factory=lambda: defaultdict(list))
     bool_var_uses: dict[Var, Bool_Var_Uses] = field(default_factory=lambda: defaultdict(Bool_Var_Uses)) 
 
+    next_available_relation_id = 0
+
     def is_var_used_only_once(self, var: Var) -> bool:
         var_uses = self.relation_uses[var]
         return len(var_uses) <= 1
+
+    def delete_all_relatations_containing_to_a_var(self, var: Var):
+        """
+        Delete all stored relations that contain a var.
+        """
+        relation_ids_to_delete_from_other_vars = list(rel.id for rel in self.relation_uses[var])
+
+        assert all(_id != -1 for _id in relation_ids_to_delete_from_other_vars)
+
+        del self.relation_uses[var]
+
+        for var in self.relation_uses:
+            var_relations = self.relation_uses[var]
+            var_relations = [rel for rel in var_relations if rel.id not in relation_ids_to_delete_from_other_vars]
+            self.relation_uses[var] = var_relations
 
     def get_bool_var_desired_value(self, var: Var) -> bool | None:
         var_uses = self.bool_var_uses[var]
@@ -246,6 +263,13 @@ class Variable_Use_Info:
 
     def add_negative_bool_var_use(self, bool_var: Var):
         self.bool_var_uses[bool_var].negative += 1
+
+    def ensure_relation_id_is_set(self, relation: Relation):
+        if relation.id >= 0:
+            return
+
+        relation.id = self.next_available_relation_id
+        self.next_available_relation_id += 1
         
 
 def scan_variable_use(root_node: ASTp_Node, var_use: Variable_Use_Info):
@@ -258,7 +282,8 @@ def scan_variable_use(root_node: ASTp_Node, var_use: Variable_Use_Info):
         case BoolLiteral():
             pass
 
-        case Relation(): 
+        case Relation():
+            var_use.ensure_relation_id_is_set(root_node)
             for var in root_node.vars:
                 var_use.add_int_var_use(var, root_node)
 
@@ -293,7 +318,9 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
         case Relation():
             for var in root_node.vars:
                 if var_uses.is_var_used_only_once(var):
-                    return BoolLiteral(True) if desired_polarity else BoolLiteral(False)
+                    var_uses.delete_all_relatations_containing_to_a_var(var)
+                    result = BoolLiteral(True)  # This relation gives us no information about models
+                    return result
             return root_node
 
         case AST_Connective():
@@ -303,7 +330,7 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
             )
 
             result = AST_Connective(referenced_vars=(), type=root_node.type, children=new_children)
-            result.simplify_on_anihilators()
+            result = result.simplify_on_anihilators()
 
             if isinstance(result, BoolLiteral):
                 return result
@@ -325,7 +352,29 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
 
         case AST_Negation():
             new_polarity = not desired_polarity
+
+            # Perform look-ahead since we are using True to say that a relation
+            # gives no information about models (how it restricts the remaining
+            # variables). Negating True would give us False, which is not what
+            # we want -- we really want to say that anything partial assignment
+            # to the remaining variables can be completed to a model (which is
+            # definitely not False).
+            #
+            # Maybe we should introduce a new (temporary) node type for this kind
+            # of optimisation. For now, we rely on the fact that we always push negations
+            # maximally inwards.
+            if isinstance(root_node.child, Relation):
+                relation: Relation = root_node.child
+                for var in relation.vars:
+                    if var_uses.is_var_used_only_once(var):
+                        var_uses.delete_all_relatations_containing_to_a_var(var)
+                        result = BoolLiteral(True)
+                        return result
+
             new_child = remove_atoms_satisfied_by_unconstrained_vars(root_node.child, var_uses, new_polarity)
+
+            if isinstance(new_child, BoolLiteral):
+                return BoolLiteral(value=not new_child.value)
 
             return AST_Negation(referenced_vars=(), child=new_child)
 
