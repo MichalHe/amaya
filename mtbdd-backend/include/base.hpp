@@ -55,7 +55,6 @@ std::ostream& operator<<(std::ostream& output, const Transition& transition);
 // @Todo: Make this an ordinary struct
 class Transition_Destination_Set {
 public:
-    bool dirty = false;
     std::vector<State> destination_set;
 
     Transition_Destination_Set() {};

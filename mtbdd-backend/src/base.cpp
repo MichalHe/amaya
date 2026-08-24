@@ -49,12 +49,10 @@ void Transition_Destination_Set::insert_sorted(State state) {
 
 void Transition_Destination_Set::insert(State state) {
     this->destination_set.push_back(state);
-    this->dirty = true;
 }
 
 void Transition_Destination_Set::sort() {
     std::sort(this->destination_set.begin(), this->destination_set.end());
-    this->dirty = false;
 }
 
 bool Transition_Destination_Set::contains(State state) const {

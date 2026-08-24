@@ -108,32 +108,3 @@ void Set_Leaf::init_set_leaf(Leaf_Type_Id_Store* type_store) {
     sylvan::sylvan_mt_set_destroy(type_store->transition_set, destroy_set_leaf);
     sylvan::sylvan_mt_set_to_str(type_store->transition_set, set_leaf_to_str);
 }
-
-
-namespace Deterministic_Leaf {
-    sylvan::MTBDD create(s64 value) {
-        sylvan::MTBDD leaf = sylvan::mtbdd_makeleaf(mtbdd_leaf_type_singleton, (uint64_t) value);
-        return leaf;
-    }
-
-    void create_form_value(uint64_t* value_ptr) {
-        *value_ptr = *value_ptr; // NOP
-    }
-
-    void destroy() {}
-
-    int equals(uint64_t a_value, uint64_t b_value) {
-        return a_value == b_value;
-    }
-
-    uint64_t hash(const uint64_t value, const uint64_t seed) {
-        return value;
-    }
-    
-    char* into_str(int comp, uint64_t leaf_val, char *buf, size_t buflen) {
-        std::stringstream ss;
-        ss << leaf_val;
-        return write_str_into_buf_or_alloc_new(ss.str(), buf, buflen);
-    }
-
-}

@@ -59,15 +59,6 @@ namespace Set_Leaf {
 }
 
 
-namespace Deterministic_Leaf {
-    sylvan::MTBDD create(s64 value);
-    void create_from_value(uint64_t* value_ptr);
-    void destroy(uint64_t leaf_value);
-    int equals(uint64_t a_value, uint64_t b_value);
-    uint64_t hash(const uint64_t contents, const uint64_t seed);
-    char* into_str(int comp, uint64_t leaf_val, char *buf, size_t buflen);
-}
-
 namespace Bit_Set_Leaf {
     sylvan::MTBDD make_bit_set_leaf(Bit_Set::Bit_Set* bit_set);
     void create_from_value(u64* bit_set_to_copy);
