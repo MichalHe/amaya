@@ -42,6 +42,15 @@ struct Serialized_Quantified_Atom_Conjunction {
 Serialized_NFA* serialize_nfa(NFA& nfa);
 NFA deserialize_nfa(Serialized_NFA& nfa);
 
+// NFA-returning construction entry points, used directly by the Cython wrapper (mtbdd-backend/wrapper)
+// so that callers who already live in C++/Cython-land do not have to pay for a round trip through
+// Serialized_NFA. The `amaya_construct_*` functions below are thin ctypes-facing wrappers around these.
+NFA construct_nfa_from_congruence(Serialized_Atom* congruence, s64 init_val, sylvan::BDDSET vars, u64 var_count);
+NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, sylvan::BDDSET vars, u64 var_count);
+NFA construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, sylvan::BDDSET vars, u64 var_count);
+NFA construct_dfa_for_atom_conjunction(Serialized_Quantified_Atom_Conjunction* raw_formula);
+NFA perform_pad_closure_using_bit_sets(NFA& nfa);
+
 extern "C" {
 
     // Export constants (wrapped)

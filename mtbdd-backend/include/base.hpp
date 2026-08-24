@@ -96,14 +96,21 @@ struct NFA {
 
     NFA(const NFA& other) : vars(other.vars), var_count(other.var_count), states(other.states), final_states(other.final_states), initial_states(other.initial_states), transitions(other.transitions)  {
         sylvan::mtbdd_ref(vars);
+        for (auto& [state, mtbdd] : transitions) sylvan::mtbdd_ref(mtbdd);
     }
 
+    // Note: this is not a "real" move constructor (it does not steal `other`'s resources - `other` remains
+    // a fully valid, independent NFA afterwards). It exists only so that returning a NFA by value type-checks
+    // in contexts that require a move constructor to be present; the compiler elides the copy in all of the
+    // (NRVO/RVO) return-by-value paths actually used in this codebase.
     NFA(NFA&& other) : states(other.states), initial_states(other.initial_states), final_states(other.final_states), vars(other.vars), var_count(other.var_count), transitions(other.transitions) {
         sylvan::mtbdd_ref(vars);
+        for (auto& [state, mtbdd] : transitions) sylvan::mtbdd_ref(mtbdd);
     }
 
     NFA& operator=(const NFA& other) {
         sylvan::mtbdd_deref(this->vars);
+        for (auto& [state, mtbdd] : this->transitions) sylvan::mtbdd_deref(mtbdd);
 
         this->states         = other.states;
         this->initial_states = other.initial_states;
@@ -113,11 +120,13 @@ struct NFA {
         this->transitions    = other.transitions;
 
         sylvan::mtbdd_ref(this->vars);
+        for (auto& [state, mtbdd] : this->transitions) sylvan::mtbdd_ref(mtbdd);
         return *this;
     }
 
     ~NFA() {
         sylvan::mtbdd_deref(vars);
+        for (auto& [state, mtbdd] : transitions) sylvan::mtbdd_deref(mtbdd);
     }
 
     // @Cleanup: Factor out the sylvan global configuration into a context struct

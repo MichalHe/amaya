@@ -650,7 +650,7 @@ void amaya_sylvan_clear_cache() {
     sylvan_clear_cache();
 }
 
-Serialized_NFA* amaya_construct_dfa_for_atom_conjunction(Serialized_Quantified_Atom_Conjunction* raw_formula) {
+NFA construct_dfa_for_atom_conjunction(Serialized_Quantified_Atom_Conjunction* raw_formula) {
     Formula_Description formula_desc;
     formula_desc.var_count = raw_formula->var_cnt;
     for (u64 atom_i = 0; atom_i < raw_formula->atom_cnt; atom_i++) {
@@ -725,8 +725,12 @@ Serialized_NFA* amaya_construct_dfa_for_atom_conjunction(Serialized_Quantified_A
     Conjunction_State initial_state(initial_state_data);
     auto created_nfa = build_nfa_with_formula_entailement(stored_formula_ptr, initial_state, var_set, pool);
 
-    auto result = serialize_nfa(created_nfa);
-    return result;
+    return created_nfa;
+}
+
+Serialized_NFA* amaya_construct_dfa_for_atom_conjunction(Serialized_Quantified_Atom_Conjunction* raw_formula) {
+    NFA created_nfa = construct_dfa_for_atom_conjunction(raw_formula);
+    return serialize_nfa(created_nfa);
 }
 
 Serialized_NFA* amaya_minimize_hopcroft(Serialized_NFA* serialized_dfa) {
@@ -763,9 +767,13 @@ Serialized_NFA* amaya_perform_pad_closure(Serialized_NFA* serialized_nfa) {
     return output;
 }
 
+NFA perform_pad_closure_using_bit_sets(NFA& nfa) {
+    return do_pad_closure_using_bit_sets(&nfa, g_solver_context->bit_set_alloc);
+}
+
 Serialized_NFA* amaya_perform_pad_closure_using_bit_sets(Serialized_NFA* serialized_nfa) {
     NFA nfa = deserialize_nfa(*serialized_nfa);
-    NFA result = do_pad_closure_using_bit_sets(&nfa, g_solver_context->bit_set_alloc);
+    NFA result = perform_pad_closure_using_bit_sets(nfa);
     auto output = serialize_nfa(result);
     return output;
 }
@@ -789,7 +797,7 @@ struct std::hash<Congruence_State> {
     }
 };
 
-Serialized_NFA* construct_nfa_from_congruence(Serialized_Atom* congruence, s64 init_val, BDDSET vars, u64 var_count) {
+NFA construct_nfa_from_congruence(Serialized_Atom* congruence, s64 init_val, BDDSET vars, u64 var_count) {
     auto moduli = decompose_modulus(congruence->modulus);
     Congruence_State initial_state = {
         .modulus_odd = moduli.modulus_odd,
@@ -874,8 +882,7 @@ Serialized_NFA* construct_nfa_from_congruence(Serialized_Atom* congruence, s64 i
         }
     }
 
-    Serialized_NFA* serialized_result = serialize_nfa(constructed_nfa);
-    return serialized_result;
+    return constructed_nfa;
 }
 
 Serialized_NFA* amaya_construct_nfa_from_congruence(
@@ -886,12 +893,12 @@ Serialized_NFA* amaya_construct_nfa_from_congruence(
 {
     BDDSET var_set = sylvan::mtbdd_set_from_array(vars, var_cnt);
     sylvan::mtbdd_ref(var_set);
-    auto result = construct_nfa_from_congruence(congruence, init_val, var_set, var_cnt);
+    NFA result = construct_nfa_from_congruence(congruence, init_val, var_set, var_cnt);
     sylvan::mtbdd_deref(var_set);
-    return result;
+    return serialize_nfa(result);
 }
 
-Serialized_NFA* construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, BDDSET vars, u64 var_count) {
+NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, BDDSET vars, u64 var_count) {
     s64 final_state_handle = 0;
     s64 init_state_handle  = 1;
     s64 final_state = std::numeric_limits<s64>::max();
@@ -951,11 +958,10 @@ Serialized_NFA* construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, B
         }
     }
 
-    auto result_ptr = serialize_nfa(constructed_nfa);
-    return result_ptr;
+    return constructed_nfa;
 }
 
-Serialized_NFA* construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 var_count) {
+NFA construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 var_count) {
     s64 final_state_handle = 0;
     s64 init_state_handle  = 1;
     s64 final_state = std::numeric_limits<s64>::max();
@@ -1023,8 +1029,7 @@ Serialized_NFA* construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, BDDSE
         }
     }
 
-    auto result_ptr = serialize_nfa(constructed_nfa);
-    return result_ptr;
+    return constructed_nfa;
 }
 
 Serialized_NFA* amaya_construct_nfa_from_ineq(
@@ -1035,9 +1040,9 @@ Serialized_NFA* amaya_construct_nfa_from_ineq(
 {
     BDDSET var_set = sylvan::mtbdd_set_from_array(vars, var_cnt);
     sylvan::mtbdd_ref(var_set);
-    auto result = construct_nfa_from_ineq(ineq, init_val, var_set, var_cnt);
+    NFA result = construct_nfa_from_ineq(ineq, init_val, var_set, var_cnt);
     sylvan::mtbdd_deref(var_set);
-    return result;
+    return serialize_nfa(result);
 }
 
 Serialized_NFA* amaya_construct_nfa_from_eq(
@@ -1048,9 +1053,9 @@ Serialized_NFA* amaya_construct_nfa_from_eq(
 {
     BDDSET var_set = sylvan::mtbdd_set_from_array(vars, var_cnt);
     sylvan::mtbdd_ref(var_set);
-    auto result = construct_nfa_from_eq(eq, init_val, var_set, var_cnt);
+    NFA result = construct_nfa_from_eq(eq, init_val, var_set, var_cnt);
     sylvan::mtbdd_deref(var_set);
-    return result;
+    return serialize_nfa(result);
 }
 
 void amaya_enable_bit_sets() {

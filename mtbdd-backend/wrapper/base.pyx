@@ -14,7 +14,16 @@ ctypedef uint64_t MTBDD
 ctypedef uint64_t BDDSET
 ctypedef uint8_t u8
 ctypedef uint64_t u64
+ctypedef uint32_t u32
+ctypedef int64_t s64
 ctypedef uint32_t BDDVAR
+
+
+class Atom_Type:
+    """Mirrors the C++ `Presburger_Atom_Type` enum (include/lazy.hpp)."""
+    INEQ = 1
+    EQ = 2
+    CONGRUENCE = 3
 
 
 cdef extern from "<sstream>" namespace "std":
@@ -36,6 +45,28 @@ cdef extern from "sylvan.h" namespace "sylvan":
 cdef extern from "wrapper.hpp":
     void init_machinery()
     void shutdown_machinery()
+
+    cdef struct Serialized_Atom:
+        u64 type
+        s64* coefs
+        u64 coef_cnt
+        s64 modulus
+
+    cdef struct Serialized_Quantified_Atom_Conjunction:
+        Serialized_Atom* atoms
+        u64 atom_cnt
+        s64* initial_state
+        u64* vars
+        u64 var_cnt
+        u64* quantified_vars
+        u64 quantified_var_cnt
+
+    NFA c_construct_nfa_from_congruence "construct_nfa_from_congruence"(Serialized_Atom* congruence, s64 init_val, BDDSET vars, u64 var_count) except +
+    NFA c_construct_nfa_from_ineq "construct_nfa_from_ineq"(Serialized_Atom* ineq, s64 init_state, BDDSET vars, u64 var_count) except +
+    NFA c_construct_nfa_from_eq "construct_nfa_from_eq"(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 var_count) except +
+    NFA c_construct_dfa_for_atom_conjunction "construct_dfa_for_atom_conjunction"(Serialized_Quantified_Atom_Conjunction* raw_formula) except +
+    NFA c_perform_pad_closure_using_bit_sets "perform_pad_closure_using_bit_sets"(NFA& nfa) except +
+    void c_amaya_enable_bit_sets "amaya_enable_bit_sets"()
 
 
 cdef extern from "base.hpp":
@@ -224,6 +255,14 @@ cdef class PyNFA:
     def perform_pad_closure(self):
         self._c_nfa.perform_pad_closure()
 
+    def clone(self):
+        """Return an independent copy of this automaton (deep-copies the underlying NFA,
+        including proper ref-counting of every transition MTBDD)."""
+        cdef PyNFA other = PyNFA()
+        del other._c_nfa
+        other._c_nfa = new NFA(self._c_nfa[0])
+        return other
+
     # --- (de)serialization / debug -------------------------------------
 
     def write_into_mata_format(self):
@@ -263,3 +302,108 @@ def minimize_hopcroft(PyNFA nfa):
 
 def remove_nonfinishing_states(PyNFA nfa):
     c_remove_nonfinishing_states(nfa._c_nfa[0])
+
+
+def perform_pad_closure_using_bit_sets(PyNFA nfa):
+    result = PyNFA()
+    del result._c_nfa
+    result._c_nfa = new NFA(c_perform_pad_closure_using_bit_sets(nfa._c_nfa[0]))
+    return result
+
+
+def enable_bit_sets():
+    c_amaya_enable_bit_sets()
+
+
+def construct_nfa_from_ineq(coefs, s64 rhs, vars):
+    cdef vector[s64] c_coefs = coefs
+    cdef vector[BDDVAR] c_vars = vars
+    cdef Serialized_Atom atom
+    atom.type = Atom_Type.INEQ
+    atom.coefs = c_coefs.data()
+    atom.coef_cnt = c_coefs.size()
+    atom.modulus = 0
+
+    cdef BDDSET var_set = mtbdd_set_from_array(c_vars.data(), c_vars.size())
+    result = PyNFA()
+    del result._c_nfa
+    result._c_nfa = new NFA(c_construct_nfa_from_ineq(&atom, rhs, var_set, c_vars.size()))
+    return result
+
+
+def construct_nfa_from_eq(coefs, s64 rhs, vars):
+    cdef vector[s64] c_coefs = coefs
+    cdef vector[BDDVAR] c_vars = vars
+    cdef Serialized_Atom atom
+    atom.type = Atom_Type.EQ
+    atom.coefs = c_coefs.data()
+    atom.coef_cnt = c_coefs.size()
+    atom.modulus = 0
+
+    cdef BDDSET var_set = mtbdd_set_from_array(c_vars.data(), c_vars.size())
+    result = PyNFA()
+    del result._c_nfa
+    result._c_nfa = new NFA(c_construct_nfa_from_eq(&atom, rhs, var_set, c_vars.size()))
+    return result
+
+
+def construct_nfa_from_congruence(coefs, s64 modulus, s64 rhs, vars):
+    cdef vector[s64] c_coefs = coefs
+    cdef vector[BDDVAR] c_vars = vars
+    cdef Serialized_Atom atom
+    atom.type = Atom_Type.CONGRUENCE
+    atom.coefs = c_coefs.data()
+    atom.coef_cnt = c_coefs.size()
+    atom.modulus = modulus
+
+    cdef BDDSET var_set = mtbdd_set_from_array(c_vars.data(), c_vars.size())
+    result = PyNFA()
+    del result._c_nfa
+    result._c_nfa = new NFA(c_construct_nfa_from_congruence(&atom, rhs, var_set, c_vars.size()))
+    return result
+
+
+def construct_dfa_for_atom_conjunction(atoms, initial_state, vars, quantified_vars):
+    """
+    :param atoms: list of (atom_type: int (Atom_Type.*), coefs: list[int] of length len(vars), modulus: int)
+    :param initial_state: list[int], one entry per atom
+    :param vars: list[int] - the (solver-level) variable ids used by this conjunction, in track order
+    :param quantified_vars: list[int] - local track indices (into `vars`) that are existentially quantified
+    """
+    cdef u64 atom_cnt = len(atoms)
+    cdef u64 var_cnt = len(vars)
+
+    cdef vector[s64] all_coefs
+    all_coefs.resize(atom_cnt * var_cnt)
+
+    cdef vector[Serialized_Atom] c_atoms
+    c_atoms.resize(atom_cnt)
+
+    cdef u64 i, j
+    cdef s64 coef
+    for i in range(atom_cnt):
+        atom_type, coefs, modulus = atoms[i]
+        for j in range(var_cnt):
+            all_coefs[i * var_cnt + j] = coefs[j]
+        c_atoms[i].type = atom_type
+        c_atoms[i].coefs = all_coefs.data() + i * var_cnt
+        c_atoms[i].coef_cnt = var_cnt
+        c_atoms[i].modulus = modulus
+
+    cdef vector[s64] c_initial_state = initial_state
+    cdef vector[u64] c_vars = vars
+    cdef vector[u64] c_quantified_vars = quantified_vars
+
+    cdef Serialized_Quantified_Atom_Conjunction conjunction
+    conjunction.atoms = c_atoms.data()
+    conjunction.atom_cnt = atom_cnt
+    conjunction.initial_state = c_initial_state.data()
+    conjunction.vars = c_vars.data()
+    conjunction.var_cnt = var_cnt
+    conjunction.quantified_vars = c_quantified_vars.data()
+    conjunction.quantified_var_cnt = c_quantified_vars.size()
+
+    result = PyNFA()
+    del result._c_nfa
+    result._c_nfa = new NFA(c_construct_dfa_for_atom_conjunction(&conjunction))
+    return result

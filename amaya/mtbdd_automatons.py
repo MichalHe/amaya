@@ -150,9 +150,7 @@ class MTBDD_NFA(NFA):
         if len(result.states) > len(self.states):  # Was a new final state added?
             self.states = result.states
             self.final_states = result.final_states
-
-            # Swap transition function so that the currently held mtbdds will be GC'd with `result`
-            self.transition_fn.mtbdds, result.transition_fn.mtbdds = result.transition_fn.mtbdds, self.transition_fn.mtbdds
+            self.transition_fn = result.transition_fn
 
 
     def determinize(self) -> MTBDD_NFA:
