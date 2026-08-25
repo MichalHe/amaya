@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 import copy
 from typing import (
     Any,
+    Callable,
     Dict,
-    Tuple,
+    cast,
 )
 
 from amaya.relations_structures import (
@@ -22,7 +24,7 @@ def freeze_ast_node(ast_node: Raw_AST) -> Frozen_AST:
     return ret  # type: ignore
 
 
-def unfreeze_ast_node(ast_node: Raw_AST) -> AST_With_Placeholders:
+def unfreeze_ast_node(ast_node: Raw_AST) -> Raw_AST:
     if isinstance(ast_node, (str, int)):
         return ast_node
 
@@ -30,11 +32,47 @@ def unfreeze_ast_node(ast_node: Raw_AST) -> AST_With_Placeholders:
     return ret  # type: ignore
 
 
+
 @dataclass
-class ConditionTable:
+class ITE_Node_Info:
+    _id: int
+
+    var_id: int
+    var_name: str  # Just some string baked from var_id, e.g., ite_var_{id}
+
+    condition_id: int
+    positive_branch: Raw_AST
+    negative_branch: Raw_AST
+
+
+@dataclass
+class Variable_Manager():
+    next_available_id: int = 0
+    allocated_var_names: list[str] = field(default_factory=list)
+
+
+    def allocate_var(self) -> int:
+        _id = self.next_available_id
+        self.next_available_id += 1
+
+        var_name = make_ite_var(_id)  # @Temporary: We should get rid of variables being strings sooner than this
+        self.allocated_var_names.append(var_name)
+        
+        return _id
+
+
+@dataclass
+class ITE_Table:
     """Table of all ite control conditions seen in an AST."""
+    variable_manager: Variable_Manager
+
     value: int = 0
     conditions: Dict[Any, int] = field(default_factory=dict)
+
+    conditions_to_nodes: Dict[int, list[int]] = field(default_factory=lambda: defaultdict(list))
+    """ Maps condition_id to a list of nodes which have the same condtion. """
+    next_ite_id: int = 0
+    node_table: dict[int, ITE_Node_Info] = field(default_factory=dict)
 
     def fetch_and_add(self) -> int:
         ret = self.value
@@ -50,14 +88,26 @@ class ConditionTable:
         self.conditions[condition] = cond_id
         return cond_id
 
+    def store_node(self, condition_id: int, positive_branch: Raw_AST, negative_branch: Raw_AST) -> int:
+        _id = self.next_ite_id
+        self.next_ite_id += 1
 
-AST_With_Placeholders = Raw_AST
+        var_id = self.variable_manager.allocate_var()
+        var_name = make_ite_var(var_id)
+        
+        node_info = ITE_Node_Info(_id, var_id, var_name, condition_id, positive_branch=positive_branch, negative_branch=negative_branch)
+        self.node_table[_id] = node_info
 
-PlaceholderInfo = Tuple[int, AST_With_Placeholders]
-"""Information about what a placeholder (int) stands for (node)"""
+        self.conditions_to_nodes[condition_id].append(_id)
+
+        return _id
 
 
-def mark_and_collect_ite_conditions(ast: Raw_AST, cond_table: ConditionTable) -> AST_With_Placeholders:
+def make_ite_var(ite_id: int) -> str:
+    return f'ite_{ite_id}'
+
+
+def mark_and_collect_ite_conditions(ast: Raw_AST, cond_table: ITE_Table, inside_expression: bool = False) -> Raw_AST:
     """Return a list of ite conditions found in the given tree. All conditions founnd in the tree are assigned a unique integer. """
     if not isinstance(ast, list):
         return ast
@@ -75,16 +125,17 @@ def mark_and_collect_ite_conditions(ast: Raw_AST, cond_table: ConditionTable) ->
 
         # Nothing prevents if-then-else from having another if-then-else inside the condition
         marked_cond_ast = mark_and_collect_ite_conditions(condition, cond_table)
+        marked_cond_ast = cast(Raw_AST, marked_cond_ast)  # We do not descend into ITE_Node_Infos (only 'unhandled' node)
+
         condition_id = cond_table.store_condition(marked_cond_ast)
 
         # @Todo: We need to descend into the condition as if-then-else expressions can be nested, e.g., (ite (ite B B1 B2) P N)
         #        should be equivalend to (ite (or (and B B1) (and (not B) B2)) -> (ite (or (and B B1) (and (not B) B2)) P N) which yields
         #        (or (and (or (and B B1) (and (not B) B2)) P) (and (nor (or (and B B1) (and (not B) B2))) N)
 
-        ast[1] = condition_id  # type: ignore
-
-        placeholdered_ast = ['ite', condition_id, pos_branch_marked_ast, neg_branch_marked_ast]
-        return placeholdered_ast
+        node_id = cond_table.store_node(condition_id=condition_id, positive_branch=pos_branch_marked_ast, negative_branch=neg_branch_marked_ast)
+        replacement_var = make_ite_var(node_id)
+        return replacement_var
 
     elif node_type == '+':  # The sum can be N-ary
         marked_subtrees = [mark_and_collect_ite_conditions(subtree, cond_table) for subtree in ast[1:]]
@@ -124,79 +175,77 @@ def mark_and_collect_ite_conditions(ast: Raw_AST, cond_table: ConditionTable) ->
             return [node_type, marked_ast]
 
     assert False, f'Unknown node type: {node_type}'
-    return ([], [])
 
 
-def copy_ast(ast: AST_With_Placeholders) -> AST_With_Placeholders:
+def copy_ast(ast: Raw_AST) -> Raw_AST:
     return copy.deepcopy(ast)
 
 
-def instantiate_condition_handles(ast: AST_With_Placeholders, conditions: Dict[int, AST_With_Placeholders], valuation_bits: int) -> Raw_AST:
-    if not isinstance(ast, list):
-        return ast  # type: ignore
-    node_type: str = ast[0]  # type: ignore
-    if node_type == 'ite':
-        cond_id: int = ast[1]  # type: ignore
-        is_cond_positive = (valuation_bits >> cond_id) % 2
-        cond = copy_ast(conditions[cond_id])
 
-        cond_body = ast[2] if is_cond_positive else ast[3]
-        instantiated_body = instantiate_condition_handles(cond_body, conditions, valuation_bits)
+def make_constraints_for_ite_var_values(node_ids: list[int], ite_table: ITE_Table, get_node_body: Callable[[int], Raw_AST]) -> Raw_AST:
+    constraining_relations = [['=',ite_table.node_table[node_id].var_name, get_node_body(node_id)] for node_id in node_ids]
 
-        return instantiated_body
-    else:
-        inst_subtrees = (instantiate_condition_handles(subtree, conditions, valuation_bits) for subtree in ast[1:])
-        return [node_type, *inst_subtrees]
+    if len(constraining_relations) == 1:
+        return constraining_relations[0]
+    
+    constraints: Raw_AST = cast(Raw_AST, ['and'] + constraining_relations)
+    return constraints
 
 
-def rewrite_ite_expressions(ast: Raw_AST) -> Raw_AST:
+def rewrite_ite_expressions(ast: Raw_AST, variable_manager: Variable_Manager) -> Raw_AST:
     if not isinstance(ast, list):
         return ast
 
-    node_type: str = ast[0]  # type: ignore
+    node_type: str = cast(str, ast[0])
 
+    # We are not inside a relation, so we do not need complicated mechanism to obtain well-structured trees
     if node_type == 'ite':
         assert len(ast) == 4, 'The ite expr should have the form of (ite C P N)'
-        condition, positive_branch, negative_branch = ast[1:]
 
-        rewritten_positive_branch = rewrite_ite_expressions(positive_branch)  # type: ignore
-        rewritten_negative_branch = rewrite_ite_expressions(negative_branch)  # type: ignore
+        condition = ast[1]
+        positive_branch, negative_branch = ast[2:]
+
+        rewritten_positive_branch = rewrite_ite_expressions(positive_branch, variable_manager)
+        rewritten_negative_branch = rewrite_ite_expressions(negative_branch, variable_manager)
 
         positive_branch_expr = ['and', condition, rewritten_positive_branch]
         negative_branch_expr = ['and', ['not', copy_ast(condition)], rewritten_negative_branch]
         ret = ['or', positive_branch_expr, negative_branch_expr]
         return ret
+
     elif node_type in ('exists', 'forall'):
-        return [node_type, ast[1], rewrite_ite_expressions(ast[2])]
+        return [node_type, ast[1], rewrite_ite_expressions(ast[2], variable_manager)]
+
     elif node_type in ('<=', '<', '=', '>', '>='):
         # @Note: We have to handle if-then-else expressions also inside atoms as such are not forbidden and they appear in formulae.
         #        Moreover, we cannot just expand them right away, as we would create a malformed AST with Boolean connectives inside
         #        an atom.
-        cond_table = ConditionTable()
+        cond_table = ITE_Table(variable_manager)
         marked_ast = mark_and_collect_ite_conditions(ast, cond_table)
+
         if not cond_table.conditions:
             return ast  # There are no if-then-else expressions in the relation
 
-        # We must be careful with nested conditions as when we instantiate a condition we have to also instantiate
-        # the conditions inside it.
-        def put_condition_with_positiveness(cond_with_id: Tuple[int, AST_With_Placeholders], conditions: Dict[int, AST_With_Placeholders], valuation_bits: int) -> Raw_AST:
-            cond_id, cond = cond_with_id
-            is_positive = (valuation_bits >> cond_id) % 2
-            cond = copy_ast(cond)
-            cond = instantiate_condition_handles(cond, conditions, valuation_bits)
-            return cond if is_positive else ['not', cond]
+        # We have a marked AST in which all of the ITE conditions were replaced with fresh (int) variables. We need to now constrain the values
+        # of these variables according to ITEs
+        ite_constraints = []
+        for condition_ast_frozen, condition_id in cond_table.conditions.items():
+            ite_node_ids = cond_table.conditions_to_nodes[condition_id]
 
-        handle_to_condition_map = dict((cond_id, unfreeze_ast_node(cond_ast)) for cond_ast, cond_id in cond_table.conditions.items())
-        cond_count = len(cond_table.conditions)
+            condition_ast = unfreeze_ast_node(condition_ast_frozen)
 
-        result_ast: Raw_AST = ['or']
+            # conditionN => pariable = Positive branch; rewrite as
+            # (NOT condition) OR variable = positive branch
+            condition_holds_constraints = make_constraints_for_ite_var_values(ite_node_ids, cond_table, lambda node_id: cond_table.node_table[node_id].positive_branch)
+            condition_holds_branch = ['or', ['not', condition_ast], condition_holds_constraints]
 
-        # Generate boolean combinations of all conditions and rewrite the relation accordingly
-        for cond_valuation_vector in range(2**cond_count):
-            branch_guard = [put_condition_with_positiveness(cond_with_handle, handle_to_condition_map, cond_valuation_vector) for cond_with_handle in handle_to_condition_map.items()]
-            branch_body = instantiate_condition_handles(marked_ast, handle_to_condition_map, cond_valuation_vector)
-            result_ast.append(['and', *branch_guard, branch_body])
-        return result_ast
+            condition_does_not_hold_constraints = make_constraints_for_ite_var_values(ite_node_ids, cond_table, lambda node_id: cond_table.node_table[node_id].negative_branch)
+            condition_does_not_hold_branch = ['or', condition_ast, condition_does_not_hold_constraints ]
 
+            ite_constraints.append(condition_holds_branch)
+            ite_constraints.append(condition_does_not_hold_branch)
+
+        return ['and', marked_ast, *ite_constraints]
+        
     else:
-        return [node_type, *(rewrite_ite_expressions(subtree) for subtree in ast[1:])]
+        return [node_type, *(rewrite_ite_expressions(subtree, variable_manager) for subtree in ast[1:])]

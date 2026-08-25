@@ -1,9 +1,4 @@
-from dataclasses import dataclass
-import collections
-import itertools
 from typing import (
-    Any,
-    Callable,
     Dict,
     Generator,
     Iterable,
@@ -21,28 +16,22 @@ from amaya.relations_structures import (
     AST_NaryNode,
     AST_Negation,
     AST_Node,
-    AST_Node_Names,
     AST_Quantifier,
     ASTp_Node,
-    Congruence,
     Connective_Type,
     FunctionSymbol,
     NodeEncounteredHandler,
     NodeEncounteredHandlerStatus,
     Raw_AST,
-    Relation,
     Var,
-    make_and_node,
-    make_exists_node,
-    make_not_node,
-    make_or_node,
+    VariableType,
 )
 from amaya.preprocessing.ite_preprocessing import (
+    Variable_Manager,
     rewrite_ite_expressions,
 )
 from amaya import (
     logger,
-    utils,
 )
 from amaya.config import (
     SolverConfig,
@@ -318,7 +307,13 @@ def preprocess_ast(ast: Raw_AST,
     logger.debug('[Preprocessing] AST after let macro expansion: %s', ast)
 
     logger.info('[Preprocessing] Rewriting if-then-else expressions.')
-    ast = rewrite_ite_expressions(ast)
+    variable_manager = Variable_Manager()
+    ast = rewrite_ite_expressions(ast, variable_manager)
+
+    declared_vars: list[FunctionSymbol] = list(global_fn_symbols) + [
+        FunctionSymbol(name=var_name, arity=0, args=[], return_type=VariableType.INT)
+        for var_name in variable_manager.allocated_var_names
+    ]
 
     third_pass_transformations = {
         'forall': replace_forall_with_exists_handler,
@@ -348,7 +343,7 @@ def preprocess_ast(ast: Raw_AST,
     logger.info('Removed %d negation pairs.', third_pass_context["negation_pairs_removed_cnt"])
 
     logger.info('Condensing atomic relation ASTs into AST leaves.')
-    evaluable_ast, var_table = convert_ast_into_evaluable_form(ast, global_fn_symbols)
+    evaluable_ast, var_table = convert_ast_into_evaluable_form(ast, declared_vars)
 
     if solver_config.preprocessing.assign_new_variable_names:
         var_table = assign_fresh_names_to_all_vars(var_table)
