@@ -5,21 +5,13 @@ import copy
 from typing import (
     Any,
     Dict,
-    List,
-    Set,
-    Union,
     Tuple,
 )
 
 from amaya.relations_structures import (
-    AST_NaryNode,
-    AST_Node,
     Frozen_AST,
-    NodeEncounteredHandlerStatus,
     Raw_AST,
-    Relation,
 )
-from amaya.utils import number_to_bit_tuple
 
 
 def freeze_ast_node(ast_node: Raw_AST) -> Frozen_AST:
