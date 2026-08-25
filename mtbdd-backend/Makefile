@@ -9,7 +9,7 @@ CXXFLAGS=$(COMMON_FLAGS) --std=c++20 $(SHARED_LIB_FLAGS)
 CFLAGS=$(COMMON_FLAGS) $(SHARED_LIB_FLAGS)
 
 .PHONY := clean
-.DEFAULT_GOAL := shared-lib
+.DEFAULT_GOAL := lazy-tests
 
 lazy-tests: build/lazy-tests.o build/lazy.o build/base.o build/custom_leaf.o build/operations.o build/sylvan-extra.o build/pareto_set.o build/tfa_leaf.o build/rewrites.o build/bit_set.o build/bit_set_leaf.o build/algorithms.o
 	$(CXX) -o $@ $^ $(CXXLIBS)
@@ -17,14 +17,12 @@ lazy-tests: build/lazy-tests.o build/lazy.o build/base.o build/custom_leaf.o bui
 build/lazy-tests.o: src/lazy-tests.cpp
 	$(CXX) -c $(CXXFLAGS) -I ./external -o $@ src/lazy-tests.cpp
 
-shared-lib: build build/amaya-mtbdd.so
-
 build/lazy.o: src/lazy.cpp include/lazy.hpp include/base.hpp include/pareto_set.h include/tfa_leaf.h include/vectors.h include/rewrites.h
 	$(CXX) -c $(CXXFLAGS) src/lazy.cpp -o build/lazy.o
 
-build/amaya-mtbdd.so: build/wrapper.o build/operations.o build/custom_leaf.o build/base.o build/lazy.o build/sylvan-extra.o build/tfa_leaf.o build/pareto_set.o build/rewrites.o build/bit_set_leaf.o build/algorithms.o
-	$(CXX) $(CXXFLAGS) $(SHARED_LIB_FLAGS) -o $@ $^ $(CXXLIBS)
-
+# Note: wrapper.cpp/wrapper.hpp are consumed directly by the Cython extension
+# (mtbdd-backend/wrapper/compile_wrapper.py), not linked into a standalone shared
+# library anymore - the ctypes-based amaya-mtbdd.so has been retired.
 build/wrapper.o: src/wrapper.cpp include/wrapper.hpp include/operations.hpp include/base.hpp include/custom_leaf.hpp
 	$(CXX) -c $(CXXFLAGS) src/wrapper.cpp -o build/wrapper.o
 
