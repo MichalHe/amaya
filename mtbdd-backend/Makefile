@@ -8,8 +8,19 @@ SHARED_LIB_FLAGS=-shared -fPIC
 CXXFLAGS=$(COMMON_FLAGS) --std=c++20 $(SHARED_LIB_FLAGS)
 CFLAGS=$(COMMON_FLAGS) $(SHARED_LIB_FLAGS)
 
-.PHONY := clean
-.DEFAULT_GOAL := lazy-tests
+# Python interpreter used to build the Cython extension (must have Cython installed).
+PYTHON ?= /home/mhecko/school/sw/amaya/venv/bin/python
+AMAYA_PKG_DIR := ../amaya
+
+.PHONY := clean libamaya
+.DEFAULT_GOAL := libamaya
+
+# Builds the Cython extension (mtbdd-backend/wrapper/base.pyx, linked together with the backend's
+# own C++ sources) and drops the resulting shared object into the amaya/ package directory, where
+# `from amaya import libamaya` expects to find it.
+libamaya:
+	cd wrapper && $(PYTHON) compile_wrapper.py build_ext --inplace
+	cp wrapper/libamaya*.so $(AMAYA_PKG_DIR)/
 
 lazy-tests: build/lazy-tests.o build/lazy.o build/base.o build/custom_leaf.o build/operations.o build/sylvan-extra.o build/pareto_set.o build/tfa_leaf.o build/rewrites.o build/bit_set.o build/bit_set_leaf.o build/algorithms.o
 	$(CXX) -o $@ $^ $(CXXLIBS)
