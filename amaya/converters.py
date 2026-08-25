@@ -6,9 +6,7 @@ import sys
 from amaya.preprocessing.eval import VarInfo
 from amaya.relations_structures import(
     AST_Connective,
-    AST_NaryNode,
     AST_Negation,
-    AST_Node,
     AST_Quantifier,
     ASTp_Node,
     BoolLiteral,
@@ -17,7 +15,6 @@ from amaya.relations_structures import(
     Relation,
     Var,
     VariableType,
-    ast_get_binding_list
 )
 
 

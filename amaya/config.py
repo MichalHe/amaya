@@ -104,7 +104,6 @@ class OptimizationsConfig:
 
 @dataclass
 class PreprocessingConfig:
-    perform_prenexing: bool = False
     perform_antiprenexing: bool = False
     disambiguate_variables: bool = True
     assign_new_variable_names: bool = False

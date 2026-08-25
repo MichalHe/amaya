@@ -10,18 +10,36 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 from amaya import logger
 from amaya.config import solver_config
 from amaya.relations_structures import (
-    AST_Atom,
-    AST_NaryNode,
-    AST_Node,
-    AST_Node_Names,
+    AST_Connective,
+    AST_Negation,
+    AST_Quantifier,
+    ASTp_Node,
     BoolLiteral,
     Congruence,
+    Connective_Type,
     FunctionSymbol,
     Raw_AST,
     Relation,
     Var,
     VariableType,
 )
+
+
+def _referenced_vars_of(ast: ASTp_Node) -> Tuple[Var, ...]:
+    if isinstance(ast, Var):
+        return (ast,)
+    if isinstance(ast, (Relation, Congruence)):
+        return tuple(ast.vars)
+    if isinstance(ast, BoolLiteral):
+        return tuple()
+    return ast.referenced_vars
+
+
+def _referenced_vars_of_children(children: Iterable[ASTp_Node]) -> Tuple[Var, ...]:
+    refd_vars: Set[Var] = set()
+    for child in children:
+        refd_vars.update(_referenced_vars_of(child))
+    return tuple(sorted(refd_vars))
 
 
 class NonlinTermType(Enum):
@@ -430,7 +448,7 @@ def is_bool_literal(node):
 @dataclass
 class RewriteInstructions:
     placeholder_replacements: Dict[Var, Tuple[LinTerm, ...]] = field(default_factory=dict)
-    new_formulae: List[AST_Node] = field(default_factory=list)
+    new_formulae: List[ASTp_Node] = field(default_factory=list)
     vars_to_quantify: Set[Var] = field(default_factory=set)
 
 
@@ -549,19 +567,26 @@ def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var
     # we have N = f(E) = E + total_offset, but due to congruence there is a nonlinear jump - find the spot where to create disjunction
     zero_point = node.body.nonlin_constant - total_offset
 
-    def fn_case(low: int, high: int, fn_dependence: Relation):
+    def make_and(children: Tuple[ASTp_Node, ...]) -> ASTp_Node:
+        return AST_Connective(referenced_vars=_referenced_vars_of_children(children), type=Connective_Type.AND, children=children)
+
+    def make_or(left: ASTp_Node, right: ASTp_Node) -> ASTp_Node:
+        children = (left, right)
+        return AST_Connective(referenced_vars=_referenced_vars_of_children(children), type=Connective_Type.OR, children=children)
+
+    def fn_case(low: int, high: int, fn_dependence: Relation) -> ASTp_Node:
         if low == high:
             eq = Relation(vars=[emitted_var], coefs=[1], rhs=low, predicate_symbol='=')
-            return ['and', eq, fn_dependence]
+            return make_and((eq, fn_dependence))
         low_bound  = Relation(vars=[emitted_var], coefs=[-1], rhs=-low, predicate_symbol='<=')
         high_bound = Relation(vars=[emitted_var], coefs=[1], rhs=high, predicate_symbol='<=')
-        return ['and', low_bound, high_bound, fn_dependence]
+        return make_and((low_bound, high_bound, fn_dependence))
 
-    def fn_case_for_fixed_value(val: int):
+    def fn_case_for_fixed_value(val: int) -> ASTp_Node:
         emitted_var_val = Relation(vars=[emitted_var], coefs=[1], rhs=val, predicate_symbol='=')
         new_var_rhs     = (val+total_offset) % node.body.nonlin_constant
         new_var_val     = Relation(vars=[new_var], coefs=[1], rhs=new_var_rhs, predicate_symbol='=')
-        return ['and', emitted_var_val, new_var_val]
+        return make_and((emitted_var_val, new_var_val))
 
     modulus = node.body.nonlin_constant
     fn_terms = sorted([(emitted_var, 1), (new_var, -1)], key=lambda it: it[0])
@@ -574,18 +599,18 @@ def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var
     right_interval = (zero_point, modulus-1)
 
     if left_interval[0] == left_interval[1]:
-        result_fn = ['or', fn_case_for_fixed_value(left_interval[0]), fn_case(right_interval[0], right_interval[1], shifted_fn)]
+        result_fn = make_or(fn_case_for_fixed_value(left_interval[0]), fn_case(right_interval[0], right_interval[1], shifted_fn))
     elif right_interval[0] == right_interval[1]:
-        result_fn = ['or', fn_case(left_interval[0], left_interval[1], fn), fn_case_for_fixed_value(right_interval[0])]
+        result_fn = make_or(fn_case(left_interval[0], left_interval[1], fn), fn_case_for_fixed_value(right_interval[0]))
     else:
-        result_fn = ['or', fn_case(0, zero_point-1, fn), fn_case(zero_point, modulus-1, shifted_fn)]
+        result_fn = make_or(fn_case(0, zero_point-1, fn), fn_case(zero_point, modulus-1, shifted_fn))
 
     rewrite_instructions.new_formulae.append(result_fn)
     rewrite_instructions.vars_to_quantify.add(new_var)
 
     lower_bound = Relation(vars=[new_var], coefs=[-1], rhs=0, predicate_symbol='<=')
     upper_bound = Relation(vars=[new_var], coefs=[1], rhs=modulus-1, predicate_symbol='<=')
-    rewrite_instructions.new_formulae.append(['and', lower_bound, upper_bound])
+    rewrite_instructions.new_formulae.append(make_and((lower_bound, upper_bound)))
 
 
 def determine_how_to_rewrite_dropped_terms(dropped_nodes: Iterable[NonlinTermNode], scoper: Scoper) -> RewriteInstructions:
@@ -683,33 +708,10 @@ def apply_substitution(vars: Iterable[Var], coefs: Iterable[int], substitution: 
     return (list(new_vars), list(new_coefs))
 
 
-def _replace_placeholders_by_equivalent_lin_terms(ast: AST_Node, rewrite_instructions: RewriteInstructions) -> AST_Node:
-    if isinstance(ast, Relation):
-        new_vars, new_coefs = apply_substitution(ast.vars, ast.coefs, rewrite_instructions.placeholder_replacements)
-        return Relation(vars=new_vars, coefs=new_coefs, rhs=ast.rhs, predicate_symbol=ast.predicate_symbol)
-
-    if isinstance(ast, Congruence):
-        new_vars, new_coefs = apply_substitution(ast.vars, ast.coefs, rewrite_instructions.placeholder_replacements)
-        return Congruence(vars=new_vars, coefs=new_coefs, rhs=ast.rhs, modulus=ast.modulus)
-
-    if isinstance(ast, (str, BoolLiteral, Var)):
-        return ast
-
-    assert isinstance(ast, list)
-
-    node_type = ast[0]
-    if node_type == AST_Node_Names.EXISTS.value:
-        child = _replace_placeholders_by_equivalent_lin_terms(ast[2], rewrite_instructions)
-        return [AST_Node_Names.EXISTS.value, ast[1], child]
-
-    children = (_replace_placeholders_by_equivalent_lin_terms(child, rewrite_instructions) for child in ast[1:])
-    return [node_type, *children]
-
-
 def _convert_ast_into_evaluable_form(ast: Raw_AST,
                                      dep_graph: NonlinTermGraph,
                                      bool_vars: Set[str],
-                                     scoper: Scoper) -> Tuple[AST_Node, ASTInfo]:
+                                     scoper: Scoper) -> Tuple[ASTp_Node, ASTInfo]:
     if isinstance(ast, str):
         match ast:
             case 'true':
@@ -728,23 +730,23 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
     assert isinstance(node_type, str)
 
     if node_type in {'and', 'or'}:
-        new_node: AST_Node = [node_type]
+        connective_type = Connective_Type.AND if node_type == 'and' else Connective_Type.OR
+        children: List[ASTp_Node] = []
         tree_info = ASTInfo()
         for child in ast[1:]:
             new_child, child_tree_info = _convert_ast_into_evaluable_form(child, dep_graph, bool_vars, scoper)
-            new_node.append(new_child)
+            children.append(new_child)
             tree_info.used_vars.update(child_tree_info.used_vars)
-        return new_node, tree_info
+        node = AST_Connective(referenced_vars=_referenced_vars_of_children(children), type=connective_type, children=tuple(children))
+        return node, tree_info
 
     if node_type == 'not':
         child, child_ast_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars, scoper)
         if isinstance(child, BoolLiteral):
             return BoolLiteral(value=not child.value), child_ast_info
-        return ['not', child], child_ast_info
+        return AST_Negation(referenced_vars=_referenced_vars_of(child), child=child), child_ast_info
 
     if node_type == 'exists':
-        new_node: AST_Node = [node_type]
-
         raw_quantifier_list: List[Tuple[str, str]] = ast[1]  # type: ignore
         quantifier_list = scoper.enter_quantifier(raw_quantifier_list)
 
@@ -756,8 +758,6 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
             # Remove the quantifier all together
             scoper.unwind_quantifier()
             return child, child_ast_info
-
-        new_node.append(bound_vars)  # type: ignore
 
         # Child's AST Info will represent this node - remove all currently bound variables
         child_ast_info.used_vars = child_ast_info.used_vars.difference(bound_vars)
@@ -773,17 +773,19 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
         new_atoms = rewrite_instructions.new_formulae
 
         if dropped_nodes:
-            if isinstance(child, list) and child[0] == 'and':
-                child += new_atoms
+            if isinstance(child, AST_Connective) and child.type == Connective_Type.AND:
+                child = child.replace_children(child.children + tuple(new_atoms))
             else:
-                child = ['and', child] + new_atoms
+                and_children = (child, *new_atoms)
+                child = AST_Connective(referenced_vars=_referenced_vars_of_children(and_children), type=Connective_Type.AND, children=and_children)
 
-            new_node[1] += rewrite_instructions.vars_to_quantify  # type: ignore
-        new_node.append(child)
+            bound_vars = bound_vars + list(rewrite_instructions.vars_to_quantify)
+
+        node = AST_Quantifier(referenced_vars=_referenced_vars_of(child), bound_vars=tuple(bound_vars), child=child)
 
         scoper.exit_quantifier()
 
-        return new_node, child_ast_info
+        return node, child_ast_info
 
     if node_type == '=':
         connectives = {'and', 'or', 'not', 'exists', 'forall'}
@@ -797,7 +799,9 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
             lhs, lhs_info = _convert_ast_into_evaluable_form(ast[1], dep_graph, bool_vars, scoper)
             rhs, rhs_info = _convert_ast_into_evaluable_form(ast[2], dep_graph, bool_vars, scoper)
             lhs_info.used_vars.update(rhs_info.used_vars)
-            return ['=', lhs, rhs], lhs_info
+            children = (lhs, rhs)
+            node = AST_Connective(referenced_vars=_referenced_vars_of_children(children), type=Connective_Type.EQUIV, children=children)
+            return node, lhs_info
         lia_symbols = {'+', '-', '*', 'mod', 'div'}
         if is_any_node_of_type(lia_symbols, ast[1], ast[2]):
             return convert_relation_to_evaluable_form(ast, dep_graph, scoper)
@@ -811,7 +815,7 @@ def _convert_ast_into_evaluable_form(ast: Raw_AST,
     raise ValueError(f'Cannot traverse trough {node_type=} while converting AST into evaluable form. {ast=}')
 
 
-def convert_ast_into_evaluable_form(ast: Raw_AST, global_symbols: Iterable[FunctionSymbol]) -> Tuple[AST_Node, Dict[Var, VarInfo]]:
+def convert_ast_into_evaluable_form(ast: Raw_AST, global_symbols: Iterable[FunctionSymbol]) -> Tuple[ASTp_Node, Dict[Var, VarInfo]]:
     dep_graph = NonlinTermGraph()
 
     bool_vars = {sym.name for sym in global_symbols if sym.return_type == VariableType.BOOL}
@@ -838,5 +842,7 @@ def convert_ast_into_evaluable_form(ast: Raw_AST, global_symbols: Iterable[Funct
     rewrite_instructions = determine_how_to_rewrite_dropped_terms(dropped_nodes, scoper)
     new_atoms = rewrite_instructions.new_formulae
 
-    new_ast = ['exists', rewrite_instructions.vars_to_quantify, ['and', new_ast, *rewrite_instructions.new_formulae]]  # type: ignore
+    and_children = (new_ast, *new_atoms)
+    and_node = AST_Connective(referenced_vars=_referenced_vars_of_children(and_children), type=Connective_Type.AND, children=and_children)
+    new_ast = AST_Quantifier(referenced_vars=_referenced_vars_of(and_node), bound_vars=tuple(rewrite_instructions.vars_to_quantify), child=and_node)
     return new_ast, scoper.var_table

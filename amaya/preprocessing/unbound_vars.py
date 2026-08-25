@@ -23,12 +23,8 @@ from typing import (
 from amaya.preprocessing.eval import LinTerm, Scoper, VarInfo, split_lin_terms_into_vars_and_coefs
 
 from amaya.relations_structures import (
-    AST_Atom,
     AST_Connective,
-    AST_NaryNode,
     AST_Negation,
-    AST_Node,
-    AST_Node_Names,
     AST_Quantifier,
     ASTp_Node,
     BoolLiteral,
@@ -39,11 +35,7 @@ from amaya.relations_structures import (
     Var,
     VariableType,
     Value_Interval,
-    ast_get_binding_list,
-    ast_get_node_type,
     get_hard_bound_semantics,
-    make_and_node,
-    make_exists_node,
     pprint_formula,
     unzip_lin_terms,
 )
@@ -69,7 +61,7 @@ class AST_Quantifier_Node_With_Bounds_Info:
 
 @dataclass
 class AST_Leaf_Node_With_Bounds_Info:
-    contents: Union[Relation, str, Congruence, Var, BoolLiteral]
+    contents: Union[Relation, Congruence, Var, BoolLiteral]
     var_values: Dict[Var, List[Value_Interval]] = field(default_factory=lambda: defaultdict(lambda: [Value_Interval(None, None)]))
 
 
@@ -233,7 +225,7 @@ def make_value_interval_negation(intervals: List[Value_Interval]) -> List[Value_
     return result
 
 
-def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Bounds_Info:
+def perform_variable_bounds_analysis_on_ast(ast: ASTp_Node) -> AST_Node_With_Bounds_Info:
     if isinstance(ast, Relation):
         relation: Relation = ast
         bounds_info = AST_Leaf_Node_With_Bounds_Info(contents=relation)
@@ -258,42 +250,38 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
                 bounds_info.var_values[var] = [Value_Interval(None, None)]
         return bounds_info
 
-    elif isinstance(ast, (str, Congruence, BoolLiteral, Var)):
+    elif isinstance(ast, (Congruence, BoolLiteral, Var)):
         return AST_Leaf_Node_With_Bounds_Info(contents=ast)
 
-    node_type = ast[0]
+    elif isinstance(ast, AST_Quantifier):
+        subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast.child)
 
-    assert isinstance(node_type, str)
-
-    if node_type in ('exists', 'forall'):
-        subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[2])
-
-        quantified_vars: Set[Var] = set(ast[1])  # type: ignore
+        quantified_vars: Set[Var] = set(ast.bound_vars)
         var_values: Dict[Var, List[Value_Interval]] = {}
         for var, var_value_intervals in subtree_bounds_info.var_values.items():
             new_var_value_intervals = [Value_Interval(None, None)] if var in quantified_vars else var_value_intervals
             var_values[var] = new_var_value_intervals
 
-        quantifier_node_with_bounds_info = AST_Quantifier_Node_With_Bounds_Info(node_type=node_type,
+        quantifier_node_with_bounds_info = AST_Quantifier_Node_With_Bounds_Info(node_type='exists',
                                                                                 child=subtree_bounds_info,
-                                                                                bindings=ast[1],  # type: ignore
+                                                                                bindings=list(ast.bound_vars),
                                                                                 var_values=var_values)
         return quantifier_node_with_bounds_info
 
-    elif node_type == 'and':
-        subtrees_with_bounds = [perform_variable_bounds_analysis_on_ast(subtree) for subtree in ast[1:]]
+    elif isinstance(ast, AST_Connective) and ast.type == Connective_Type.AND:
+        subtrees_with_bounds = [perform_variable_bounds_analysis_on_ast(subtree) for subtree in ast.children]
 
-        overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type, children=subtrees_with_bounds)
+        overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type='and', children=subtrees_with_bounds)
         for subtree_with_bounds in subtrees_with_bounds:
             for var, var_value_intervals in subtree_with_bounds.var_values.items():
                 overall_bounds_info.var_values[var] = make_value_interval_intersection(overall_bounds_info.var_values[var],
                                                                                        var_value_intervals)
         return overall_bounds_info
 
-    elif node_type == 'or':
-        subtrees_with_bounds = [perform_variable_bounds_analysis_on_ast(subtree) for subtree in ast[1:]]
+    elif isinstance(ast, AST_Connective) and ast.type == Connective_Type.OR:
+        subtrees_with_bounds = [perform_variable_bounds_analysis_on_ast(subtree) for subtree in ast.children]
 
-        overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type=node_type, children=subtrees_with_bounds)
+        overall_bounds_info = AST_Internal_Node_With_Bounds_Info(node_type='or', children=subtrees_with_bounds)
         overall_bounds_info.var_values = defaultdict(list)
         seen_vars: Dict[Var, int] = defaultdict(int)
 
@@ -309,8 +297,8 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
 
         return overall_bounds_info
 
-    elif node_type == 'not':
-        subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast[1])
+    elif isinstance(ast, AST_Negation):
+        subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast.child)
         negated_var_values: Dict[Var, List[Value_Interval]] = {}
 
         if len(subtree_bounds_info.var_values) == 1:
@@ -319,16 +307,16 @@ def perform_variable_bounds_analysis_on_ast(ast: AST_Node) -> AST_Node_With_Boun
         else:
             negated_var_values = {var: [Value_Interval(None, None)] for var in subtree_bounds_info.var_values}
 
-        return AST_Internal_Node_With_Bounds_Info(node_type=node_type,
+        return AST_Internal_Node_With_Bounds_Info(node_type='not',
                                                   children=[subtree_bounds_info],
                                                   var_values=negated_var_values)
 
-    elif node_type == '=':  # Bool equivalence
-        subtree_bounds_info = [perform_variable_bounds_analysis_on_ast(child) for child in ast[1:]]
-        return AST_Internal_Node_With_Bounds_Info(node_type=node_type,
+    elif isinstance(ast, AST_Connective) and ast.type == Connective_Type.EQUIV:
+        subtree_bounds_info = [perform_variable_bounds_analysis_on_ast(child) for child in ast.children]
+        return AST_Internal_Node_With_Bounds_Info(node_type='=',
                                                   children=subtree_bounds_info)
 
-    raise ValueError(f'[Variable bounds analysis] Cannot descend into AST - unknown node: {node_type=}, {ast=}')
+    raise ValueError(f'[Variable bounds analysis] Cannot descend into AST - unknown node: {ast=}')
 
 
 def filter_vars_with_no_info_from_node(vars_with_bounds_rewritten: Set[Var], node: AST_Internal_Node_With_Bounds_Info) -> Set[Var]:
@@ -347,9 +335,9 @@ def filter_vars_with_no_info_from_node(vars_with_bounds_rewritten: Set[Var], nod
     return vars_with_bounds_rewritten.difference(vars_with_no_info_about_their_value)
 
 
-def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[Var]) -> Optional[AST_Node]:
+def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_bounds: Set[Var]) -> Optional[ASTp_Node]:
     if isinstance(ast, AST_Leaf_Node_With_Bounds_Info):
-        if isinstance(ast.contents, (Var, Congruence, str, BoolLiteral)):
+        if isinstance(ast.contents, (Var, Congruence, BoolLiteral)):
             return ast.contents
 
         relation: Relation = ast.contents
@@ -372,37 +360,50 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
                         continue
                     vars_to_rewrite_bounds_at_current_level.add(var)
 
-            new_ast_node: AST_NaryNode = ['and']
+            new_children: List[ASTp_Node] = []
             for var_to_rewrite_bounds in vars_to_rewrite_bounds_at_current_level:
                 var_bounds = ast.var_values[var_to_rewrite_bounds][0]
                 are_bounds_equal = var_bounds.lower_limit == var_bounds.upper_limit
                 if var_bounds.lower_limit is not None:
                     if are_bounds_equal:  # Both of the bounds have value (!= None)
                         eq = Relation(vars=[var_to_rewrite_bounds], coefs=[1], predicate_symbol='=', rhs=var_bounds.lower_limit)
-                        new_ast_node.append(eq)
+                        new_children.append(eq)
                         continue
 
                     lower_bound = Relation.new_lin_relation(variable_names=[var_to_rewrite_bounds], variable_coefficients=[-1],
                                                             predicate_symbol='<=', absolute_part=-var_bounds.lower_limit)
-                    new_ast_node.append(lower_bound)
+                    new_children.append(lower_bound)
                 if var_bounds.upper_limit is not None:
                     upper_bound = Relation.new_lin_relation(variable_names=[var_to_rewrite_bounds], variable_coefficients=[1],
                                                             predicate_symbol='<=', absolute_part=var_bounds.upper_limit)
-                    new_ast_node.append(upper_bound)
+                    new_children.append(upper_bound)
 
             vars_to_not_rewrite_at_lower_levels = vars_to_rewrite_bounds_at_current_level.union(vars_with_rewritten_bounds)
             for subtree in ast.children:
                 simplified_subtree = _simplify_bounded_atoms(subtree, vars_to_not_rewrite_at_lower_levels)
                 if simplified_subtree:
-                    new_ast_node.append(simplified_subtree)
-            return new_ast_node if len(new_ast_node) > 1 else None
+                    new_children.append(simplified_subtree)
 
-        else:
+            if not new_children:
+                return None
+            children = tuple(new_children)
+            return AST_Connective(referenced_vars=_referenced_vars_of_children(children), type=Connective_Type.AND, children=children)
+
+        elif ast.node_type == 'not':
+            vars_to_not_rewrite = filter_vars_with_no_info_from_node(vars_with_rewritten_bounds, ast)
+            simplified_child = _simplify_bounded_atoms(ast.children[0], vars_to_not_rewrite)
+            if not simplified_child:
+                return None
+            return AST_Negation(referenced_vars=_referenced_vars_of(simplified_child), child=simplified_child)
+
+        else:  # 'or' or '=' (Boolean equivalence)
+            connective_type = Connective_Type.OR if ast.node_type == 'or' else Connective_Type.EQUIV
             vars_to_not_rewrite = filter_vars_with_no_info_from_node(vars_with_rewritten_bounds, ast)
             rewritten_subtrees = (_simplify_bounded_atoms(subtree, vars_to_not_rewrite) for subtree in ast.children)
-            preserved_subtrees = (tree for tree in rewritten_subtrees if tree)
-            new_ast_node = [ast.node_type, *preserved_subtrees]
-            return new_ast_node if len(new_ast_node) > 1 else None
+            preserved_subtrees = tuple(tree for tree in rewritten_subtrees if tree)
+            if not preserved_subtrees:
+                return None
+            return AST_Connective(referenced_vars=_referenced_vars_of_children(preserved_subtrees), type=connective_type, children=preserved_subtrees)
 
     if isinstance(ast, AST_Quantifier_Node_With_Bounds_Info):
         rewritten_subtree = _simplify_bounded_atoms(ast.child, vars_with_rewritten_bounds)
@@ -411,7 +412,7 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
                       ' More likely are doing something wrong.')
 
         assert rewritten_subtree, assert_msg
-        return [ast.node_type, ast.bindings, rewritten_subtree]  # type: ignore
+        return AST_Quantifier(referenced_vars=_referenced_vars_of(rewritten_subtree), bound_vars=tuple(ast.bindings), child=rewritten_subtree)
 
     raise ValueError(f'Don\'t know how to process the node {ast=} when simplifying variable bounds.')
 
@@ -435,114 +436,126 @@ def fmt_bound_analysis_tree_into_str(ast):
     return '\n'.join(_fmt_bound_analysis_tree_into_str(ast, 0))
 
 
-def simplify_bounded_atoms(ast: AST_Node) -> Optional[AST_Node]:
+def simplify_bounded_atoms(ast: ASTp_Node) -> Optional[ASTp_Node]:
     ast_with_bounds = perform_variable_bounds_analysis_on_ast(ast)
     simplified_tree = _simplify_bounded_atoms(ast_with_bounds, set())
     return simplified_tree
 
 
-def _simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
+def _simplify_unbounded_equations(ast: ASTp_Node) -> ASTp_Node:
     if is_atom(ast):
         return ast
 
-    assert isinstance(ast, list), ast
-    node_type = ast[0]
+    match ast:
+        case AST_Quantifier():
+            if isinstance(ast.child, Relation) and ast.child.predicate_symbol == '=':
+                bound_vars: Tuple[Var, ...] = ast.bound_vars
+                rel: Relation = ast.child
 
-    if node_type == 'exists':
-        if isinstance(ast[2], Relation) and ast[2].predicate_symbol == '=':
-            bound_vars: List[Var] = ast[1]  # type: ignore
-            rel: Relation = ast[2]
+                bound_var_coefs: List[int] = []
+                remaining_lin_terms: List[Tuple[Var, int]] = []
+                for var, coef in zip(rel.vars, rel.coefs):
+                    if var in bound_vars:
+                        bound_var_coefs.append(coef)
+                        continue
+                    remaining_lin_terms.append((var, coef))
+                remaining_lin_terms = sorted(remaining_lin_terms, key = lambda var_coef_pair: var_coef_pair[0])
 
-            bound_var_coefs: List[int] = []
-            remaining_lin_terms: List[Tuple[Var, int]] = []
-            for var, coef in zip(rel.vars, rel.coefs):
-                if var in bound_vars:
-                    bound_var_coefs.append(coef)
-                    continue
-                remaining_lin_terms.append((var, coef))
-            remaining_lin_terms = sorted(remaining_lin_terms, key = lambda var_coef_pair: var_coef_pair[0])
+                if not remaining_lin_terms:
+                    return BoolLiteral(value=True)
 
-            if not remaining_lin_terms:
-                return BoolLiteral(value=True)
+                vars, coefs = [], []
+                for var, coef in remaining_lin_terms:
+                    vars.append(var)
+                    coefs.append(coef)
 
-            vars, coefs = [], []
-            for var, coef in remaining_lin_terms:
-                vars.append(var)
-                coefs.append(coef)
+                if sum(coef > 0 for coef in coefs):
+                    coefs = [-1 * coef for coef in coefs]
 
-            if sum(coef > 0 for coef in coefs):
-                coefs = [-1 * coef for coef in coefs]
+                modulus = gcd(*bound_var_coefs)
+                rhs = rel.rhs % modulus
+                congruence = Congruence(vars=list(vars), coefs=list(coefs), rhs=rhs, modulus=modulus)
+                return congruence
+            return AST_Quantifier(referenced_vars=ast.referenced_vars, bound_vars=ast.bound_vars,
+                                  child=_simplify_unbounded_equations(ast.child))
 
-            modulus = gcd(*bound_var_coefs)
-            rhs = rel.rhs % modulus
-            congruence = Congruence(vars=list(vars), coefs=list(coefs), rhs=rhs, modulus=modulus)
-            return congruence
-        return [node_type, ast[1], _simplify_unbounded_equations(ast[2])]
-    else:
-        children = (_simplify_unbounded_equations(child) for child in ast[1:])
-        ret: AST_Node = [node_type, *children]
-        return ret
+        case AST_Negation():
+            return AST_Negation(referenced_vars=ast.referenced_vars, child=_simplify_unbounded_equations(ast.child))
+
+        case AST_Connective():
+            children = tuple(_simplify_unbounded_equations(child) for child in ast.children)
+            return ast.replace_children(children)
+
+    raise NotImplementedError(f'Unhandled node while simplifying unbounded equations: {ast=}')
 
 
-def simplify_unbounded_equations(ast: AST_Node) -> AST_Node:
+def simplify_unbounded_equations(ast: ASTp_Node) -> ASTp_Node:
     return _simplify_unbounded_equations(ast)
 
 
-def drop_negation_if_holding(ast: AST_Node, holding_negation: bool) -> AST_Node:
-    return [AST_Node_Names.NOT.value, ast] if holding_negation else ast
+def _referenced_vars_of(ast: ASTp_Node) -> Tuple[Var, ...]:
+    match ast:
+        case Var():
+            return (ast,)
+        case Relation() | Congruence():
+            return tuple(ast.vars)
+        case BoolLiteral():
+            return tuple()
+        case _:
+            return ast.referenced_vars
 
 
-def _push_negations_towards_atoms(ast: AST_Node, holding_negation: bool) -> AST_Node:
-    if isinstance(ast, (Var, str)):
-        return drop_negation_if_holding(ast, holding_negation)
+def drop_negation_if_holding(ast: ASTp_Node, holding_negation: bool) -> ASTp_Node:
+    if not holding_negation:
+        return ast
+    return AST_Negation(referenced_vars=_referenced_vars_of(ast), child=ast)
 
-    if isinstance(ast, Relation):
-        rel: Relation = ast
-        if rel.predicate_symbol == '=':
-            return drop_negation_if_holding(rel, holding_negation)
-        if not holding_negation:
-            return rel
-        assert rel.predicate_symbol == '<='
-        negated_coefs = [-coef for coef in rel.coefs]
-        rhs = -(rel.rhs+ 1)
-        return Relation(vars=rel.vars, coefs=negated_coefs, rhs=rhs, predicate_symbol='<=')
 
-    if isinstance(ast, Congruence):
-        return drop_negation_if_holding(ast, holding_negation)
+def _push_negations_towards_atoms(ast: ASTp_Node, holding_negation: bool) -> ASTp_Node:
+    match ast:
+        case Var():
+            return drop_negation_if_holding(ast, holding_negation)
 
-    if isinstance(ast, BoolLiteral):
-        return BoolLiteral(value = not ast.value) if holding_negation else ast
+        case Relation():
+            if ast.predicate_symbol == '=':
+                return drop_negation_if_holding(ast, holding_negation)
+            if not holding_negation:
+                return ast
+            assert ast.predicate_symbol == '<='
+            negated_coefs = [-coef for coef in ast.coefs]
+            rhs = -(ast.rhs + 1)
+            return Relation(vars=ast.vars, coefs=negated_coefs, rhs=rhs, predicate_symbol='<=')
 
-    assert isinstance(ast, list), ast
+        case Congruence():
+            return drop_negation_if_holding(ast, holding_negation)
 
-    node_type: str = ast[0]  # type: ignore
-    if node_type == AST_Node_Names.EXISTS.value:
-        if holding_negation:
-            child = _push_negations_towards_atoms(ast[2], False)
-            return ['not', [node_type, ast[1], child]]
-        else:  # Not holding negation
-            return [node_type, ast[1], _push_negations_towards_atoms(ast[2], holding_negation)]
+        case BoolLiteral():
+            return BoolLiteral(value=not ast.value) if holding_negation else ast
 
-    if node_type == AST_Node_Names.AND.value:
-        res_node_type = AST_Node_Names.OR.value if holding_negation else AST_Node_Names.AND.value
-        return [res_node_type, *(_push_negations_towards_atoms(child, holding_negation) for child in ast[1:])]
+        case AST_Quantifier():
+            if holding_negation:
+                child = _push_negations_towards_atoms(ast.child, False)
+                negated_quantifier = AST_Quantifier(referenced_vars=ast.referenced_vars, bound_vars=ast.bound_vars, child=child)
+                return AST_Negation(referenced_vars=ast.referenced_vars, child=negated_quantifier)
+            return AST_Quantifier(referenced_vars=ast.referenced_vars, bound_vars=ast.bound_vars,
+                                  child=_push_negations_towards_atoms(ast.child, holding_negation))
 
-    if node_type == AST_Node_Names.OR.value:
-        res_node_type = AST_Node_Names.AND.value if holding_negation else AST_Node_Names.OR.value
-        return [res_node_type, *(_push_negations_towards_atoms(child, holding_negation) for child in ast[1:])]
+        case AST_Connective() if ast.type in (Connective_Type.AND, Connective_Type.OR):
+            flipped_type = {Connective_Type.AND: Connective_Type.OR, Connective_Type.OR: Connective_Type.AND}
+            res_type = flipped_type[ast.type] if holding_negation else ast.type
+            children = tuple(_push_negations_towards_atoms(child, holding_negation) for child in ast.children)
+            return AST_Connective(referenced_vars=ast.referenced_vars, type=res_type, children=children)
 
-    if node_type == AST_Node_Names.NOT.value:
-        holding_negation = not holding_negation
-        return _push_negations_towards_atoms(ast[1], holding_negation=holding_negation)
+        case AST_Negation():
+            return _push_negations_towards_atoms(ast.child, not holding_negation)
 
-    if node_type == AST_Node_Names.BOOL_EQUIV.value:
-        return drop_negation_if_holding(ast, holding_negation)
+        case AST_Connective():  # Connective_Type.EQUIV
+            return drop_negation_if_holding(ast, holding_negation)
 
     raise ValueError(f'Unhandled node type while pushing negation towards atoms: {ast=}')
 
 
-
-def push_negations_towards_atoms(ast: AST_Node) -> AST_Node:
+def push_negations_towards_atoms(ast: ASTp_Node) -> ASTp_Node:
     """
     Push negations towards atom.
 
@@ -583,7 +596,14 @@ class Literal:
     id: int = field(hash=True)
 
 
-def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal_decoding_table: Dict[int, AST_Atom]) -> AST_Node:
+def _referenced_vars_of_children(children: Iterable[ASTp_Node]) -> Tuple[Var, ...]:
+    refd_vars: Set[Var] = set()
+    for child in children:
+        refd_vars.update(_referenced_vars_of(child))
+    return tuple(sorted(refd_vars))
+
+
+def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal_decoding_table: Dict[int, ASTp_Node]) -> ASTp_Node:
     produced_clauses: List[Tuple[Literal, ...]] = []
     for or_literal in or_literals:
         produced_clauses.append((or_literal, *and_literals))
@@ -614,12 +634,15 @@ def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal
         return BoolLiteral(value=False)
 
 
-    def decode_literal(literal: Literal) -> AST_Node:
+    def decode_literal(literal: Literal) -> ASTp_Node:
         atom = literal_decoding_table[literal.id]
-        return atom if literal.positive else [AST_Node_Names.NOT.value, atom]
+        if literal.positive:
+            return atom
+        return AST_Negation(referenced_vars=_referenced_vars_of(atom), child=atom)
 
-    def decode_clause(clause: Iterable[Literal]) -> AST_Node:
-        return [AST_Node_Names.AND.name, *(decode_literal(literal) for literal in clause)]
+    def decode_clause(clause: Iterable[Literal]) -> ASTp_Node:
+        decoded = tuple(decode_literal(literal) for literal in clause)
+        return AST_Connective(referenced_vars=_referenced_vars_of_children(decoded), type=Connective_Type.AND, children=decoded)
 
     if len(simplified_clauses) == 1:  # Do not introduce an extra OR node
         clause = simplified_clauses[0]
@@ -627,72 +650,68 @@ def produce_dnf(and_literals: List[Literal], or_literals: List[Literal], literal
             return decode_literal(clause[0])
         return decode_clause(clause)
 
-    return [AST_Node_Names.OR.name, *(decode_clause(clause) for clause in simplified_clauses)]
+    clauses = tuple(decode_clause(clause) for clause in simplified_clauses)
+    return AST_Connective(referenced_vars=_referenced_vars_of_children(clauses), type=Connective_Type.OR, children=clauses)
 
 
-def is_atom(ast: AST_Node) -> bool:
-    atom_types = (str, BoolLiteral, Relation, Congruence, Var)
+def is_atom(ast: ASTp_Node) -> bool:
+    atom_types = (BoolLiteral, Relation, Congruence, Var)
     return isinstance(ast, atom_types)
 
 
-def is_literal(ast: AST_Node) -> bool:
+def is_literal(ast: ASTp_Node) -> bool:
     if is_atom(ast):
         return True
 
-    assert isinstance(ast, list)
-    return ast[0] == AST_Node_Names.NOT.value and is_atom(ast[1])
+    return isinstance(ast, AST_Negation) and is_atom(ast.child)
 
 
 
 LiteralIds = Tuple[int, ...]
 LiteralIdDecodingTable = Dict[int, Literal]
-FrozenAtom = Union[str, BoolLiteral, FrozenLinAtom, FrozenCongruence]
+FrozenAtom = Union[Var, BoolLiteral, FrozenLinAtom, FrozenCongruence]
 
-def do_and_or_tree_lookahead_and_produce_dnf(ast: AST_Node) -> Optional[AST_Node]:
-    if not isinstance(ast, list):
+def do_and_or_tree_lookahead_and_produce_dnf(ast: ASTp_Node) -> Optional[ASTp_Node]:
+    if not (isinstance(ast, AST_Connective) and ast.type == Connective_Type.AND):
         return None
 
-    node_type: str = ast[0]  # type: ignore
-    if node_type != AST_Node_Names.AND.value:
-        return None
-
-    children = ast[1:]
-    and_literals = [child for child in children if is_literal(child)]
-    or_nodes = [child for child in children if isinstance(child, list) and child[0] == AST_Node_Names.OR.value]
+    children = ast.children
+    and_literals_raw = [child for child in children if is_literal(child)]
+    or_nodes = [child for child in children if isinstance(child, AST_Connective) and child.type == Connective_Type.OR]
 
     flattening_happened = len(or_nodes) == 1
     if not flattening_happened:
         return None
 
-    if len(or_nodes) + len(and_literals) != len(children):
+    if len(or_nodes) + len(and_literals_raw) != len(children):
         return None
 
     or_node = or_nodes[0]
-    if not all(is_literal(or_child) for or_child in or_node[1:]):
+    if not all(is_literal(or_child) for or_child in or_node.children):
         return None
 
-    def freeze_atom(atom: AST_Atom) -> FrozenAtom:
+    def freeze_atom(atom: ASTp_Node) -> FrozenAtom:
         if isinstance(atom, Relation):
             return FrozenLinAtom.from_relation(atom)
         elif isinstance(atom, Congruence):
             return FrozenCongruence.from_congruence(atom)
         else:
-            assert isinstance(atom, str) or isinstance(atom, BoolLiteral), atom
+            assert isinstance(atom, Var) or isinstance(atom, BoolLiteral), atom
             return atom
 
     # We have a valid AND-OR tree
 
-    literal_decoding_table: Dict[int, AST_Atom] = {}
-    literal_table: Dict[Union[FrozenLinAtom, FrozenCongruence, str, BoolLiteral], int] = {}
+    literal_decoding_table: Dict[int, ASTp_Node] = {}
+    literal_table: Dict[FrozenAtom, int] = {}
 
-    def make_atoms_into_literals(ast: AST_NaryNode) -> List[Literal]:
+    def make_atoms_into_literals(nodes: Iterable[ASTp_Node]) -> List[Literal]:
         literals: List[Literal] = []
-        for _child in ast:
-            child: AST_Atom = _child  # type: ignore
+        for node in nodes:
+            child = node
 
             is_positive = True
-            if isinstance(child, list) and child[0] == AST_Node_Names.NOT.value:
-                child = child[1]
+            if isinstance(child, AST_Negation):
+                child = child.child
                 is_positive = False
 
             frozen_atom = freeze_atom(child)
@@ -705,8 +724,8 @@ def do_and_or_tree_lookahead_and_produce_dnf(ast: AST_Node) -> Optional[AST_Node
             literals.append(Literal(positive=is_positive, id=literal_id))
         return literals
 
-    or_literals = make_atoms_into_literals(or_node[1:])
-    and_literals = make_atoms_into_literals(and_literals)
+    or_literals = make_atoms_into_literals(or_node.children)
+    and_literals = make_atoms_into_literals(and_literals_raw)
 
     if not set(lit.id for lit in or_literals).issubset(lit.id for lit in and_literals):
         return None
@@ -715,68 +734,47 @@ def do_and_or_tree_lookahead_and_produce_dnf(ast: AST_Node) -> Optional[AST_Node
     return dnf
 
 
-def _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) -> AST_Node:
+def _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: ASTp_Node) -> ASTp_Node:
     """
     Convert 2-deep AND-OR trees into DNF if they are talking about similar atoms.
 
     Conversion is performed if the subordinate tree is talking about a subset of parent atoms.
     """
+    match ast:
+        case Var() | BoolLiteral() | Relation() | Congruence():
+            return ast
 
-    if is_atom(ast):
-        return ast
-    assert isinstance(ast, list)
-    node_type: str = ast[0]  # type: ignore
+        case AST_Connective() if ast.type == Connective_Type.AND:
+            # Are we dealing with an AND-OR tree?
+            dnf = do_and_or_tree_lookahead_and_produce_dnf(ast)
+            if dnf:
+                return dnf
 
-    if node_type == AST_Node_Names.AND.value:
-        children = ast[1:]
-        atoms = [child for child in children if is_atom(child)]
-        or_nodes = [child for child in children if isinstance(child, list) and child[0] == AST_Node_Names.OR.value]
+            children = tuple(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in ast.children)
+            return ast.replace_children(children)
 
-        # Are we dealing with an AND-OR tree?
-        dnf = do_and_or_tree_lookahead_and_produce_dnf(ast)
-        if dnf:
-            return dnf
+        case AST_Quantifier():
+            return AST_Quantifier(referenced_vars=ast.referenced_vars, bound_vars=ast.bound_vars,
+                                  child=_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast.child))
 
-        return [AST_Node_Names.AND.value, *(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in children)]
+        case AST_Negation():
+            return AST_Negation(referenced_vars=ast.referenced_vars,
+                                child=_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast.child))
 
-    if node_type == AST_Node_Names.EXISTS.value:
-        return [AST_Node_Names.EXISTS.value, ast[1], _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast[2])]
+        case AST_Connective():  # OR, EQUIV - no lookahead applies, just descend
+            children = tuple(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in ast.children)
+            return ast.replace_children(children)
 
-    if node_type == AST_Node_Names.NOT.value:
-        return [AST_Node_Names.NOT.value, _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast[1])]
-
-    if node_type == AST_Node_Names.OR.value:
-        children =  ast[1:]
-        return [AST_Node_Names.OR.value, *(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in children)]
-
-    if node_type == AST_Node_Names.BOOL_EQUIV.value:
-        new_children = (_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in ast[1:])
-        return [node_type, *new_children]
-
-    logger.warning(f'Unhandled node while converting tree into DNF: %s', ast)
-    return [node_type, *(_convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(child) for child in ast[1:])]
+    raise NotImplementedError(f'Unhandled node while converting tree into DNF: {ast=}')
 
 
-def convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: AST_Node) -> AST_Node:
+def convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast: ASTp_Node) -> ASTp_Node:
     result = _convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(ast)
     return result
 
 
-def _collect_variables_present_in_formula(ast: AST_Node) -> Set[Var]:
-    if isinstance(ast, (Relation, Congruence)):
-        return set(ast.vars)
-    if isinstance(ast, Var):
-        return set([ast])
-    if isinstance(ast, BoolLiteral):
-        return set()
-
-    assert isinstance(ast, list), ast
-
-    node_type = ast_get_node_type(ast)
-    if node_type == 'exists':
-        return _collect_variables_present_in_formula(ast[2])
-
-    return functools.reduce(set.union, (_collect_variables_present_in_formula(child) for child in ast[1:]), set())
+def _collect_variables_present_in_formula(ast: ASTp_Node) -> Set[Var]:
+    return set(_referenced_vars_of(ast))
 
 
 def replace_congruence_component_with_term(congruence: Congruence, component: Tuple[Tuple[int, Var]], replace_term: Tuple[int, Var]) -> Congruence:
@@ -795,10 +793,11 @@ def replace_congruence_component_with_term(congruence: Congruence, component: Tu
 
 
 
-def _try_rewrite_congruence_on_unbund_vars(exists_and_tree: AST_NaryNode, var_table: Dict[Var, VarInfo]) -> Optional[AST_NaryNode]:
-    bound_vars = ast_get_binding_list(exists_and_tree)
-    and_node = exists_and_tree[2]
-    leaves = and_node[1:]  # type:ignore
+def _try_rewrite_congruence_on_unbund_vars(exists_and_tree: AST_Quantifier, var_table: Dict[Var, VarInfo]) -> Optional[AST_Quantifier]:
+    bound_vars = exists_and_tree.bound_vars
+    and_node = exists_and_tree.child
+    assert isinstance(and_node, AST_Connective) and and_node.type == Connective_Type.AND
+    leaves = and_node.children
 
     _used_vars = (_collect_variables_present_in_formula(leaf) for leaf in leaves if not isinstance(leaf, Congruence))
     used_vars = functools.reduce(set.union, _used_vars, set())
@@ -880,8 +879,9 @@ def _try_rewrite_congruence_on_unbund_vars(exists_and_tree: AST_NaryNode, var_ta
     # Variables that were part of some relations were not considered unbound and therefore they must be stil part of the quantifier
     new_binding_list = [var for var in bound_vars if var not in bound_vars_used_only_in_congruences] + new_bound_vars
     assert new_binding_list, exists_and_tree
-    new_and_node = make_and_node([*non_congruences, *new_congruences])
-    new_node = make_exists_node(new_binding_list, new_and_node)
+    new_and_children = tuple([*non_congruences, *new_congruences])
+    new_and_node = AST_Connective(referenced_vars=_referenced_vars_of_children(new_and_children), type=Connective_Type.AND, children=new_and_children)
+    new_node = AST_Quantifier(referenced_vars=_referenced_vars_of(new_and_node), bound_vars=tuple(new_binding_list), child=new_and_node)
 
     for new_var in new_bound_vars:
         var_table[new_var] = VarInfo(name='congruence replacement', type=VariableType.INT)
@@ -889,54 +889,56 @@ def _try_rewrite_congruence_on_unbund_vars(exists_and_tree: AST_NaryNode, var_ta
     return new_node
 
 
-def _simplify_congruences_on_unbounded_existential_vars(ast: AST_Node, var_table: Dict[Var, VarInfo]) -> AST_Node:
-    if not isinstance(ast, list):
-        return ast
-
-    node_type = ast_get_node_type(ast)
-
-    if node_type == 'exists':
-        # Perform lookahead to check whether we have (exists Vars (and Atoms))
-        child: AST_Node = ast[2]
-        if not isinstance(child, list):
+def _simplify_congruences_on_unbounded_existential_vars(ast: ASTp_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
+    match ast:
+        case Var() | Relation() | Congruence() | BoolLiteral():
             return ast
 
-        child_type = ast_get_node_type(child)
-        if child_type == 'and':
-            new_ast = _try_rewrite_congruence_on_unbund_vars(ast, var_table)
-            if not new_ast:
-                return ['exists', ast[1], _simplify_congruences_on_unbounded_existential_vars(ast[2], var_table)]
-            return new_ast
-        return ['exists', ast[1], _simplify_congruences_on_unbounded_existential_vars(ast[2], var_table)]
+        case AST_Quantifier():
+            # Perform lookahead to check whether we have (exists Vars (and Atoms))
+            if isinstance(ast.child, AST_Connective) and ast.child.type == Connective_Type.AND:
+                new_ast = _try_rewrite_congruence_on_unbund_vars(ast, var_table)
+                if new_ast:
+                    return new_ast
+            return AST_Quantifier(referenced_vars=ast.referenced_vars, bound_vars=ast.bound_vars,
+                                  child=_simplify_congruences_on_unbounded_existential_vars(ast.child, var_table))
 
-    # The node is some N-ary
-    rewritten_children = tuple(_simplify_congruences_on_unbounded_existential_vars(child, var_table) for child in ast[1:])
-    return [node_type, *rewritten_children]
+        case AST_Negation():
+            return AST_Negation(referenced_vars=ast.referenced_vars,
+                                child=_simplify_congruences_on_unbounded_existential_vars(ast.child, var_table))
+
+        case AST_Connective():
+            children = tuple(_simplify_congruences_on_unbounded_existential_vars(child, var_table) for child in ast.children)
+            return ast.replace_children(children)
+
+    raise NotImplementedError(f'Unhandled node while simplifying congruences on unbounded vars: {ast=}')
 
 
-def simplify_congruences_on_unbounded_existential_vars(ast: AST_Node, var_table: Dict[Var, VarInfo]) -> AST_Node:
+def simplify_congruences_on_unbounded_existential_vars(ast: ASTp_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
     ret = _simplify_congruences_on_unbounded_existential_vars(ast, var_table)
     return ret
 
 
-def _collect_used_free_variables(ast: AST_Node, bound_vars: Set[Var]) -> Set[Var]:
+def _collect_used_free_variables(ast: ASTp_Node, bound_vars: Set[Var]) -> Set[Var]:
     if isinstance(ast, Var):
         return {ast}
     if isinstance(ast, (Relation, Congruence)):
         return set(ast.vars).difference(bound_vars)
-    if not isinstance(ast, list):
+    if isinstance(ast, BoolLiteral):
         return set()
 
-    node_type = ast_get_node_type(ast)
-    if node_type == 'exists':
-        newly_bound_vars = ast_get_binding_list(ast)
-        new_bound_vars = bound_vars.union(newly_bound_vars)
-        return _collect_used_free_variables(ast[2], new_bound_vars)
+    if isinstance(ast, AST_Quantifier):
+        new_bound_vars = bound_vars.union(ast.bound_vars)
+        return _collect_used_free_variables(ast.child, new_bound_vars)
 
-    return functools.reduce(set.union, (_collect_used_free_variables(child, bound_vars) for child in ast[1:]), set())
+    if isinstance(ast, AST_Negation):
+        return _collect_used_free_variables(ast.child, bound_vars)
+
+    assert isinstance(ast, AST_Connective)
+    return functools.reduce(set.union, (_collect_used_free_variables(child, bound_vars) for child in ast.children), set())
 
 
-def _are_exists_and_trees_isomorphic(left: AST_Node, right: AST_Node, isomorphism: Dict[Var, Var]) -> bool:
+def _are_exists_and_trees_isomorphic(left: ASTp_Node, right: ASTp_Node, isomorphism: Dict[Var, Var]) -> bool:
     if type(left) != type(right):
         return False
 
@@ -965,48 +967,46 @@ def _are_exists_and_trees_isomorphic(left: AST_Node, right: AST_Node, isomorphis
         assert isinstance(right, BoolLiteral)
         return left.value == right.value
 
-    if not isinstance(left, list):
-        logger.warning('Unhandled branch in isomorphism checking, assumimg that the trees are not isomorphic')
-        return False
+    if isinstance(left, AST_Negation):
+        assert isinstance(right, AST_Negation)
+        return _are_exists_and_trees_isomorphic(left.child, right.child, isomorphism)
 
-    assert isinstance(left, list)
-    assert isinstance(right, list)
-
-    left_node_type  = ast_get_node_type(left)
-    right_node_type = ast_get_node_type(right)
-
-    if left_node_type != right_node_type:
-        return False
-
-    if len(left) != len(right):
-        return False
-
-    if left_node_type == 'exists':
-        left_bindings = ast_get_binding_list(left)
-        right_bindings = ast_get_binding_list(right)
-        if len(left_bindings) != len(right_bindings):
+    if isinstance(left, AST_Quantifier):
+        assert isinstance(right, AST_Quantifier)
+        if len(left.bound_vars) != len(right.bound_vars):
             return False
 
         # @Incomplete: Extend the isomorphism in a naive fashion
         isomorphism = dict(isomorphism)
-        for left_var, right_var in zip(left_bindings, right_bindings):
+        for left_var, right_var in zip(left.bound_vars, right.bound_vars):
             isomorphism[left_var] = right_var
 
-        return _are_exists_and_trees_isomorphic(left[2], right[2], isomorphism)
+        return _are_exists_and_trees_isomorphic(left.child, right.child, isomorphism)
 
-    return all(_are_exists_and_trees_isomorphic(left_child, right_child, isomorphism) for left_child, right_child in zip(left[1:], right[1:]))
+    if isinstance(left, AST_Connective):
+        assert isinstance(right, AST_Connective)
+        if left.type != right.type or len(left.children) != len(right.children):
+            return False
+
+        return all(
+            _are_exists_and_trees_isomorphic(left_child, right_child, isomorphism)
+            for left_child, right_child in zip(left.children, right.children)
+        )
+
+    logger.warning('Unhandled branch in isomorphism checking, assumimg that the trees are not isomorphic')
+    return False
 
 
-def are_exists_and_trees_isomorphic(left: AST_Node, right: AST_Node, free_vars: Iterable[Var]) -> bool:
+def are_exists_and_trees_isomorphic(left: ASTp_Node, right: ASTp_Node, free_vars: Iterable[Var]) -> bool:
     isomorphism = {free_var: free_var for free_var in free_vars}
     are_isomorphic = _are_exists_and_trees_isomorphic(left, right, isomorphism)
     return are_isomorphic
 
 
-def _check_if_children_are_conflicting(children: List[AST_NaryNode], free_vars: Tuple[Var, ...]) -> bool:
+def _check_if_children_are_conflicting(children: List[ASTp_Node], free_vars: Tuple[Var, ...]) -> bool:
     positive, negative = [], []
     for child in children:
-        if ast_get_node_type(child) == 'not':
+        if isinstance(child, AST_Negation):
             negative.append(child)
         else:
             positive.append(child)
@@ -1015,43 +1015,50 @@ def _check_if_children_are_conflicting(children: List[AST_NaryNode], free_vars: 
     if len(positive) != 1 or len(negative) != 1:
         return False
 
-    neg_node = negative[0][1] # Strip the leading 'not'
+    neg_node = negative[0].child  # Strip the leading negation
     return are_exists_and_trees_isomorphic(positive[0], neg_node, free_vars)
 
 
-def _detect_conflics_on_isomorphic_fragments(ast: AST_Node) -> AST_Node:
+def _detect_conflics_on_isomorphic_fragments(ast: ASTp_Node) -> ASTp_Node:
     """ Detects conflicting conjunctive clauses that conflict because of different renaming of bound vars. """
-    if not isinstance(ast, list):
-        return ast
+    match ast:
+        case Var() | Relation() | Congruence() | BoolLiteral():
+            return ast
 
-    node_type = ast_get_node_type(ast)
-    if node_type == 'exists':
-        return ['exists', ast[1], _detect_conflics_on_isomorphic_fragments(ast[2])]
+        case AST_Quantifier():
+            return AST_Quantifier(referenced_vars=ast.referenced_vars, bound_vars=ast.bound_vars,
+                                  child=_detect_conflics_on_isomorphic_fragments(ast.child))
 
-    if node_type == 'and':
-        rewritten_children = [_detect_conflics_on_isomorphic_fragments(child) for child in ast[1:]]
+        case AST_Negation():
+            return AST_Negation(referenced_vars=ast.referenced_vars, child=_detect_conflics_on_isomorphic_fragments(ast.child))
 
-        children: List[AST_NaryNode] = [child for child in rewritten_children if isinstance(child, list)]
-        free_vars_to_children: Dict[Tuple[Var, ...], List[AST_NaryNode]] = defaultdict(list)
-        for child in children:
-            free_vars = tuple(sorted(_collect_used_free_variables(child, set())))
-            free_vars_to_children[free_vars].append(child)
+        case AST_Connective() if ast.type == Connective_Type.AND:
+            rewritten_children = tuple(_detect_conflics_on_isomorphic_fragments(child) for child in ast.children)
 
-        for free_vars, children_with_same_free_vars in free_vars_to_children.items():
-            # @Incomplete: There could be other clauses that might nothing to do with the conflict, for now we focus on (and A (not A))
-            if len(children_with_same_free_vars) > 2:
-                continue
+            children: List[ASTp_Node] = [child for child in rewritten_children if isinstance(child, (AST_Connective, AST_Negation, AST_Quantifier))]
+            free_vars_to_children: Dict[Tuple[Var, ...], List[ASTp_Node]] = defaultdict(list)
+            for child in children:
+                free_vars = tuple(sorted(_collect_used_free_variables(child, set())))
+                free_vars_to_children[free_vars].append(child)
 
-            if _check_if_children_are_conflicting(children_with_same_free_vars, free_vars):
-                return BoolLiteral(value=False)
+            for free_vars, children_with_same_free_vars in free_vars_to_children.items():
+                # @Incomplete: There could be other clauses that might nothing to do with the conflict, for now we focus on (and A (not A))
+                if len(children_with_same_free_vars) > 2:
+                    continue
 
-        # No clauses were found conflicting
-        return ['and', *rewritten_children]
+                if _check_if_children_are_conflicting(children_with_same_free_vars, free_vars):
+                    return BoolLiteral(value=False)
 
-    return [ast[0], *(_detect_conflics_on_isomorphic_fragments(child) for child in ast[1:])]
+            # No clauses were found conflicting
+            return ast.replace_children(rewritten_children)
+
+        case AST_Connective():
+            return ast.replace_children(tuple(_detect_conflics_on_isomorphic_fragments(child) for child in ast.children))
+
+    raise NotImplementedError(f'Unhandled node while detecting isomorphic conflicts: {ast=}')
 
 
-def detect_conflics_on_isomorphic_fragments(ast: AST_Node) -> AST_Node:
+def detect_conflics_on_isomorphic_fragments(ast: ASTp_Node) -> ASTp_Node:
     """ Detects conflicting conjunctive clauses that conflict because of different renaming of bound vars. """
     return _detect_conflics_on_isomorphic_fragments(ast)
 

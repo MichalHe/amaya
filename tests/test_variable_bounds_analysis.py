@@ -4,7 +4,11 @@ from typing import (
 )
 
 from amaya.relations_structures import (
+    AST_Connective,
+    AST_Negation,
+    AST_Quantifier,
     Congruence,
+    Connective_Type,
     Relation,
     Var,
 )
@@ -41,7 +45,7 @@ def test_variable_bounds_analysis_with_and():
     right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
                                               predicate_symbol='>=', absolute_part=-10)
 
-    ast = ['and', left_relation, right_relation]
+    ast = AST_Connective(type=Connective_Type.AND, children=(left_relation, right_relation), referenced_vars=tuple())
     actual_result = perform_variable_bounds_analysis_on_ast(ast)
 
     assert actual_result.var_values['x'] == [Value_Interval(lower_limit=None, upper_limit=0)]
@@ -54,7 +58,7 @@ def test_variable_bounds_analysis_with_or():
     right_relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
                                               predicate_symbol='>=', absolute_part=-10)
 
-    ast = ['or', left_relation, right_relation]
+    ast = AST_Connective(type=Connective_Type.OR, children=(left_relation, right_relation), referenced_vars=tuple())
     actual_result = perform_variable_bounds_analysis_on_ast(ast)
 
     assert isinstance(actual_result, AST_Internal_Node_With_Bounds_Info)
@@ -73,7 +77,9 @@ def test_variable_bounds_analysis_deeper_ast():
 
     level0_relation = Relation(vars=[v_x, v_y], coefs=[1, 1], predicate_symbol='>=', rhs=-20)
 
-    ast = ['exists', [v_x], ['or', ['and', level1_relation_left, level1_relation_right], level0_relation]]
+    inner_and = AST_Connective(type=Connective_Type.AND, children=(level1_relation_left, level1_relation_right), referenced_vars=(v_x, v_y))
+    or_node = AST_Connective(type=Connective_Type.OR, children=(inner_and, level0_relation), referenced_vars=(v_x, v_y))
+    ast = AST_Quantifier(bound_vars=(v_x,), child=or_node, referenced_vars=(v_x, v_y))
 
     actual_result = perform_variable_bounds_analysis_on_ast(ast)
 
@@ -89,7 +95,7 @@ def test_variable_bounds_analysis_both_bounds():
     lower_bound = Relation(vars=[v_x], coefs=[-1], predicate_symbol='<=', rhs=0)
     upper_bound = Relation(vars=[v_x], coefs=[1], predicate_symbol='<=', rhs=10)
 
-    ast = ['and', lower_bound, upper_bound]
+    ast = AST_Connective(type=Connective_Type.AND, children=(lower_bound, upper_bound), referenced_vars=(v_x,))
 
     result = perform_variable_bounds_analysis_on_ast(ast)
 
@@ -101,15 +107,14 @@ def test_variable_bounds_analysis_with_multiple_bounded_variables():
     v_v = Var(2)
     v_w = Var(3)
 
-    ast = [
-        'and',
+    ast = AST_Connective(type=Connective_Type.AND, children=(
          # (<= 23 w)
          Relation(vars=[v_w], coefs=[-1], rhs=23, predicate_symbol='<='),
          # (<= 0 u)
          Relation(vars=[v_u], coefs=[-1], rhs=0, predicate_symbol='<='),
          # (<= (+ (* 5 w) 517989) u))))
          Relation(vars=[v_w, v_u], coefs=[5, -1], rhs=-517989, predicate_symbol='<='),
-   ]
+    ), referenced_vars=(v_u, v_w))
 
     ast_with_bounds_info = perform_variable_bounds_analysis_on_ast(ast)
 
@@ -177,16 +182,15 @@ def test_variable_bounds_analysis_on_ultimate_automizer_fragment():
         'v': Var(4),
     }
 
-    ast = [
-        'and',
+    ast = AST_Connective(type=Connective_Type.AND, children=(
         Relation(vars=[vars['m']], coefs=[-1], predicate_symbol='<=', rhs=0),
         Relation(vars=[vars['m']], coefs=[1], predicate_symbol='<=', rhs=299_992),
         Relation(vars=[vars['x'], vars['v']], coefs=[1, -1], predicate_symbol='<=', rhs=600_000),
         Relation(vars=[vars['m'], vars['y']], coefs=[1, -1], predicate_symbol='<=', rhs=0),
-        ['not', Relation(vars=[vars['m']], coefs=[1], predicate_symbol='=', rhs=0)],
+        AST_Negation(child=Relation(vars=[vars['m']], coefs=[1], predicate_symbol='=', rhs=0), referenced_vars=(vars['m'],)),
         Relation(vars=[vars['m']], coefs=[-1], predicate_symbol='<=', rhs=0),
         Congruence(vars=[vars['m'], vars['v']], coefs=[1, -1], rhs=0, modulus=299_993),
-    ]
+    ), referenced_vars=tuple(vars.values()))
 
     ast_with_bounds_info = perform_variable_bounds_analysis_on_ast(ast)
 
@@ -223,12 +227,12 @@ def test_simple_variable_bounds_simplification():
     expected_lower_bound = Relation(vars=[v_x], coefs=[-1], predicate_symbol='<=', rhs=-10)
     expected_upper_bound = Relation(vars=[v_x], coefs=[1], predicate_symbol='<=', rhs=20)
 
-    assert isinstance(result, list)
-    assert len(result) == 4
-    assert 'and' == result[0]
-    assert expected_lower_bound in result
-    assert expected_upper_bound in result
-    assert preserved_relation in result
+    assert isinstance(result, AST_Connective)
+    assert result.type == Connective_Type.AND
+    assert len(result.children) == 3
+    assert expected_lower_bound in result.children
+    assert expected_upper_bound in result.children
+    assert preserved_relation in result.children
 
 
 def test_bounds_simplification_on_ultimate_automizer_fragment():
@@ -245,23 +249,23 @@ def test_bounds_simplification_on_ultimate_automizer_fragment():
         congruence
     ]
 
-    ast = [
-        'and',
+    not_node = AST_Negation(child=Relation(vars=[v_m], coefs=[1], predicate_symbol='=', rhs=0), referenced_vars=(v_m,))
+    ast = AST_Connective(type=Connective_Type.AND, children=(
         Relation(vars=[v_m], coefs=[-1], predicate_symbol='<=', rhs=0),
         Relation(vars=[v_m], coefs=[1], predicate_symbol='<=', rhs=299_992),
-        ['not', Relation(vars=[v_m], coefs=[1], predicate_symbol='=', rhs=0)],
+        not_node,
         *preserved_relations,
-    ]
+    ), referenced_vars=(v_m, v_x, v_y, v_v))
 
     result = simplify_bounded_atoms(ast)
-    assert isinstance(result, list)
-    assert result[0] == 'and'
-    assert len(result) == 6
+    assert isinstance(result, AST_Connective)
+    assert result.type == Connective_Type.AND
+    assert len(result.children) == 5
 
     for preserved_relation in preserved_relations:
-        assert preserved_relation in result
+        assert preserved_relation in result.children
 
     upper_bound = Relation(vars=[v_m], coefs=[1], predicate_symbol='<=', rhs=299_992)
     lower_bound = Relation(vars=[v_m], coefs=[-1], predicate_symbol='<=', rhs=-1)
-    assert upper_bound in result
-    assert lower_bound in result
+    assert upper_bound in result.children
+    assert lower_bound in result.children

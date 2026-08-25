@@ -56,7 +56,6 @@ from amaya.relations_structures import (
     Relation,
     Var,
     VariableType,
-    convert_ast_into_astp,
     pprint_formula,
 )
 from amaya.tokenize import tokenize
@@ -150,40 +149,38 @@ def build_syntax_tree(tokens: Iterable[str]):
     return stack
 
 
-def optimize_formula_structure(formula_to_evaluate: AST_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
+def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
     if solver_config.optimizations.simplify_variable_bounds:
-        logger.debug('Simplifying variable bounds of formula: %s', formula_to_evaluate)
-        formula_to_evaluate = cast(AST_Node, var_bounds_lib.simplify_bounded_atoms(formula_to_evaluate))
-        logger.debug('Simplified formula: %s', formula_to_evaluate)
+        logger.debug('Simplifying variable bounds of formula: %s', astp)
+        astp = cast(ASTp_Node, var_bounds_lib.simplify_bounded_atoms(astp))
+        logger.debug('Simplified formula: %s', astp)
 
     if solver_config.optimizations.rewrite_existential_equations_via_gcd:
-        logger.debug('Rewriting: %s', formula_to_evaluate)
-        formula_to_evaluate = var_bounds_lib.simplify_unbounded_equations(formula_to_evaluate)
-        logger.debug('Simplified formula: %s', formula_to_evaluate)
+        logger.debug('Rewriting: %s', astp)
+        astp = var_bounds_lib.simplify_unbounded_equations(astp)
+        logger.debug('Simplified formula: %s', astp)
 
     if solver_config.optimizations.rewrite_congruences_with_unbound_terms:
-        logger.debug('Rewriting congruence terms containing unbounded variables:  %s', formula_to_evaluate)
-        formula_to_evaluate = var_bounds_lib.simplify_congruences_on_unbounded_existential_vars(formula_to_evaluate, var_table)
-        logger.debug('Congruences rewritten. Result:  %s', formula_to_evaluate)
+        logger.debug('Rewriting congruence terms containing unbounded variables:  %s', astp)
+        astp = var_bounds_lib.simplify_congruences_on_unbounded_existential_vars(astp, var_table)
+        logger.debug('Congruences rewritten. Result:  %s', astp)
 
     if solver_config.optimizations.push_negation_towards_atoms:
-        logger.debug('Pushing negation towards atoms on:  %s', formula_to_evaluate)
-        formula_to_evaluate = var_bounds_lib.push_negations_towards_atoms(formula_to_evaluate)
-        logger.debug('Negations pushed towards atoms. Result:  %s', formula_to_evaluate)
+        logger.debug('Pushing negation towards atoms on:  %s', astp)
+        astp = var_bounds_lib.push_negations_towards_atoms(astp)
+        logger.debug('Negations pushed towards atoms. Result:  %s', astp)
 
     if solver_config.optimizations.flatten_connectives:
         logger.debug('Flattening bool connectives into N-ary nodes.')
-        formula_to_evaluate = preprocessing.flatten_bool_nary_connectives(formula_to_evaluate)
+        astp = preprocessing.flatten_bool_nary_connectives(astp)
 
     if solver_config.optimizations.detect_isomorphic_conflicts:
-        logger.debug('Detecting conflicts in conjuctive clauses using formula isomorphism:  %s', formula_to_evaluate)
-        formula_to_evaluate = var_bounds_lib.detect_conflics_on_isomorphic_fragments(formula_to_evaluate)
-        logger.debug('Conflict detection done. Result:  %s', formula_to_evaluate)
+        logger.debug('Detecting conflicts in conjuctive clauses using formula isomorphism:  %s', astp)
+        astp = var_bounds_lib.detect_conflics_on_isomorphic_fragments(astp)
+        logger.debug('Conflict detection done. Result:  %s', astp)
 
     if solver_config.optimizations.do_light_sat_reasoning:
-        formula_to_evaluate = var_bounds_lib.convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(formula_to_evaluate)
-
-    astp = convert_ast_into_astp(formula_to_evaluate)
+        astp = var_bounds_lib.convert_and_or_trees_to_dnf_if_talking_about_similar_atoms(astp)
 
     if solver_config.optimizations.do_interval_analysis:
         logger.debug('Detecting conflicts in formula using interval analysis:  %s', astp)

@@ -17,10 +17,15 @@ from typing import (
 from amaya.preprocessing.eval import VarInfo, convert_ast_into_evaluable_form
 
 from amaya.relations_structures import (
+    AST_Connective,
     AST_NaryNode,
+    AST_Negation,
     AST_Node,
     AST_Node_Names,
+    AST_Quantifier,
+    ASTp_Node,
     Congruence,
+    Connective_Type,
     FunctionSymbol,
     NodeEncounteredHandler,
     NodeEncounteredHandlerStatus,
@@ -292,7 +297,7 @@ def assign_fresh_names_to_all_vars(var_table: Dict[Var, VarInfo]) -> Dict[Var, V
 
 def preprocess_ast(ast: Raw_AST,
                    global_fn_symbols: Iterable[FunctionSymbol],
-                   solver_config: SolverConfig = solver_config) -> Tuple[AST_Node, Dict[Var, VarInfo]]:
+                   solver_config: SolverConfig = solver_config) -> Tuple[ASTp_Node, Dict[Var, VarInfo]]:
     """
     Peforms preprocessing on the given AST. The following proprocessing operations are performed:
         - universal quantifiers are replaced with existential quantifiers,
@@ -351,45 +356,38 @@ def preprocess_ast(ast: Raw_AST,
     return evaluable_ast, var_table
 
 
-def _flatten_bool_nary_connectives(ast: AST_Node) -> AST_Node:
-    if not isinstance(ast, list):
-        return ast
+def _flatten_bool_nary_connectives(ast: ASTp_Node) -> ASTp_Node:
+    match ast:
+        case AST_Connective() if ast.type in (Connective_Type.AND, Connective_Type.OR):
+            new_children: List[ASTp_Node] = []
 
-    parent_type: str = ast[0]  # type: ignore
+            for child in ast.children:
+                flattened_child = _flatten_bool_nary_connectives(child)
+                if isinstance(flattened_child, AST_Connective) and flattened_child.type == ast.type:
+                    new_children.extend(flattened_child.children)
+                else:
+                    new_children.append(flattened_child)
 
-    connectives_to_flatten = (AST_Node_Names.AND.value, AST_Node_Names.OR.value)
-    if parent_type in connectives_to_flatten:
+            if len(new_children) == 1:
+                return new_children[0]
 
-        new_node: AST_Node = [parent_type]
+            return ast.replace_children(tuple(new_children))
 
-        for child in ast[1:]:
-            flattened_child = _flatten_bool_nary_connectives(child)
-            is_nary_node = isinstance(flattened_child, list)
-            if is_nary_node and flattened_child[0] == parent_type:
-                new_node.extend(flattened_child[1:])
-            else:
-                new_node.append(flattened_child)
+        case AST_Connective():  # Connective_Type.EQUIV - not n-ary, just descend
+            children = tuple(_flatten_bool_nary_connectives(child) for child in ast.children)
+            return ast.replace_children(children)
 
-        if len(new_node) == 2:
-            return new_node[1]
+        case AST_Negation():
+            return AST_Negation(referenced_vars=ast.referenced_vars, child=_flatten_bool_nary_connectives(ast.child))
 
-        return new_node
+        case AST_Quantifier():
+            return AST_Quantifier(referenced_vars=ast.referenced_vars, bound_vars=ast.bound_vars,
+                                  child=_flatten_bool_nary_connectives(ast.child))
 
-    if parent_type == AST_Node_Names.EXISTS.value:
-        new_child = _flatten_bool_nary_connectives(ast[2])
-        return [parent_type, ast[1], new_child]
-
-    if parent_type == AST_Node_Names.NOT.value:
-        new_child = _flatten_bool_nary_connectives(ast[1])
-        return [parent_type, new_child]
-
-    if parent_type == AST_Node_Names.BOOL_EQUIV.value:
-        new_node = [parent_type, *(_flatten_bool_nary_connectives(child) for child in ast[1:])]
-        return new_node
-
-    logger.warning(f'Node {parent_type} is not explicitly handled when flattening bool connectives.')
-    return [parent_type, *(_flatten_bool_nary_connectives(child) for child in ast[1:])]
+        case _:
+            return ast
 
 
-def flatten_bool_nary_connectives(ast: AST_Node) -> AST_Node:
+def flatten_bool_nary_connectives(ast: ASTp_Node) -> ASTp_Node:
+    """ Convert sequences of (binary) ANDs/ORs into one N-ary node. """
     return _flatten_bool_nary_connectives(ast)
