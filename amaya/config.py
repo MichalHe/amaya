@@ -41,6 +41,14 @@ class OptimizationsConfig:
     push_negation_towards_atoms: bool = False
     """Push negations as close to atoms as possible."""
 
+    remove_vars_used_only_in_disequalities: bool = False
+    """
+    Drop existentially quantified variables (of an infinite sort) that occur only in disequalities.
+
+    Example:
+        (exists ((x Int)) (and (<= y 0) (not (= x 5))))   --->   (<= y 0)
+    """
+
     do_interval_analysis: bool = True
     """
     Use interval analysis to prune the formula from simple conflicting clauses.

@@ -167,7 +167,8 @@ opt_to_config_field = {
     'opt-bottom-exists': 'optimize_bottom_quantifiers',
     'flatten-connectives': 'flatten_connectives',
     'overapprox-rhs': 'rewrite_by_overapprox_relation_rhs',
-    'model-reasoning': 'reason_about_models'
+    'model-reasoning': 'reason_about_models',
+    'infinite-domain': 'remove_vars_used_only_in_disequalities',
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
 

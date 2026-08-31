@@ -204,6 +204,9 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -
 
     if solver_config.optimizations.reason_about_models:
         model_properties = Asserted_Model_Properties()
+
+        # pprint_formula(astp)
+        astp = simplify_formula_using_model_properties(astp, model_properties)
         astp = simplify_formula_using_model_properties(astp, model_properties)
 
         var_uses = Variable_Use_Info()
@@ -211,6 +214,15 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -
         astp = remove_atoms_satisfied_by_unconstrained_vars(astp, var_uses, desired_polarity=True)
         # pprint_formula(astp)
         # sys.exit(0)
+
+    if solver_config.optimizations.remove_vars_used_only_in_disequalities:
+        logger.debug('Removing vars used only in disequalities:  %s', astp)
+        astp = var_bounds_lib.remove_vars_used_only_in_disequalities(astp, var_table)
+        logger.debug('Vars used only in disequalities removed. Result:  %s', astp)
+
+        print('Now')
+        model_properties = Asserted_Model_Properties()
+        astp = simplify_formula_using_model_properties(astp, model_properties)
 
     return astp
 
