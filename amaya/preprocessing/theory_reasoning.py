@@ -19,17 +19,77 @@ from amaya.relations_structures import (
 
 
 @dataclass
+class Var_Alias:
+    """ Represents `elim_var = sum(coef*var for var, coef in zip(vars, coefs)) + const`. """
+    vars: list[Var]
+    coefs: list[int]
+    const: int
+
+
+@dataclass
 class Asserted_Model_Properties:
     equations: list[list[Relation]] = field(default_factory=lambda: [[]])
     bool_atom_values: list[dict[Var, bool]] = field(default_factory=lambda: [{}])
+    var_aliases: list[dict[Var, Var_Alias]] = field(default_factory=lambda: [{}])
+
+    branch_depth: int = 0
+    """ How many OR/EQUIV branch boundaries we are currently nested under. """
+
+    negation_depth: int = 0
+    """ How many NOTs we are currently nested under. """
+
+    quantifier_scopes: list[tuple[frozenset[Var], int, int]] = field(default_factory=list)
+    """
+    Stack of currently open quantifiers: (their bound vars, branch_depth, negation_depth) as they
+    were when we entered that quantifier's body.
+    """
+
+    vars_eliminated_via_alias: set[Var] = field(default_factory=set)
+    """
+    Bound variables whose defining equation was dropped because they were fully substituted away.
+    Consumed (and removed from this set) by the AST_Quantifier node that binds them.
+    """
 
     def insert_stack(self):
         self.equations.append([])
         self.bool_atom_values.append(dict())
+        self.var_aliases.append(dict())
 
     def pop_stack(self):
         self.bool_atom_values.pop(-1)
         self.equations.pop(-1)
+        self.var_aliases.pop(-1)
+
+    def enter_branch(self):
+        self.branch_depth += 1
+
+    def exit_branch(self):
+        self.branch_depth -= 1
+
+    def enter_negation(self):
+        self.negation_depth += 1
+
+    def exit_negation(self):
+        self.negation_depth -= 1
+
+    def enter_quantifier_scope(self, bound_vars: tuple[Var, ...]):
+        self.quantifier_scopes.append((frozenset(bound_vars), self.branch_depth, self.negation_depth))
+
+    def exit_quantifier_scope(self):
+        self.quantifier_scopes.pop(-1)
+
+    def is_unconditionally_true_for_owning_quantifier(self, var: Var) -> bool:
+        """
+        True if `var` is bound by a currently open quantifier, and we are still in a position that
+        is unconditionally within that quantifier's whole body - no OR/EQUIV branch and no NOT
+        crossed since entering it. An equation defining `var` found at such a position can be
+        treated as asserted throughout the quantifier's whole body, and can therefore be dropped
+        (together with `var`'s binding) once it has been substituted away everywhere else.
+        """
+        for bound_vars, entry_branch_depth, entry_negation_depth in reversed(self.quantifier_scopes):
+            if var in bound_vars:
+                return entry_branch_depth == self.branch_depth and entry_negation_depth == self.negation_depth
+        return False
 
     def negate_last_level(self):
         last_level = self.bool_atom_values[-1]
@@ -60,6 +120,15 @@ class Asserted_Model_Properties:
     def pop_bool_atom(self, atom: Var):
         last_level = self.bool_atom_values[-1]
         del last_level[atom]
+
+    def assert_alias(self, var: Var, alias: Var_Alias):
+        self.var_aliases[-1][var] = alias
+
+    def get_alias(self, var: Var) -> Var_Alias | None:
+        for level in reversed(self.var_aliases):
+            if var in level:
+                return level[var]
+        return None
 
 
 def _eliminate_known_info_from_eq(eq1: Relation, eq2: Relation) -> Relation:
@@ -109,6 +178,83 @@ def _subtract_equations(eq: Relation, other_eq: Relation) -> Relation:
     )
 
 
+def _substitute_known_aliases(relation: Relation, assertions: Asserted_Model_Properties) -> Relation:
+    """ Replace every variable in `relation` that has a known alias (e.g. x = y - 1) with its alias expression. """
+    new_terms: dict[Var, int] = {}
+    const_shift = 0
+    substituted_anything = False
+
+    for var, coef in zip(relation.vars, relation.coefs):
+        alias = assertions.get_alias(var)
+        if alias is None:
+            new_terms[var] = new_terms.get(var, 0) + coef
+            continue
+
+        substituted_anything = True
+        for alias_var, alias_coef in zip(alias.vars, alias.coefs):
+            new_terms[alias_var] = new_terms.get(alias_var, 0) + coef * alias_coef
+        const_shift += coef * alias.const
+
+    if not substituted_anything:
+        return relation
+
+    sorted_terms = sorted((var, coef) for var, coef in new_terms.items() if coef != 0)
+    new_vars = [var for var, _ in sorted_terms]
+    new_coefs = [coef for _, coef in sorted_terms]
+    new_rhs = relation.rhs - const_shift
+
+    return Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=relation.predicate_symbol)
+
+
+def _try_extract_alias(equation: Relation) -> tuple[Var, Var_Alias] | None:
+    """
+    If `equation` has a variable with a unit coefficient, express it as an alias of the remaining terms,
+    e.g. `x - y = 1` (x has a unit coefficient) becomes the alias `x = y + 1`.
+    """
+    unit_coef_vars = [(var, coef) for var, coef in zip(equation.vars, equation.coefs) if abs(coef) == 1]
+    if not unit_coef_vars:
+        return None
+
+    # Prefer eliminating the variable with the largest id, keeping lower-id variables as canonical.
+    elim_var, elim_coef = max(unit_coef_vars, key=lambda var_coef: var_coef[0].id)
+
+    remaining_terms = [(var, coef) for var, coef in zip(equation.vars, equation.coefs) if var != elim_var]
+
+    # elim_coef*elim_var + sum(remaining) = rhs  <=>  elim_var = elim_coef*rhs - elim_coef*sum(remaining)  (elim_coef is +-1)
+    alias_vars = [var for var, _coef in remaining_terms]
+    alias_coefs = [-elim_coef * coef for _var, coef in remaining_terms]
+    alias_const = elim_coef * equation.rhs
+
+    return elim_var, Var_Alias(vars=alias_vars, coefs=alias_coefs, const=alias_const)
+
+
+def _register_unresolved_equation(equation: Relation, assertions: Asserted_Model_Properties) -> ASTp_Node | None:
+    """
+    Remember `equation` for future simplifications - either as a variable alias, or verbatim.
+
+    If the eliminated variable is bound by an enclosing quantifier, and `equation` is unconditionally
+    true throughout that quantifier's whole body, then the variable has effectively been "asserted"
+    by this equation already - the equation itself is therefore redundant (its only remaining job,
+    substituting the variable away everywhere else, is handled separately) and can be dropped, which
+    this signals by returning BoolLiteral(True); the AST_Quantifier node will drop the now-unused
+    binding once this bubbles back up to it. Otherwise, returns None - the caller should keep the
+    (possibly already-substituted) equation as-is.
+    """
+    alias = _try_extract_alias(equation)
+    if alias is None:
+        assertions.assert_equation(equation)
+        return None
+
+    elim_var, var_alias = alias
+    assertions.assert_alias(elim_var, var_alias)
+
+    if assertions.is_unconditionally_true_for_owning_quantifier(elim_var):
+        assertions.vars_eliminated_via_alias.add(elim_var)
+        return BoolLiteral(True)
+
+    return None
+
+
 def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: Asserted_Model_Properties) -> ASTp_Node:
     """
     Simplify formula by considering its models. 
@@ -119,6 +265,10 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
        OR                               OR
           ...                               ...
           NOT x - y = 0                     FALSE
+
+    AND:                    ---->    AND
+       x - y = 0                        x - y = 0
+       2*y + x + z = 3                  3*x + z = 3     (y is known to equal x, substituted away)
     """
     match root_node:
         case Var():
@@ -132,24 +282,33 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
             return root_node
                        
         case Relation():
-            if root_node.predicate_symbol != '=':
-                return root_node
+            # Replace every variable with a known alias (e.g. x = y - 1) before doing anything else - this
+            # also makes the duplicate/implied-equation detection below strictly more effective, since two
+            # equations that only differed by an already-known alias will now compare equal.
+            substituted = _substitute_known_aliases(root_node, assertions)
+
+            is_constant = substituted.is_true_or_false()
+            if is_constant is not None:
+                return BoolLiteral(is_constant)
+
+            if substituted.predicate_symbol != '=':
+                return substituted
 
             # TODO: This is sketchy, we should have a heuristic that tries to combine similar-enough equations
             #       to obtain implications that should produce smaller automata/prune the formula.
-            similar_eq = assertions.search_similar_eq(root_node)
+            similar_eq = assertions.search_similar_eq(substituted)
             if not similar_eq:
-                assertions.assert_equation(root_node)
-                return root_node
+                absorbed = _register_unresolved_equation(substituted, assertions)
+                return absorbed if absorbed is not None else substituted
 
-            implication = _eliminate_known_info_from_eq(root_node, similar_eq)
+            implication = _eliminate_known_info_from_eq(substituted, similar_eq)
             simplified_value = implication.is_true_or_false()
 
             if simplified_value is None:
                 # TODO: Maybe we should keep the simplified relation here instead? For example, if there are less variables, or
                 # the coefficients are smaller? Right now we do nothing
-                assertions.assert_equation(root_node)
-                return root_node
+                absorbed = _register_unresolved_equation(substituted, assertions)
+                return absorbed if absorbed is not None else substituted
 
             return BoolLiteral(simplified_value)
 
@@ -175,22 +334,42 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
                     new_children = []
                     for subformula in root_node.children:
                         assertions.insert_stack()
+                        assertions.enter_branch()
                         new_child = simplify_formula_using_model_properties(subformula, assertions)
+                        assertions.exit_branch()
                         assertions.pop_stack()
 
                         new_children.append(new_child)
                     new_children = tuple(new_children)
-
+            
             result = AST_Connective(referenced_vars=root_node.referenced_vars, type=root_node.type, children=new_children)
+
             result = result.simplify_on_anihilators()
             if not isinstance(result, AST_Connective):
                 return result
+
             result = result.remove_idempotent_children()
+            if not isinstance(result, AST_Connective):
+                return result
+
+            result = result.simplify_on_exclusion_on_the_third()
             return result
 
         case AST_Negation():
-            # TODO: We are missing assertion barriers here
+            if isinstance(root_node.child, Var):
+                var_value = assertions.get_asserted_values_for_bool_atom(root_node.child)
+
+                if not var_value:
+                    assertions.assert_bool_atom(root_node.child, False)
+                    return root_node
+
+                return BoolLiteral(value=var_value)
+
+            
+            assertions.enter_negation()
             new_child = simplify_formula_using_model_properties(root_node.child, assertions)
+            assertions.exit_negation()
+
             if isinstance(new_child, BoolLiteral):
                 return BoolLiteral(value=not new_child.value)
 
@@ -201,13 +380,25 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
             return result
 
         case AST_Quantifier():
+            assertions.enter_quantifier_scope(root_node.bound_vars)
             new_child = simplify_formula_using_model_properties(root_node.child, assertions)
+            assertions.exit_quantifier_scope()
+
             if isinstance(new_child, BoolLiteral):
+                assertions.vars_eliminated_via_alias.difference_update(root_node.bound_vars)
+                return new_child
+
+            remaining_bound_vars = tuple(
+                var for var in root_node.bound_vars if var not in assertions.vars_eliminated_via_alias
+            )
+            assertions.vars_eliminated_via_alias.difference_update(root_node.bound_vars)
+
+            if not remaining_bound_vars:
                 return new_child
 
             result = AST_Quantifier(
                 referenced_vars=root_node.referenced_vars,
-                bound_vars=root_node.bound_vars,
+                bound_vars=remaining_bound_vars,
                 child=new_child
             )
             return result

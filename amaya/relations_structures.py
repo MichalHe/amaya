@@ -431,7 +431,37 @@ class AST_Connective(ASTp_Node_Base):
 
         return self
 
+    def simplify_on_exclusion_on_the_third(self) -> AST_Connective | BoolLiteral:
+        """
+        Simplify formulae such as (AND X (NOT X)) whre X is a Bool var. 
 
+        This is implemented for Bool vars so far.
+
+        @Todo: Extend this to arbitrary formulae once we implement second-order term labeling (formulae IDs)
+        """
+
+        positive_vars: set[Var] = set()
+        negative_vars: set[Var] = set()
+
+        for child in self.children:
+            if isinstance(child, Var):
+                positive_vars.add(child)
+                continue
+
+            if isinstance(child, AST_Negation):
+                if isinstance(child.child, Var):
+                    negative_vars.add(child.child)
+
+        vars_appearing_with_both_polarities = positive_vars & negative_vars
+
+        if vars_appearing_with_both_polarities:
+            if self.type == Connective_Type.AND | Connective_Type.EQUIV:
+                return BoolLiteral(False)
+
+            return BoolLiteral(False)
+
+        return self
+                       
 
 ASTp_Leaf_Type_List = (Relation, Congruence, BoolLiteral, Var)
 ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral, Var]

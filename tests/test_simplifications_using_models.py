@@ -250,3 +250,172 @@ def test_simplify_on_unconstrained_vars():
     pprint_formula(result)
 
     assert result == expected_result
+
+
+def test_alias_substitution_replaces_equals_by_equals():
+    '''
+    and                              and
+       x - y = 0                        x - y = 0
+       2y + x + z = 3      ---->        3x + z = 3     (y is known to equal x, substituted away)
+    '''
+    x, y, z = Var(1), Var(2), Var(3)
+
+    eq_alias = dsl._eq([(1, x), (-1, y)], 0)                 # x - y = 0  =>  x = y
+    atom = dsl._eq([(1, x), (2, y), (1, z)], 3)               # 2y + x + z = 3
+
+    formula = dsl._and(eq_alias, atom)
+
+    assertions = Asserted_Model_Properties()
+    result = simplify_formula_using_model_properties(formula, assertions)
+
+    expected_atom = Relation(vars=[x, z], coefs=[3, 1], rhs=3, predicate_symbol='=')
+    expected_result = dsl._and(eq_alias, expected_atom)
+
+    assert result == expected_result
+
+
+def test_alias_substitution_applies_to_inequalities_too():
+    '''
+    and                              and
+       x - y = 0                        x - y = 0
+       x + 2y <= 9         ---->        3x <= 9
+    '''
+    x, y = Var(1), Var(2)
+
+    eq_alias = dsl._eq([(1, x), (-1, y)], 0)
+    inequality = Relation(vars=[x, y], coefs=[1, 2], rhs=9, predicate_symbol='<=')
+
+    formula = dsl._and(eq_alias, inequality)
+
+    assertions = Asserted_Model_Properties()
+    result = simplify_formula_using_model_properties(formula, assertions)
+
+    expected_inequality = Relation(vars=[x], coefs=[3], rhs=9, predicate_symbol='<=')
+    expected_result = dsl._and(eq_alias, expected_inequality)
+
+    assert result == expected_result
+
+
+def test_alias_substitution_collapses_atom_that_becomes_a_tautology():
+    '''
+    and                              and
+       x - y = 0                        x - y = 0
+       2x - 2y = 0         ---->        TRUE           (already implied once y is substituted by x)
+    '''
+    x, y = Var(1), Var(2)
+
+    eq_alias = dsl._eq([(1, x), (-1, y)], 0)
+    redundant_atom = Relation(vars=[x, y], coefs=[2, -2], rhs=0, predicate_symbol='=')
+
+    formula = dsl._and(eq_alias, redundant_atom)
+
+    assertions = Asserted_Model_Properties()
+    result = simplify_formula_using_model_properties(formula, assertions)
+
+    # The AND's idempotent-children cleanup drops the resulting TRUE, leaving just the alias equation.
+    assert result == eq_alias
+
+
+def test_alias_substitution_does_not_leak_across_or_branches():
+    '''
+    or                                or
+       and                               and
+          x - y = 0                         x - y = 0
+          2y + x + z = 3                    3x + z = 3
+       2y + x + z = 3      ---->         2y + x + z = 3   (unchanged - the alias from the other branch
+                                                             must not leak into this sibling branch)
+    '''
+    x, y, z = Var(1), Var(2), Var(3)
+
+    eq_alias = dsl._eq([(1, x), (-1, y)], 0)
+    atom = dsl._eq([(1, x), (2, y), (1, z)], 3)
+
+    formula = dsl._or(
+        dsl._and(eq_alias, atom),
+        atom,
+    )
+
+    assertions = Asserted_Model_Properties()
+    result = simplify_formula_using_model_properties(formula, assertions)
+
+    expected_substituted_atom = Relation(vars=[x, z], coefs=[3, 1], rhs=3, predicate_symbol='=')
+    expected_result = dsl._or(
+        dsl._and(eq_alias, expected_substituted_atom),
+        atom,
+    )
+
+    assert result == expected_result
+
+
+def test_simplification_fragment_with_negated_shared_vars():
+    '''
+    Fragment reproducing a real formula shape: two equations over disjoint-looking variable pairs
+    (Var(23)-Var(47) and Var(24)-Var(48)) both sit negated as siblings of one OR, nested inside
+    NOT/AND/OR/exists layers that never establish a "similar equation" match for either of them -
+    which is exactly the condition under which _register_unresolved_equation tries to turn a negated
+    equation into an alias.
+
+    not
+       exists (Var(id=48))
+          and
+             -1.Var(id=47) +1.Var(id=48) = 0
+             exists (Var(id=44))
+                and
+                   -1.Var(id=43) +1.Var(id=44) = 0
+                   exists (Var(id=39))
+                      and
+                         -1.Var(id=38) +1.Var(id=39) = 0
+                         or
+                            NOT
+                               +1.Var(id=15) -1.Var(id=16) = 0
+                            and
+                               Var(id=34)
+                               or
+                                  NOT
+                                     +1.Var(id=23) -1.Var(id=47) = 0
+                                  NOT
+                                     +1.Var(id=24) -1.Var(id=48) = 0
+    '''
+    eq_47_48 = dsl._eq([(-1, Var(47)), (1, Var(48))], 0)
+    eq_43_44 = dsl._eq([(-1, Var(43)), (1, Var(44))], 0)
+    eq_38_39 = dsl._eq([(-1, Var(38)), (1, Var(39))], 0)
+    eq_15_16 = dsl._eq([(1, Var(15)), (-1, Var(16))], 0)
+    eq_23_47 = dsl._eq([(1, Var(23)), (-1, Var(47))], 0)
+    eq_24_48 = dsl._eq([(1, Var(24)), (-1, Var(48))], 0)
+
+    formula = dsl._neg(
+        dsl._exists(
+            (Var(48),),
+            dsl._and(
+                eq_47_48,
+                dsl._exists(
+                    (Var(44),),
+                    dsl._and(
+                        eq_43_44,
+                        dsl._exists(
+                            (Var(39),),
+                            dsl._and(
+                                eq_38_39,
+                                dsl._or(
+                                    dsl._neg(eq_15_16),
+                                    dsl._and(
+                                        Var(34),
+                                        dsl._or(
+                                            dsl._neg(eq_23_47),
+                                            dsl._neg(eq_24_48),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assertions = Asserted_Model_Properties()
+    result = simplify_formula_using_model_properties(formula, assertions)
+    pprint_formula(result)
+    assert False
+    # TODO: write assertions once the expected behaviour under negation is settled
