@@ -215,6 +215,11 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -
         # pprint_formula(astp)
         # sys.exit(0)
 
+    if solver_config.optimizations.inline_bool_var_definitions:
+        logger.debug('Inlining bool var definitions:  %s', astp)
+        astp = var_bounds_lib.inline_bool_var_definitions(astp)
+        logger.debug('Bool var definitions inlined. Result:  %s', astp)
+
     if solver_config.optimizations.remove_vars_used_only_in_disequalities:
         logger.debug('Removing vars used only in disequalities:  %s', astp)
         astp = var_bounds_lib.remove_vars_used_only_in_disequalities(astp, var_table)

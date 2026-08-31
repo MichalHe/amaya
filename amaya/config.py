@@ -109,6 +109,15 @@ class OptimizationsConfig:
     reason_about_models: bool = False
     """ Reason about models of a superformula to simplify subformulae. """
 
+    inline_bool_var_definitions: bool = False
+    """
+    Inline unconditionally-true "definitions" of Bool variables, e.g. conjuncts of the form `(= bool_var phi)`,
+    by substituting every occurrence of bool_var with phi and dropping the now-tautological equivalence.
+
+    Example:
+        (and (= b (or x y)) (or b z))   --->   (or x y z)
+    """
+
 
 @dataclass
 class PreprocessingConfig:

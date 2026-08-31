@@ -655,6 +655,145 @@ def remove_vars_used_only_in_disequalities(ast: ASTp_Node, var_table: Dict[Var, 
     return _drop_vars_used_only_in_disequalities(ast, vars_appearing_only_in_disequations)
 
 
+@dataclass
+class Bool_Var_Definitions:
+    """ Maps a Bool var to the formula that unconditionally defines it, e.g. `b = (or x y)` maps `b -> (or x y)`. """
+    definitions: dict[Var, ASTp_Node] = field(default_factory=dict)
+    conflicting_vars: set[Var] = field(default_factory=set)
+    defining_node_ids: set[int] = field(default_factory=set)
+    """ `id()` of the AST_Connective nodes the definitions were extracted from - to be dropped once inlined. """
+
+
+def _try_register_bool_var_definition(defining_node: AST_Connective, var_side: ASTp_Node, def_side: ASTp_Node,
+                                      defs: Bool_Var_Definitions) -> None:
+    if not isinstance(var_side, Var) or isinstance(def_side, Var):
+        return
+
+    var = var_side
+    if var in defs.conflicting_vars or var in _referenced_vars_of(def_side):
+        return
+
+    if var in defs.definitions:
+        if defs.definitions[var] != def_side:
+            # Conflicting definitions for the same var - cannot be soundly inlined, forget about it.
+            del defs.definitions[var]
+            defs.conflicting_vars.add(var)
+        return
+
+    defs.definitions[var] = def_side
+    defs.defining_node_ids.add(id(defining_node))
+
+
+def _collect_bool_var_definitions(ast: ASTp_Node, defs: Bool_Var_Definitions) -> None:
+    """
+    Collect Bool var definitions reachable from `ast` through ANDs/quantifiers only - such definitions hold
+    unconditionally, throughout the whole formula. Definitions nested under an OR/EQUIV only hold within that
+    branch and are therefore not collected.
+    """
+    match ast:
+        case Var() | BoolLiteral() | Relation() | Congruence() | AST_Negation():
+            pass
+
+        case AST_Quantifier():
+            _collect_bool_var_definitions(ast.child, defs)
+
+        case AST_Connective():
+            if ast.type == Connective_Type.EQUIV and len(ast.children) == 2:
+                left, right = ast.children
+                _try_register_bool_var_definition(ast, left, right, defs)
+                _try_register_bool_var_definition(ast, right, left, defs)
+
+            if ast.type == Connective_Type.AND:
+                for child in ast.children:
+                    _collect_bool_var_definitions(child, defs)
+
+        case _:
+            raise NotImplementedError(f'Unhandled node while collecting bool var definitions: {ast=}')
+
+
+def _resolve_bool_var_definition(var: Var, defs: Bool_Var_Definitions, cache: Dict[Var, ASTp_Node],
+                                 vars_being_resolved: Set[Var]) -> ASTp_Node:
+    if var in cache:
+        return cache[var]
+
+    if var in vars_being_resolved:
+        # A cyclic chain of definitions, e.g. `a <=> b`, `b <=> a` - leave the var as-is to avoid looping forever.
+        return var
+
+    vars_being_resolved.add(var)
+    resolved = _inline_bool_var_definitions(defs.definitions[var], defs, cache, vars_being_resolved)
+    vars_being_resolved.discard(var)
+
+    cache[var] = resolved
+    return resolved
+
+
+def _inline_bool_var_definitions(ast: ASTp_Node, defs: Bool_Var_Definitions, cache: Dict[Var, ASTp_Node],
+                                 vars_being_resolved: Set[Var]) -> ASTp_Node:
+    match ast:
+        case Var():
+            if ast not in defs.definitions:
+                return ast
+            return _resolve_bool_var_definition(ast, defs, cache, vars_being_resolved)
+
+        case BoolLiteral() | Relation() | Congruence():
+            return ast
+
+        case AST_Connective():
+            if id(ast) in defs.defining_node_ids:
+                # The equivalence has become a tautology now that the var it defines has been substituted away.
+                return BoolLiteral(True)
+
+            new_children = tuple(
+                _inline_bool_var_definitions(child, defs, cache, vars_being_resolved) for child in ast.children
+            )
+            return AST_Connective(referenced_vars=_referenced_vars_of_children(new_children), type=ast.type,
+                                  children=new_children)
+
+        case AST_Negation():
+            new_child = _inline_bool_var_definitions(ast.child, defs, cache, vars_being_resolved)
+            if isinstance(new_child, BoolLiteral):
+                return BoolLiteral(value=not new_child.value)
+            return AST_Negation(referenced_vars=_referenced_vars_of(new_child), child=new_child)
+
+        case AST_Quantifier():
+            new_child = _inline_bool_var_definitions(ast.child, defs, cache, vars_being_resolved)
+            if isinstance(new_child, BoolLiteral):
+                return new_child
+
+            remaining_bound_vars = tuple(var for var in ast.bound_vars if var not in defs.definitions)
+            if not remaining_bound_vars:
+                return new_child
+
+            return AST_Quantifier(referenced_vars=_referenced_vars_of(new_child), bound_vars=remaining_bound_vars,
+                                  child=new_child)
+
+        case _:
+            raise NotImplementedError(f'Unhandled node while inlining bool var definitions: {ast=}')
+
+
+def inline_bool_var_definitions(ast: ASTp_Node) -> ASTp_Node:
+    """
+    Inline "definitions" of Bool variables - unconditionally-true equivalences of the form `(= bool_var phi)`
+    (or `(= phi bool_var)`) - by substituting every occurrence of bool_var with phi and dropping the now
+    tautological defining equivalence.
+
+    Example:
+        (and (= b (or x y)) (or b z))   --->   (or x y z)
+
+    Only equivalences reachable from the root through ANDs/quantifiers are inlined - see `_collect_bool_var_definitions`.
+    A var defined more than once (with differing definitions), or whose definition refers to itself, is left untouched.
+    """
+    defs = Bool_Var_Definitions()
+    _collect_bool_var_definitions(ast, defs)
+
+    if not defs.definitions:
+        return ast
+
+    cache: Dict[Var, ASTp_Node] = {}
+    return _inline_bool_var_definitions(ast, defs, cache, set())
+
+
 @dataclass(frozen=True)
 class FrozenLinAtom:
     coefs: Tuple[int, ...]

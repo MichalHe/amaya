@@ -169,6 +169,7 @@ opt_to_config_field = {
     'overapprox-rhs': 'rewrite_by_overapprox_relation_rhs',
     'model-reasoning': 'reason_about_models',
     'infinite-domain': 'remove_vars_used_only_in_disequalities',
+    'iniline-bool-definitions': 'inline_bool_var_definitions',
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
 
