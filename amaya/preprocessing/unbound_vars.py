@@ -568,62 +568,86 @@ def push_negations_towards_atoms(ast: ASTp_Node) -> ASTp_Node:
 
 @dataclass
 class Var_Use_Info:
-    vars_in_positive_atoms: Set[Var] = field(default_factory=set)
-    vars_in_disequalities: Set[Var] = field(default_factory=set)
+    vars_in_positive_atoms: dict[Var, int] = field(default_factory=lambda: defaultdict(int))
+    vars_in_disequalities: dict[Var, int] = field(default_factory=lambda: defaultdict(int))
     existentially_quantified_vars: Set[Var] = field(default_factory=set)
 
+    def add_positive_atom_variable_use(self, var: Var):
+        self.vars_in_positive_atoms[var] += 1
 
-def _collect_vars_used_only_in_disequalities(ast: ASTp_Node, var_use_info: Var_Use_Info) -> None:
+    def add_var_use_in_disequality(self, var: Var):
+        self.vars_in_disequalities[var] += 1
+
+    def is_var_inconsequential_to_models(self, var: Var) -> bool:
+        positive_atom_uses = self.vars_in_positive_atoms[var]
+        disequation_uses = self.vars_in_disequalities[var]
+
+        is_var_used_once = (positive_atom_uses + disequation_uses) == 1
+        is_var_used_only_in_diseqs = (positive_atom_uses == 0) and disequation_uses >= 0
+
+        return is_var_used_once or is_var_used_only_in_diseqs
+
+    def contains_any_data(self) -> bool:
+        return bool(self.vars_in_disequalities) or bool(self.vars_in_disequalities)
+
+
+def _collect_vars_uses_for_quantifier_simplifications(ast: ASTp_Node, var_use_info: Var_Use_Info) -> None:
     match ast:
         case Var() | BoolLiteral():
             pass
         case Relation() | Congruence():
-            var_use_info.vars_in_positive_atoms.update(ast.vars)
+            for var in ast.vars:
+                var_use_info.add_positive_atom_variable_use(var)
         case AST_Negation():
             if isinstance(ast.child, Relation) and ast.child.predicate_symbol == '=':
-                var_use_info.vars_in_disequalities.update(ast.child.vars)
+                for var in ast.child.vars:
+                    var_use_info.add_var_use_in_disequality(var)
                 return
-            
-            _collect_vars_used_only_in_disequalities(ast.child, var_use_info)
+
+            _collect_vars_uses_for_quantifier_simplifications(ast.child, var_use_info)
         case AST_Quantifier():
             var_use_info.existentially_quantified_vars.update(ast.bound_vars)
-            _collect_vars_used_only_in_disequalities(ast.child, var_use_info)
+            _collect_vars_uses_for_quantifier_simplifications(ast.child, var_use_info)
         case AST_Connective():
             for child in ast.children:
-                _collect_vars_used_only_in_disequalities(child, var_use_info)
+                _collect_vars_uses_for_quantifier_simplifications(child, var_use_info)
         case _:
             raise NotImplementedError(f'Unhandled node while collecting vars used only in disequalities: {ast=}')
 
 
-def _drop_vars_used_only_in_disequalities(ast: ASTp_Node, vars_only_in_disequations: set[Var]) -> ASTp_Node:
+def _drop_vars_with_no_consequences_to_models(ast: ASTp_Node, var_use_info: Var_Use_Info) -> ASTp_Node:
     match ast:
         case Var() | BoolLiteral():
             return ast
 
         case Relation():
-            if any(var in vars_only_in_disequations for var in ast.vars):
-                return BoolLiteral(value=False)
+            if any(var_use_info.is_var_inconsequential_to_models(var) for var in ast.vars):
+                return BoolLiteral(value=True)
             return ast
 
         case Congruence():
             return ast
 
         case AST_Negation():
-            new_child = _drop_vars_used_only_in_disequalities(ast.child, vars_only_in_disequations)
+            if isinstance(ast.child, Relation):
+                if any(var_use_info.is_var_inconsequential_to_models(var) for var in ast.child.vars):
+                    return BoolLiteral(True)  # Return true as this disequation can be always satisfied
+
+            new_child = _drop_vars_with_no_consequences_to_models(ast.child, var_use_info)
             if isinstance(new_child, BoolLiteral):
                 return BoolLiteral(value=not new_child.value)
             return AST_Negation(referenced_vars=_referenced_vars_of(new_child), child=new_child)
 
         case AST_Quantifier():
-            new_bound_vars = tuple(var for var in ast.bound_vars if var not in vars_only_in_disequations)
-            new_child = _drop_vars_used_only_in_disequalities(ast.child, vars_only_in_disequations)
+            new_bound_vars = tuple(var for var in ast.bound_vars if not var_use_info.is_var_inconsequential_to_models(var))
+            new_child = _drop_vars_with_no_consequences_to_models(ast.child, var_use_info)
             if not new_bound_vars:
                 return new_child
             return AST_Quantifier(referenced_vars=_referenced_vars_of(new_child), bound_vars=tuple(new_bound_vars),
                                   child=new_child)
 
         case AST_Connective():
-            new_children = tuple(_drop_vars_used_only_in_disequalities(child, vars_only_in_disequations) for child in ast.children)
+            new_children = tuple(_drop_vars_with_no_consequences_to_models(child, var_use_info) for child in ast.children)
             result = ast.replace_children(new_children)
             result = result.simplify_on_anihilators()
             if not isinstance(result, AST_Connective):
@@ -633,7 +657,7 @@ def _drop_vars_used_only_in_disequalities(ast: ASTp_Node, vars_only_in_disequati
     raise NotImplementedError(f'Unhandled node while dropping vars used only in disequalities: {ast=}')
 
 
-def remove_vars_used_only_in_disequalities(ast: ASTp_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
+def remove_vars_with_no_consequences_on_the_model(ast: ASTp_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
     """
     Drop existentially quantified variables of an infinite sort (Int) that occur only in disequalities.
 
@@ -646,13 +670,14 @@ def remove_vars_used_only_in_disequalities(ast: ASTp_Node, var_table: Dict[Var, 
         (exists ((x Int)) (and (<= y 0) (not (= x 5)) (not (= x y))))   --->   (<= y 0)
     """
     var_use_info = Var_Use_Info()
-    _collect_vars_used_only_in_disequalities(ast, var_use_info)
+    _collect_vars_uses_for_quantifier_simplifications(ast, var_use_info)
 
-    vars_appearing_only_in_disequations  = (var_use_info.vars_in_disequalities - var_use_info.vars_in_positive_atoms) & var_use_info.existentially_quantified_vars
-    if not vars_appearing_only_in_disequations:
+    if not var_use_info.vars_in_disequalities:
         return ast
 
-    return _drop_vars_used_only_in_disequalities(ast, vars_appearing_only_in_disequations)
+    result = _drop_vars_with_no_consequences_to_models(ast, var_use_info)
+
+    return result
 
 
 @dataclass

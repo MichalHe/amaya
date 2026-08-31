@@ -222,11 +222,15 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -
 
     if solver_config.optimizations.remove_vars_used_only_in_disequalities:
         logger.debug('Removing vars used only in disequalities:  %s', astp)
-        astp = var_bounds_lib.remove_vars_used_only_in_disequalities(astp, var_table)
+        astp = var_bounds_lib.remove_vars_with_no_consequences_on_the_model(astp, var_table)
+        astp = var_bounds_lib.remove_vars_with_no_consequences_on_the_model(astp, var_table)
         logger.debug('Vars used only in disequalities removed. Result:  %s', astp)
 
-        print('Now')
+    if solver_config.optimizations.reason_about_models:
         model_properties = Asserted_Model_Properties()
+
+        # pprint_formula(astp)
+        astp = simplify_formula_using_model_properties(astp, model_properties)
         astp = simplify_formula_using_model_properties(astp, model_properties)
 
     return astp
