@@ -1,6 +1,6 @@
-FROM debian 
+FROM debian
 RUN apt update
-RUN apt install -y gcc cmake make git python3 python3-pip libgmp-dev libhwloc-dev pkg-config
+RUN apt install -y gcc g++ cmake make git python3 python3-pip python3-dev libgmp-dev libhwloc-dev pkg-config
 
 RUN git clone https://github.com/trolando/sylvan.git sylvan
 RUN mkdir -p sylvan/build
@@ -11,16 +11,23 @@ WORKDIR build
 RUN cmake ..
 RUN make -j`nproc`
 RUN make install
-
-WORKDIR /
-RUN git clone https://github.com/MichalHe/amaya-mtbdd.git amaya-mtbdd
-WORKDIR amaya-mtbdd
-RUN make -j`nproc` shared-lib
+RUN ldconfig
 
 WORKDIR /
 COPY . /amaya
 WORKDIR amaya
-RUN cp /amaya-mtbdd/build/amaya-mtbdd.so /amaya/amaya/
 RUN pip3 install -r requirements.txt --break-system-packages
-ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/lib/"
+RUN pip3 install cython setuptools --break-system-packages
+
+# The MTBDD backend (mtbdd-backend/) is compiled into a Cython extension
+# (libamaya) and dropped into amaya/, replacing the old ctypes-based
+# amaya-mtbdd.so built from a separate cloned repo. CPATH/LIBRARY_PATH point
+# the extension build at the sylvan headers/lib just installed above, since
+# mtbdd-backend/wrapper/compile_wrapper.py's own search paths are dev-machine
+# specific.
+ENV CPATH="/usr/local/include"
+ENV LIBRARY_PATH="/usr/local/lib"
+ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/lib"
+RUN make -C mtbdd-backend libamaya PYTHON=python3
+
 ENTRYPOINT ["./run-amaya.py", "--fast", "-O", "all", "get-sat"]
