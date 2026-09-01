@@ -36,8 +36,10 @@ import amaya.presburger.constructions.naturals as relations_to_dfa
 import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
 from amaya.preprocessing import (
-    antiprenexing
+    antiprenexing,
+    flatten_bool_nary_connectives
 )
+from amaya.preprocessing.conditional_equality_resolution import resolve_conditional_equalities
 from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
@@ -229,9 +231,30 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -
     if solver_config.optimizations.reason_about_models:
         model_properties = Asserted_Model_Properties()
 
-        # pprint_formula(astp)
         astp = simplify_formula_using_model_properties(astp, model_properties)
         astp = simplify_formula_using_model_properties(astp, model_properties)
+
+    if solver_config.optimizations.resolve_conditional_equalities:
+        logger.debug('Resolving conditional equalities:  %s', astp)
+        astp = resolve_conditional_equalities(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        astp = resolve_conditional_equalities(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        astp = resolve_conditional_equalities(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        astp = resolve_conditional_equalities(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        astp = resolve_conditional_equalities(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        astp = resolve_conditional_equalities(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        astp = resolve_conditional_equalities(astp)
+        astp = antiprenexing.miniscope_quantifiers(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        astp = resolve_conditional_equalities(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        astp = resolve_conditional_equalities(astp)
+        logger.debug('Conditional equalities resolved. Result:  %s', astp)
 
     return astp
 

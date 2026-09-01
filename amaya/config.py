@@ -118,6 +118,15 @@ class OptimizationsConfig:
         (and (= b (or x y)) (or b z))   --->   (or x y z)
     """
 
+    resolve_conditional_equalities: bool = False
+    """
+    Eliminate existentially quantified variables occurring only in "conditional equalities" hidden
+    inside disjunctions.
+
+    Example:
+        (exists ((x Int)) (and (or A (= x t1)) (or B (= x t2))))   --->   (or A B (= t1 t2))
+    """
+
 
 @dataclass
 class PreprocessingConfig:

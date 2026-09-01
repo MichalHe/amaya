@@ -170,6 +170,7 @@ opt_to_config_field = {
     'model-reasoning': 'reason_about_models',
     'infinite-domain': 'remove_vars_used_only_in_disequalities',
     'iniline-bool-definitions': 'inline_bool_var_definitions',
+    'rce': 'resolve_conditional_equalities',
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
 
