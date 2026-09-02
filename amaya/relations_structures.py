@@ -201,6 +201,8 @@ class Congruence:
     rhs: int
     modulus: int
 
+    id: int = -1
+
     def linear_terms(self) -> Generator[Tuple[int, Var], None, None]:
         for term in zip(self.coefs, self.vars):
             yield term
@@ -372,7 +374,7 @@ class FunctionSymbol:
 
 @dataclass
 class ASTp_Node_Base:
-    referenced_vars: Tuple[Var,...] = field(repr=False)
+    referenced_vars: Tuple[Var,...] = field(repr=True, compare=False)
 
 
 @dataclass

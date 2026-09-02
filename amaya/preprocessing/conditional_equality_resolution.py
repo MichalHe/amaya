@@ -62,7 +62,8 @@ case.
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+import itertools
+from typing import List, Optional, Sequence, Tuple
 
 from amaya.relations_structures import (
     ASTp_Node,
@@ -78,22 +79,45 @@ from amaya.relations_structures import (
 )
 
 
-def _referenced_vars_of(node: ASTp_Node) -> Tuple[Var, ...]:
+def _extract_referenced_vars(node: ASTp_Node) -> Tuple[Var, ...]:
+    if isinstance(node, (Relation, Congruence)):
+        return tuple(node.vars)
+    elif isinstance(node, (Var,)):
+        return (node,)
+    elif isinstance(node, (BoolLiteral,)):
+        return tuple()
+    return tuple(node.referenced_vars)
+
+
+def fill_referenced_vars(node: ASTp_Node):
+    """
+    The dsl `_and`/`_or`/`_neg`/`_exists` helpers default `referenced_vars` to `()`. The pass under
+    test relies on that field being accurate (as it always is for real, preprocessed formulae), so
+    hand-built test trees must have it filled in bottom-up before being fed to the pass.
+    """
     match node:
-        case Var():
-            return (node,)
-        case Relation() | Congruence():
-            return tuple(node.vars)
-        case BoolLiteral():
-            return tuple()
+        case AST_Connective():
+            referenced_vars: set[Var] = set()
+            for child in node.children:
+                fill_referenced_vars(child)
+                referenced_vars.update(_extract_referenced_vars(child))
+            node.referenced_vars=tuple(sorted(referenced_vars))
+            return
+
+        case AST_Negation():
+            fill_referenced_vars(node.child)
+            childs_referenced_vars = _extract_referenced_vars(node.child)
+            node.referenced_vars=tuple(sorted(childs_referenced_vars))
+            return
+
+        case AST_Quantifier():
+            fill_referenced_vars(node.child)
+            childs_referenced_vars = _extract_referenced_vars(node.child)
+            node.referenced_vars=tuple(sorted(childs_referenced_vars))
+            return
+
         case _:
-            return node.referenced_vars
-
-
-def _mentions_var(node: ASTp_Node, var: Var) -> bool:
-    if isinstance(node, Var):
-        return node == var
-    return var in _referenced_vars_of(node)
+            return node
 
 
 def _subtract_equations(eq: Relation, other_eq: Relation) -> Relation:
@@ -118,7 +142,7 @@ def _subtract_equations(eq: Relation, other_eq: Relation) -> Relation:
 def _referenced_vars_of_children(children: List[ASTp_Node]) -> Tuple[Var, ...]:
     seen: set[Var] = set()
     for child in children:
-        seen.update(_referenced_vars_of(child))
+        seen.update(_extract_referenced_vars(child))
     return tuple(sorted(seen))
 
 
@@ -133,7 +157,7 @@ def _make_or(children: List[ASTp_Node]) -> ASTp_Node:
     return AST_Connective(referenced_vars=_referenced_vars_of_children(filtered), type=Connective_Type.OR, children=tuple(filtered))
 
 
-def _make_and(children: List[ASTp_Node]) -> ASTp_Node:
+def _make_and(children: Sequence[ASTp_Node]) -> ASTp_Node:
     filtered = [child for child in children if child != BoolLiteral(True)]
     if any(child == BoolLiteral(False) for child in filtered):
         return BoolLiteral(False)
@@ -158,14 +182,14 @@ def _negate(node: ASTp_Node) -> ASTp_Node:
                 return node.negate()
             return AST_Negation(referenced_vars=tuple(node.vars), child=node)
         case Congruence():
-            return AST_Negation(referenced_vars=_referenced_vars_of(node), child=node)
+            return AST_Negation(referenced_vars=tuple(node.vars), child=node)
         case AST_Connective():
             if node.type == Connective_Type.EQUIV:
                 # Negating an equivalence isn't a simple De Morgan swap - keep it wrapped.
                 return AST_Negation(referenced_vars=node.referenced_vars, child=node)
             flipped_type = Connective_Type.OR if node.type == Connective_Type.AND else Connective_Type.AND
             negated_children = tuple(_negate(child) for child in node.children)
-            return AST_Connective(referenced_vars=_referenced_vars_of_children(list(negated_children)), type=flipped_type, children=negated_children)
+            return AST_Connective(referenced_vars=node.referenced_vars, type=flipped_type, children=negated_children)
         case _:
             raise ValueError(f'Unhandled node while negating: {node}')
 
@@ -225,12 +249,12 @@ def _match_clause_against_var(clause: ASTp_Node, var: Var) -> Optional[Tuple[AST
     if not (isinstance(clause, AST_Connective) and clause.type == Connective_Type.OR):
         return None
 
-    var_children = [child for child in clause.children if _mentions_var(child, var)]
-    if not var_children:
+    children_containing_var = [child for child in clause.children if var in _extract_referenced_vars(child)]
+    if not children_containing_var:
         return None
 
     normalized_equality: Optional[Relation] = None
-    for equality_candidate in var_children:
+    for equality_candidate in children_containing_var:
         if not (isinstance(equality_candidate, Relation) and equality_candidate.predicate_symbol == '='):
             return None
 
@@ -248,7 +272,7 @@ def _match_clause_against_var(clause: ASTp_Node, var: Var) -> Optional[Tuple[AST
 
     assert normalized_equality is not None
 
-    var_child_ids = {id(child) for child in var_children}
+    var_child_ids = {id(child) for child in children_containing_var}
     escape_children = [child for child in clause.children if id(child) not in var_child_ids]
     escape = _make_or(escape_children)
 
@@ -276,7 +300,7 @@ def _try_eliminate_var(var: Var, node: ASTp_Node) -> Optional[ASTp_Node]:
     inequalities: List[Relation] = []
 
     for idx, child in enumerate(node.children):
-        if not _mentions_var(child, var):
+        if not var in _extract_referenced_vars(child):
             continue
 
         if isinstance(child, Relation) and child.predicate_symbol == '<=':
@@ -358,8 +382,9 @@ def _resolve_with_inequalities(var: Var, matches: List[_Clause_Match], inequalit
             bound_interval.apply_assertion(bound)
         d_is_satisfiable = BoolLiteral(not bound_interval.implies_contradiction())
     else:
+        vars_in_inequalities: set[Var] = set(itertools.chain.from_iterable(ineq.vars for ineq in inequalities))
         d_is_satisfiable = AST_Quantifier(
-            referenced_vars=_referenced_vars_of_children(inequalities),
+            referenced_vars=tuple(vars_in_inequalities),
             bound_vars=(var,),
             child=_make_and(inequalities),
         )
@@ -410,7 +435,7 @@ def resolve_conditional_equalities(root: ASTp_Node) -> ASTp_Node:
             new_child = resolve_conditional_equalities(root.child)
             if isinstance(new_child, BoolLiteral):
                 return BoolLiteral(not new_child.value)
-            return AST_Negation(referenced_vars=_referenced_vars_of(new_child), child=new_child)
+            return AST_Negation(referenced_vars=_extract_referenced_vars(new_child), child=new_child)
 
         case AST_Connective():
             new_children = tuple(resolve_conditional_equalities(child) for child in root.children)
@@ -431,7 +456,7 @@ def resolve_conditional_equalities(root: ASTp_Node) -> ASTp_Node:
                 return new_child
 
             return AST_Quantifier(
-                referenced_vars=_referenced_vars_of(new_child),
+                referenced_vars=_extract_referenced_vars(new_child),
                 bound_vars=remaining_bound_vars,
                 child=new_child,
             )

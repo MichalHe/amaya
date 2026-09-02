@@ -29,5 +29,3 @@ ENV CPATH="/usr/local/include"
 ENV LIBRARY_PATH="/usr/local/lib"
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/lib"
 RUN make -C mtbdd-backend libamaya PYTHON=python3
-
-ENTRYPOINT ["./run-amaya.py", "--fast", "-O", "all", "get-sat"]

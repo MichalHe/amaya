@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Iterable, cast
+from typing import Iterable, cast, overload
 import math
 import itertools
 
@@ -11,6 +11,7 @@ from amaya.relations_structures import (
     ASTp_Node,
     ASTp_Node_Base,
     BoolLiteral,
+    Congruence,
     Connective_Type,
     Relation,
     Var,
@@ -178,22 +179,28 @@ def _subtract_equations(eq: Relation, other_eq: Relation) -> Relation:
     )
 
 
-def _substitute_known_aliases(relation: Relation, assertions: Asserted_Model_Properties) -> Relation:
+@overload
+def _substitute_known_aliases(relation: Relation, assertions: Asserted_Model_Properties) -> Relation: ...
+
+@overload
+def _substitute_known_aliases(relation: Congruence, assertions: Asserted_Model_Properties) -> Congruence: ...
+
+def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asserted_Model_Properties) -> Relation | Congruence:
     """ Replace every variable in `relation` that has a known alias (e.g. x = y - 1) with its alias expression. """
-    new_terms: dict[Var, int] = {}
-    const_shift = 0
+    new_terms: dict[Var, int] = defaultdict(int)
+    abs_term = 0
     substituted_anything = False
 
     for var, coef in zip(relation.vars, relation.coefs):
         alias = assertions.get_alias(var)
         if alias is None:
-            new_terms[var] = new_terms.get(var, 0) + coef
+            new_terms[var] = new_terms[var] + coef
             continue
 
         substituted_anything = True
         for alias_var, alias_coef in zip(alias.vars, alias.coefs):
-            new_terms[alias_var] = new_terms.get(alias_var, 0) + coef * alias_coef
-        const_shift += coef * alias.const
+            new_terms[alias_var] = new_terms[alias_var] + coef * alias_coef
+        abs_term += coef * alias.const
 
     if not substituted_anything:
         return relation
@@ -201,9 +208,15 @@ def _substitute_known_aliases(relation: Relation, assertions: Asserted_Model_Pro
     sorted_terms = sorted((var, coef) for var, coef in new_terms.items() if coef != 0)
     new_vars = [var for var, _ in sorted_terms]
     new_coefs = [coef for _, coef in sorted_terms]
-    new_rhs = relation.rhs - const_shift
+    new_rhs = relation.rhs - abs_term
 
-    return Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=relation.predicate_symbol)
+    if isinstance(relation, Relation):
+        return Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=relation.predicate_symbol)
+    else:
+        # We are dealing with a congruence
+        new_coefs = [coef % relation.modulus for coef in new_coefs]
+        new_rhs = new_rhs % relation.modulus
+        return Congruence(vars=new_vars, coefs=new_coefs, rhs=new_rhs, modulus=relation.modulus)
 
 
 def _try_extract_alias(equation: Relation) -> tuple[Var, Var_Alias] | None:
@@ -280,6 +293,10 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
 
         case BoolLiteral():
             return root_node
+
+        case Congruence():
+            rewritten_congruence: Congruence = _substitute_known_aliases(root_node, assertions)
+            return rewritten_congruence
                        
         case Relation():
             # Replace every variable with a known alias (e.g. x = y - 1) before doing anything else - this
@@ -415,13 +432,15 @@ class Bool_Var_Uses:
 @dataclass
 class Variable_Use_Info:
     relation_uses: dict[Var, list[Relation]] = field(default_factory=lambda: defaultdict(list))
+    congruence_uses: dict[Var, list[Congruence]] = field(default_factory=lambda: defaultdict(list))
     bool_var_uses: dict[Var, Bool_Var_Uses] = field(default_factory=lambda: defaultdict(Bool_Var_Uses)) 
 
     next_available_relation_id = 0
 
     def is_var_used_only_once(self, var: Var) -> bool:
-        var_uses = self.relation_uses[var]
-        return len(var_uses) <= 1
+        rel_uses = self.relation_uses[var]
+        congruence_uses = self.congruence_uses[var]
+        return len(rel_uses) + len(congruence_uses) <= 1
 
     def delete_all_relatations_containing_to_a_var(self, var: Var):
         """
@@ -449,13 +468,16 @@ class Variable_Use_Info:
     def add_int_var_use(self, var: Var, use: Relation): 
         self.relation_uses[var].append(use)
 
+    def add_var_use_in_congruence(self, var: Var, use: Congruence): 
+        self.congruence_uses[var].append(use)
+
     def add_positive_bool_var_use(self, bool_var: Var):
         self.bool_var_uses[bool_var].positive += 1
 
     def add_negative_bool_var_use(self, bool_var: Var):
         self.bool_var_uses[bool_var].negative += 1
 
-    def ensure_relation_id_is_set(self, relation: Relation):
+    def ensure_relation_id_is_set(self, relation: Relation | Congruence):
         if relation.id >= 0:
             return
 
@@ -472,6 +494,11 @@ def scan_variable_use(root_node: ASTp_Node, var_use: Variable_Use_Info):
 
         case BoolLiteral():
             pass
+
+        case Congruence():
+            var_use.ensure_relation_id_is_set(root_node)
+            for var in root_node.vars:
+                var_use.add_var_use_in_congruence(var, root_node)
 
         case Relation():
             var_use.ensure_relation_id_is_set(root_node)
@@ -512,6 +539,9 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
                     var_uses.delete_all_relatations_containing_to_a_var(var)
                     result = BoolLiteral(True)  # This relation gives us no information about models
                     return result
+            return root_node
+
+        case Congruence():
             return root_node
 
         case AST_Connective():

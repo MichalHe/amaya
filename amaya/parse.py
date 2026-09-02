@@ -39,7 +39,7 @@ from amaya.preprocessing import (
     antiprenexing,
     flatten_bool_nary_connectives
 )
-from amaya.preprocessing.conditional_equality_resolution import resolve_conditional_equalities
+from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars, resolve_conditional_equalities
 from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
@@ -236,6 +236,7 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -
 
     if solver_config.optimizations.resolve_conditional_equalities:
         logger.debug('Resolving conditional equalities:  %s', astp)
+        fill_referenced_vars(astp)
         astp = resolve_conditional_equalities(astp)
         astp = flatten_bool_nary_connectives(astp)
         astp = resolve_conditional_equalities(astp)
