@@ -276,9 +276,8 @@ TASK_IMPL_3(MTBDD, build_pad_closure_bit_set_fronier_op, MTBDD *, p_extension, M
 
         bool can_ext_post_state_reach_final = frontier_contents->has_any_state(extension_contents->destination_set);
         if (can_ext_post_state_reach_final) {
-            auto new_frontier = g_solver_context->bit_set_alloc->alloc();
-            u64 block_cnt = g_solver_context->bit_set_alloc->current_generation_block_cnt;
-            new_frontier->populate_with(*frontier_contents, block_cnt);
+            auto new_frontier = g_solver_context->bit_set_alloc->alloc_uninitialized();
+            new_frontier->populate_with(*frontier_contents);
             new_frontier->add_state(state_to_extend_frontier_with);
 
             MTBDD result = Bit_Set_Leaf::make_bit_set_leaf(new_frontier);

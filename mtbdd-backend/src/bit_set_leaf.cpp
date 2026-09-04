@@ -15,8 +15,8 @@ sylvan::MTBDD Bit_Set_Leaf::make_bit_set_leaf(Bit_Set::Bit_Set* bit_set) {
 void Bit_Set_Leaf::create_from_value(u64* bit_set_to_copy) {
     Bit_Set::Bit_Set** value_ptr_to_copy = reinterpret_cast<Bit_Set::Bit_Set**>(bit_set_to_copy);
 
-    Bit_Set::Bit_Set* new_value = g_solver_context->bit_set_alloc->alloc();
-    new_value->populate_with(*(*value_ptr_to_copy), g_solver_context->bit_set_alloc->current_generation_block_cnt);
+    Bit_Set::Bit_Set* new_value = g_solver_context->bit_set_alloc->alloc_uninitialized();
+    new_value->populate_with(**value_ptr_to_copy);
 
     *value_ptr_to_copy = new_value;
 }
@@ -30,9 +30,7 @@ int Bit_Set_Leaf::leaf_equals(u64 left_bit_set_raw_ptr, u64 right_bit_set_raw_pt
     auto left_bit_set  = reinterpret_cast<Bit_Set::Bit_Set*>(left_bit_set_raw_ptr);
     auto right_bit_set = reinterpret_cast<Bit_Set::Bit_Set*>(right_bit_set_raw_ptr);
 
-    u64 block_count = g_solver_context->bit_set_alloc->current_generation_block_cnt;
-
-    return left_bit_set->equals(*right_bit_set, block_count);
+    return left_bit_set->equals(*right_bit_set);
 }
 
 u64 Bit_Set_Leaf::leaf_hash(const u64 bit_set_raw_ptr, const u64 seed) {
@@ -41,9 +39,9 @@ u64 Bit_Set_Leaf::leaf_hash(const u64 bit_set_raw_ptr, const u64 seed) {
     const u64 prime = 1099511628211u;
     u64 hash = seed;
 
-    const u64 chunk_count = g_solver_context->bit_set_alloc->current_generation_block_cnt;
+    const u64 chunk_count = bit_set->block_cnt;
 
-    for (int chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
+    for (u64 chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
         u64 chunk = bit_set->data[chunk_idx];
 
         hash = hash ^ chunk;
@@ -61,7 +59,7 @@ char* Bit_Set_Leaf::into_str(int comp, uint64_t leaf_contents_raw_ptr, char *buf
     auto leaf_contents = reinterpret_cast<Bit_Set::Bit_Set*>(leaf_contents_raw_ptr);
     ss << "{";
     uint32_t cnt = 1;
-    for (State state = 0; state < g_solver_context->bit_set_alloc->current_generation_state_cnt; state++) {
+    for (State state = 0; state < static_cast<State>(leaf_contents->capacity()); state++) {
         bool is_present = leaf_contents->has_state(state);
         if (!is_present) continue;
 
@@ -88,10 +86,10 @@ std::vector<Transition> Bit_Set_Leaf::unpack_mtbdd(sylvan::MTBDD bdd, State orig
     std::vector<Transition> transitions;
     u8 raw_symbol[support_size];
 
-    u64 state_count = g_solver_context->bit_set_alloc->current_generation_block_cnt;
     sylvan::MTBDD leaf = sylvan::mtbdd_enum_first(bdd, support_vars, raw_symbol, NULL);
     while (leaf != sylvan::mtbdd_false) {
         auto leaf_contents = reinterpret_cast<Bit_Set::Bit_Set*>(sylvan::mtbdd_getvalue(leaf));
+        State state_count = static_cast<State>(leaf_contents->capacity());
 
         for (State dest_state = 0; dest_state < state_count; dest_state++) {
             if (!leaf_contents->has_state(static_cast<u64>(dest_state))) continue;                
