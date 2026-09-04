@@ -142,6 +142,8 @@ class Automaton_Cache:
     hits: int = 0
     misses: int = 0
     evictions: int = 0
+    unusable_renamings: int = 0
+    """ Hits that had to be rebuilt anyway because the renaming onto this occurrence was not order-preserving. """
 
     def get(self, key: Tuple) -> Optional[Tuple[Tuple[Var, ...], NFA]]:
         entry = self.entries.get(key)
@@ -214,7 +216,15 @@ def run_evaluation_procedure_cse(ast: ASTp_Node,
         if hit is not None:
             cached_sig, cached_nfa = hit
             renaming = dict(zip(cached_sig, enc.sig))
-            return cached_nfa.renamed_copy(renaming)
+            try:
+                return cached_nfa.renamed_copy(renaming)
+            except ValueError:
+                # `libamaya.rename_vars` only accepts order-preserving renamings (see `_renamed_copy`),
+                # and two alpha-equivalent occurrences may well use var ids in a different relative
+                # order - e.g. a subformula over (x, y) recurring over (y, x). That is a cache miss,
+                # not an error: fall through and build the automaton normally. Without this the whole
+                # run dies on such a pair (`--astp-cse` on benchmarks/formulae/psyco/001.smt2).
+                automaton_cache.unusable_renamings += 1
 
     nfa = _original_run_evaluation_procedure(ast, ctx, _debug_recursion_depth)
 

@@ -114,9 +114,14 @@ class Asserted_Model_Properties:
         last_level[atom] = value
 
     def get_asserted_values_for_bool_atom(self, atom: Var) -> bool | None:
+        """ The value asserted for `atom` at the innermost level that has one, or None if there is none. """
         for level in reversed(self.bool_atom_values):
-            if atom_value := level.get(atom) is not None:
-                return atom_value
+            # Note: `if atom_value := level.get(atom) is not None` would bind the *comparison's* result,
+            # making every recorded atom - including one asserted False - read back as True.
+            asserted_value = level.get(atom)
+            if asserted_value is not None:
+                return asserted_value
+        return None
 
     def pop_bool_atom(self, atom: Var):
         last_level = self.bool_atom_values[-1]

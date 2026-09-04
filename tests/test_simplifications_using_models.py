@@ -419,3 +419,34 @@ def test_simplification_fragment_with_negated_shared_vars():
     pprint_formula(result)
     assert False
     # TODO: write assertions once the expected behaviour under negation is settled
+
+
+def test_asserted_bool_atom_values_are_read_back_faithfully():
+    """
+    Regression: `get_asserted_values_for_bool_atom` used to be written as
+    `if atom_value := level.get(atom) is not None`, which binds the result of the *comparison* - so
+    every recorded atom, including one asserted False, read back as True.
+    """
+    assertions = Asserted_Model_Properties()
+    asserted_true, asserted_false, never_asserted = Var(id=1), Var(id=2), Var(id=3)
+
+    assertions.assert_bool_atom(asserted_true, True)
+    assertions.assert_bool_atom(asserted_false, False)
+
+    assert assertions.get_asserted_values_for_bool_atom(asserted_true) is True
+    assert assertions.get_asserted_values_for_bool_atom(asserted_false) is False
+    assert assertions.get_asserted_values_for_bool_atom(never_asserted) is None
+
+
+def test_asserted_bool_atom_values_are_scoped_innermost_first():
+    assertions = Asserted_Model_Properties()
+    atom = Var(id=1)
+
+    assertions.assert_bool_atom(atom, False)
+    assertions.insert_stack()
+    assertions.assert_bool_atom(atom, True)
+
+    assert assertions.get_asserted_values_for_bool_atom(atom) is True
+
+    assertions.pop_stack()
+    assert assertions.get_asserted_values_for_bool_atom(atom) is False

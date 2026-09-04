@@ -23,6 +23,7 @@ given formula (controlled via the `--backend` option):
 '''
 import argparse as ap
 from collections.abc import Iterable
+import functools
 import contextlib
 from enum import Enum
 import os
@@ -111,6 +112,27 @@ argparser.add_argument('--astp-cse',
                              'subtrees with the same shape) reuse one automaton instead of being constructed again.\n'
                              'Requires -m MTBDD; a no-op (falls back to the ordinary evaluation) on any other backend.\n'
                              'Does not change the result on any input - see DEBRUJIN_CSE.md.'))
+
+argparser.add_argument('--use-toplevel-sat',
+                       action='store_true',
+                       dest='use_toplevel_sat',
+                       default=False,
+                       help=('(EXPERIMENTAL) Decide the formula\'s free Bool variables with a CDCL SAT solver and hand\n'
+                             'only the residual LIA formulae to the automata engine, blocking an assignment and asking\n'
+                             'for the next one whenever its residual turns out unsatisfiable. Intended for\n'
+                             'Boolean-structure-heavy inputs; formulae without free Bool variables fall through to the\n'
+                             'ordinary evaluation. Implies --astp-cse (the loop relies on the automaton cache to reuse\n'
+                             'work across iterations), so -m MTBDD is strongly recommended. Cannot be combined with\n'
+                             '--shard. Requires python-sat. See SAT_TOP_LEVEL.md.'))
+
+argparser.add_argument('--toplevel-sat-exact-blocking',
+                       action='store_true',
+                       dest='toplevel_sat_exact_blocking',
+                       default=False,
+                       help=('(EXPERIMENTAL) Only meaningful together with --use-toplevel-sat: block a refuted\n'
+                             'Boolean assignment exactly, instead of blocking every assignment that agrees with it\n'
+                             'on the variables the refuted residual actually depended on. Strictly weaker pruning;\n'
+                             'exists to measure what the generalized blocking clauses buy. See SAT_TOP_LEVEL.md.'))
 
 argparser.add_argument('-q', '--quiet',
                        action='store_true',
@@ -467,6 +489,29 @@ else:
 # evaluation call below in `amaya.cse_cache.cse_enabled()`.
 use_astp_cse = args.astp_cse
 
+# `--use-toplevel-sat` is experimental and, like `--astp-cse`, not an `-O` optimization: it does not
+# tweak preprocessing, it replaces the top-level driver, so it belongs next to the backend/mode
+# selection instead of among the flags that compose with the default evaluator. See SAT_TOP_LEVEL.md.
+if args.use_toplevel_sat and args.sharding_enabled:
+    print('Error: --use-toplevel-sat and --shard are two different strategies for decomposing the same '
+          'top-level conjunction and cannot be combined.', file=sys.stderr)
+    sys.exit(1)
+
+
+def get_evaluation_strategy():
+    """
+    The `evaluate_prepared_formula` callback handed to `parse.perform_whole_evaluation_on_source_text`.
+
+    `amaya.sat_toplevel` is imported lazily (like `amaya.cse_cache` below) so that the python-sat
+    dependency is only ever touched when the feature is explicitly requested.
+    """
+    if not args.use_toplevel_sat:
+        return parse.evaluate_prepared_formula_with_automata
+
+    from amaya.sat_toplevel import evaluate_prepared_formula_with_toplevel_sat
+    return functools.partial(evaluate_prepared_formula_with_toplevel_sat,
+                             use_generalized_blocking=not args.toplevel_sat_exact_blocking)
+
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""
     if os.path.exists(output_destination):
@@ -598,7 +643,9 @@ def run_in_getsat_mode(args) -> bool:
         logger.info(f'Executing evaluation procedure with configuration: {solver_config}')
 
         try:
-            result = parse.perform_whole_evaluation_on_source_text(input_text, handle_automaton_created_fn)
+            result = parse.perform_whole_evaluation_on_source_text(
+                input_text, handle_automaton_created_fn,
+                evaluate_prepared_formula=get_evaluation_strategy())
         except NonlinearArithmeticError as err:
             logger.debug('Input formula is not a valid LIA formula. Reason: %s', err)
             print('unknown')
@@ -709,7 +756,8 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                 text = benchmark_input_file.read()
 
                 benchmark_start = time.time_ns()
-                result = parse.perform_whole_evaluation_on_source_text(text)
+                result = parse.perform_whole_evaluation_on_source_text(
+                    text, evaluate_prepared_formula=get_evaluation_strategy())
                 benchmark_end = time.time_ns()
                 runtime_ns = benchmark_end - benchmark_start
 

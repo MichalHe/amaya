@@ -309,8 +309,38 @@ class Evaluation_Result:
     var_table: Dict[Var, VarInfo] = field(default_factory=dict)
 
 
+def evaluate_prepared_formula_with_automata(astp: ASTp_Node, eval_ctx: EvaluationContext) -> Evaluation_Result:
+    """
+    The default evaluation strategy: build the automaton accepting the formula's solutions and read a
+    model off it (or shard the top-level conjunction, if sharding is enabled).
+
+    Factored out of `perform_whole_evaluation_on_source_text` so that experimental top-level drivers
+    (`amaya/sat_toplevel.py`) can replace *just* this step and share the parsing, preprocessing and
+    context setup verbatim, instead of keeping a second copy of them that would drift.
+    """
+    var_table = eval_ctx.var_table
+
+    if isinstance(astp, AST_Connective) and astp.type == Connective_Type.AND and solver_config.optimizations.allow_sharding:
+        model = evaluate_using_sharding(astp, eval_ctx)
+        return Evaluation_Result(run_stats=eval_ctx.stats, model=model, shards=[], solutions_nfa=None, var_table=var_table)
+
+    nfa = run_evaluation_procedure(astp, eval_ctx)
+    binary_model = nfa.find_model()
+    if binary_model:
+        formula_params = tuple(var for var, var_info in var_table.items() if var_info.is_formula_param)
+        decadic_model = convert_binary_model_into_decadic(binary_model, formula_params)
+    else:
+        decadic_model = None
+
+    return Evaluation_Result(run_stats=eval_ctx.stats, solutions_nfa=nfa, model=decadic_model, var_table=var_table)
+
+
 # @Cleanup: This should be renamed to something like evaluate_smt2
-def perform_whole_evaluation_on_source_text(source_text: str, emit_introspect: Optional[IntrospectHandle] = None) -> Evaluation_Result | None:
+def perform_whole_evaluation_on_source_text(
+    source_text: str,
+    emit_introspect: Optional[IntrospectHandle] = None,
+    evaluate_prepared_formula: Callable[[ASTp_Node, EvaluationContext], Evaluation_Result] = evaluate_prepared_formula_with_automata,
+) -> Evaluation_Result | None:
     """
     Parses the given SMT2 source code and runs the evaluation procedure.
 
@@ -322,6 +352,9 @@ def perform_whole_evaluation_on_source_text(source_text: str, emit_introspect: O
         source_text: The SMT2 source text encoding the problem.
         emit_introspect: Introspection handle. If given it will be called with every automaton
                          produced during the evaluation procedure (in the order they are created).
+        evaluate_prepared_formula: What to do with the preprocessed formula and its evaluation context.
+                                   Defaults to the ordinary automata-based evaluation; overridden by
+                                   experimental top-level drivers.
     Returns:
         Evaluation result (model + additional information), or
         None if there was no 'check-sat' directive in the source_text
@@ -397,21 +430,7 @@ def perform_whole_evaluation_on_source_text(source_text: str, emit_introspect: O
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
 
-            if isinstance(astp, AST_Connective) and astp.type == Connective_Type.AND and solver_config.optimizations.allow_sharding:
-                model = evaluate_using_sharding(astp, eval_ctx)
-                result = Evaluation_Result(run_stats=eval_ctx.stats, model=model, shards=[], solutions_nfa=None, var_table=var_table)
-                return result
-
-            nfa = run_evaluation_procedure(astp, eval_ctx)
-            binary_model = nfa.find_model()
-            if binary_model:
-                formula_params = tuple(var for var, var_info in var_table.items() if var_info.is_formula_param)
-                decadic_model = convert_binary_model_into_decadic(binary_model, formula_params)
-            else:
-                decadic_model = None
-
-            result = Evaluation_Result(run_stats=eval_ctx.stats, solutions_nfa=nfa, model=decadic_model, var_table=var_table)
-            return result
+            return evaluate_prepared_formula(astp, eval_ctx)
 
         elif statement_root == 'exit':
             return None

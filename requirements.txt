@@ -14,6 +14,7 @@ py
 pydot
 pyparsing
 pytest
+python-sat
 six
 toml
 typing-extensions
