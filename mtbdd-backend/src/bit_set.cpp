@@ -15,9 +15,11 @@ Bit_Set::Bit_Set* Bit_Set::make_union(Block_Arena_Allocator* allocator, const Bi
 
 Bit_Set::Bit_Set* Bit_Set::add_state(Block_Arena_Allocator* allocator, const Bit_Set* set, u64 state) {
     Bit_Set* new_set = allocator->alloc();
-    
+
+    // Note: this copies the *blocks*, not the Bit_Set structs - `new_set` is a single Bit_Set,
+    // so indexing it as an array of block_cnt Bit_Sets ran off the end of the allocation.
     for (u64 i = 0; i < allocator->current_generation_block_cnt; i++) {
-        new_set[i] = set[i];
+        new_set->data[i] = set->data[i];
     }
 
     new_set->add_state(state);

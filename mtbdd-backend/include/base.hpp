@@ -41,6 +41,23 @@ typedef int8_t  s8;
 
 typedef int64_t State;
 
+/*
+Instrumentation for the pad-closure fixpoint. Dumped to stderr at exit when AMAYA_PAD_STATS is set
+in the environment; the counters are plain (non-atomic) adds done only from the driver loops (never
+from inside a Lace task), so they do not perturb the measured work.
+*/
+struct Pad_Closure_Stats {
+    u64 calls           = 0;
+    u64 frontier_passes = 0;   // one pass = one sweep over every state's MTBDD
+    u64 frontier_applies= 0;   // mtbdd_applyp calls made while computing the frontier
+    u64 augment_applies = 0;   // mtbdd_applyp calls made while adding the pad transitions
+    u64 states_seen     = 0;   // summed over calls, to report the average automaton size
+    double frontier_seconds = 0.0;
+    double augment_seconds  = 0.0;
+};
+extern Pad_Closure_Stats g_pad_closure_stats;
+
+
 typedef std::vector<State> Macrostate;
 
 struct Transition {

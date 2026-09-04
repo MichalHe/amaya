@@ -7,3 +7,9 @@ benchmarks/**
 scripts/**
 amaya/*.so
 mtbdd-backend/build/*
+
+# Build artifacts of the Cython extension (mtbdd-backend/Makefile -> compile_wrapper.py):
+# the setuptools build tree, the built extension, and the base.pyx -> C++ translation.
+mtbdd-backend/wrapper/build/*
+mtbdd-backend/wrapper/*.so
+mtbdd-backend/wrapper/base.cpp

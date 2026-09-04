@@ -62,6 +62,7 @@ cdef extern from "wrapper.hpp":
         u64 quantified_var_cnt
 
     NFA c_construct_nfa_from_congruence "construct_nfa_from_congruence"(Serialized_Atom* congruence, s64 init_val, BDDSET vars, u64 var_count) except +
+    NFA c_construct_nfa_from_congruence_with_bounded_var "construct_nfa_from_congruence_with_bounded_var"(Serialized_Atom* congruence, s64 rhs, u64 bound_var_idx, s64 lower_bound, s64 upper_bound, BDDSET vars, u64 var_count) except +
     NFA c_construct_nfa_from_ineq "construct_nfa_from_ineq"(Serialized_Atom* ineq, s64 init_state, BDDSET vars, u64 var_count) except +
     NFA c_construct_nfa_from_eq "construct_nfa_from_eq"(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 var_count) except +
     NFA c_construct_dfa_for_atom_conjunction "construct_dfa_for_atom_conjunction"(Serialized_Quantified_Atom_Conjunction* raw_formula) except +
@@ -360,6 +361,53 @@ def construct_nfa_from_congruence(coefs, s64 modulus, s64 rhs, vars):
     result = PyNFA()
     del result._c_nfa
     result._c_nfa = new NFA(c_construct_nfa_from_congruence(&atom, rhs, var_set, c_vars.size()))
+    return result
+
+
+def construct_nfa_from_congruence_with_bounded_var(coefs, s64 modulus, s64 rhs, bound_var_idx,
+                                                  s64 lower_bound, s64 upper_bound, vars):
+    """
+    Build an NFA for `exists X. (lower_bound <= X <= upper_bound  and  <coefs, vars> = rhs (mod modulus))`,
+    where `X` is the variable at index `bound_var_idx`.
+
+    `X` is projected away: the returned automaton is over the remaining tracks, i.e. `vars` with the
+    `bound_var_idx`-th entry removed, and its `var_count` is `len(vars) - 1`. It generally has several
+    initial states - one per distinct right-hand side produced by instantiating `X` - which all share
+    a single state graph. See BOUNDED_CONGRUENCE.md.
+
+    :param coefs: coefficients, one per entry of `vars`, in the same (ascending) order.
+    :param modulus: the congruence's modulus; must be positive.
+    :param rhs: the congruence's right-hand side.
+    :param bound_var_idx: index into `coefs`/`vars` of the bounded variable.
+    :param lower_bound, upper_bound: inclusive bounds on the bounded variable. An empty range
+                                     (`lower_bound > upper_bound`) yields an automaton accepting nothing.
+    """
+    cdef vector[s64] c_coefs = coefs
+    cdef vector[BDDVAR] c_vars = vars
+    cdef u64 c_bound_var_idx
+
+    if c_coefs.size() != c_vars.size():
+        raise ValueError(f'Got {c_coefs.size()} coefficients for {c_vars.size()} variables - the counts must match.')
+    if c_vars.size() < 2:
+        raise ValueError('At least 2 variables are needed - one to project away, and one to be left in the automaton.')
+    if not 0 <= bound_var_idx < c_vars.size():
+        raise ValueError(f'bound_var_idx={bound_var_idx} is out of range for {c_vars.size()} variables.')
+    if modulus <= 0:
+        raise ValueError(f'The modulus must be positive, got {modulus}.')
+
+    c_bound_var_idx = bound_var_idx
+
+    cdef Serialized_Atom atom
+    atom.type = Atom_Type.CONGRUENCE
+    atom.coefs = c_coefs.data()
+    atom.coef_cnt = c_coefs.size()
+    atom.modulus = modulus
+
+    cdef BDDSET var_set = mtbdd_set_from_array(c_vars.data(), c_vars.size())
+    result = PyNFA()
+    del result._c_nfa
+    result._c_nfa = new NFA(c_construct_nfa_from_congruence_with_bounded_var(
+        &atom, rhs, c_bound_var_idx, lower_bound, upper_bound, var_set, c_vars.size()))
     return result
 
 

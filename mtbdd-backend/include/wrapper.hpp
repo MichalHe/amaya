@@ -33,6 +33,23 @@ struct Serialized_Quantified_Atom_Conjunction {
 // NFA-returning construction/machinery entry points, used directly by the Cython wrapper
 // (mtbdd-backend/wrapper/base.pyx) - the sole caller of everything in this header.
 NFA construct_nfa_from_congruence(Serialized_Atom* congruence, s64 init_val, sylvan::BDDSET vars, u64 var_count);
+
+// Builds an NFA for `exists X. (lower_bound <= X <= upper_bound  &&  congruence)`, where `X` is the
+// variable whose coefficient sits at `congruence->coefs[bound_var_idx]`. `X` is *projected away* -
+// the returned automaton is over the remaining `var_count - 1` tracks (`vars` minus the
+// `bound_var_idx`-th one, in ascending order).
+//
+// Instantiating `X := n` changes only the congruence's right-hand side, never its coefficients or
+// its modulus, so all instantiations share a single state graph and differ only in which state they
+// start from. The construction therefore explores that one graph once, seeding it with an initial
+// state per distinct right-hand side; the result is a multi-initial-state NFA whose language is the
+// union over `n` in `[lower_bound, upper_bound]`. See BOUNDED_CONGRUENCE.md.
+//
+// Requires `var_count >= 2` (something must be left after projecting `X` away) and a positive
+// modulus. An empty bound range (`lower_bound > upper_bound`) yields an automaton accepting nothing.
+NFA construct_nfa_from_congruence_with_bounded_var(Serialized_Atom* congruence, s64 rhs, u64 bound_var_idx,
+                                                  s64 lower_bound, s64 upper_bound,
+                                                  sylvan::BDDSET vars, u64 var_count);
 NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, sylvan::BDDSET vars, u64 var_count);
 NFA construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, sylvan::BDDSET vars, u64 var_count);
 NFA construct_dfa_for_atom_conjunction(Serialized_Quantified_Atom_Conjunction* raw_formula);

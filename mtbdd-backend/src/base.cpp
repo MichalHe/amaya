@@ -17,6 +17,25 @@
 
 using sylvan::MTBDD;
 
+Pad_Closure_Stats g_pad_closure_stats;
+
+namespace {
+    struct Pad_Closure_Stats_Reporter {
+        ~Pad_Closure_Stats_Reporter() {
+            if (getenv("AMAYA_PAD_STATS") == nullptr) return;
+            const Pad_Closure_Stats& s = g_pad_closure_stats;
+            std::cerr << "PAD_STATS calls=" << s.calls
+                      << " states_total=" << s.states_seen
+                      << " frontier_passes=" << s.frontier_passes
+                      << " frontier_applies=" << s.frontier_applies
+                      << " augment_applies=" << s.augment_applies
+                      << " frontier_s=" << s.frontier_seconds
+                      << " augment_s=" << s.augment_seconds << std::endl;
+        }
+    };
+    Pad_Closure_Stats_Reporter g_pad_closure_stats_reporter;
+}
+
 Transition_Destination_Set::Transition_Destination_Set(const Transition_Destination_Set& other) {
     // @Note: Copy is called when a new leaf is created
     this->destination_set = std::vector<State>(other.destination_set);
@@ -247,6 +266,10 @@ The MTBDD pad closure works in two steps:
 void NFA::perform_pad_closure() {
     if (states.empty()) return;
 
+    g_pad_closure_stats.calls += 1;
+    g_pad_closure_stats.states_seen += states.size();
+    auto pad_stats_frontier_start = std::chrono::steady_clock::now();
+
     LACE_ME;
     using namespace sylvan; // @Cleanup: Remove this once we migrate to the new Sylvan version
 
@@ -266,7 +289,10 @@ void NFA::perform_pad_closure() {
         sylvan::mtbdd_ref(this_iter_start_frontier);
         sylvan::mtbdd_ref(this_iter_end_frontier);
 
+        g_pad_closure_stats.frontier_passes += 1;
+
         for (auto& [origin, state_mtbdd]: transitions) {
+            g_pad_closure_stats.frontier_applies += 1;
             MTBDD tmp_frontier = mtbdd_applyp(state_mtbdd, this_iter_end_frontier, origin, TASK(build_pad_closure_fronier_op), AMAYA_EXTEND_FRONTIER_OP_ID);
 
             sylvan::mtbdd_ref(tmp_frontier);
@@ -285,6 +311,10 @@ void NFA::perform_pad_closure() {
         // only frontier is referenced
     }
 
+    g_pad_closure_stats.frontier_seconds +=
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - pad_stats_frontier_start).count();
+    auto pad_stats_augment_start = std::chrono::steady_clock::now();
+
     State new_final_state = *states.rbegin() + 1;
 
     Pad_Closure_Info2 pad_closure_info = {.new_final_state = new_final_state, .final_states = &final_states};
@@ -294,6 +324,7 @@ void NFA::perform_pad_closure() {
 
     bool was_any_transition_added = false;
     for (auto& state_transition_pair: transitions) {
+        g_pad_closure_stats.augment_applies += 1;
         State origin_state = state_transition_pair.first;
         MTBDD old_mtbdd = state_transition_pair.second;
         state_transition_pair.second = mtbdd_applyp(state_transition_pair.second,
@@ -316,6 +347,9 @@ void NFA::perform_pad_closure() {
         final_states.insert(new_final_state);
         PRINT_DEBUG("Added a new final state " << new_final_state << " during pad closue.");
     }
+
+    g_pad_closure_stats.augment_seconds +=
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - pad_stats_augment_start).count();
 
     sylvan::mtbdd_deref(frontier); // -frontier
 }

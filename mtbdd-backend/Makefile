@@ -12,7 +12,16 @@ CFLAGS=$(COMMON_FLAGS) $(SHARED_LIB_FLAGS)
 PYTHON ?= /home/mhecko/school/sw/amaya/venv/bin/python
 AMAYA_PKG_DIR := ../amaya
 
-.PHONY := clean libamaya
+# Every compiled object lands in build/. `clean` removes that directory outright, so the objects
+# carry it as an order-only prerequisite (| build) - otherwise the first build after a clean, or
+# a build from a fresh checkout, would fail with "No such file or directory" on build/*.o.
+OBJECTS := build/lazy-tests.o build/lazy.o build/wrapper.o build/operations.o build/custom_leaf.o \
+           build/base.o build/vectors.o build/pareto_set.o build/rewrites.o build/tfa_leaf.o \
+           build/bit_set.o build/bit_set_leaf.o build/algorithms.o build/sylvan-extra.o build/test.o
+
+$(OBJECTS): | build
+
+.PHONY: clean libamaya
 .DEFAULT_GOAL := libamaya
 
 # Builds the Cython extension (mtbdd-backend/wrapper/base.pyx, linked together with the backend's
@@ -71,10 +80,17 @@ build/sylvan-extra.o: include/sylvan-extra.h src/sylvan-extra.c
 	$(CC) -c $(CFLAGS) -o $@ src/sylvan-extra.c
 
 build:
-	-mkdir build
+	mkdir -p build
 
+# Must remove everything any target here produces - most importantly the Cython extension's
+# artifacts (wrapper/build/, the base.pyx -> base.cpp translation, and the built shared objects
+# in both wrapper/ and the amaya package). Wiping only build/*, as this used to, left all of
+# those in place, so `make clean && make` reused the previous extension build instead of
+# rebuilding it from scratch.
 clean:
-	rm -r build/* || true
+	rm -rf build lazy-tests test
+	rm -rf wrapper/build wrapper/base.cpp wrapper/libamaya*.so
+	rm -f $(AMAYA_PKG_DIR)/libamaya*.so
 
 build/test.o: src/test.cpp
 	$(CXX) -c $(CXXFLAGS) src/test.cpp -o build/test.o
