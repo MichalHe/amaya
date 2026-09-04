@@ -23,6 +23,7 @@ given formula (controlled via the `--backend` option):
 '''
 import argparse as ap
 from collections.abc import Iterable
+import contextlib
 from enum import Enum
 import os
 import logging
@@ -100,6 +101,16 @@ argparser.add_argument('--fast',
                        action='store_true',
                        default=False,
                        help='Enable MTBDD backend and Hopcroft\'s minimization.')
+
+argparser.add_argument('--astp-cse',
+                       action='store_true',
+                       dest='astp_cse',
+                       default=False,
+                       help=('(EXPERIMENTAL) Cache automata built for subformulae keyed by a De Bruijn/slot-normalised\n'
+                             'encoding, so that alpha-equivalent subformulae (e.g. two differently-named quantified\n'
+                             'subtrees with the same shape) reuse one automaton instead of being constructed again.\n'
+                             'Requires -m MTBDD; a no-op (falls back to the ordinary evaluation) on any other backend.\n'
+                             'Does not change the result on any input - see DEBRUJIN_CSE.md.'))
 
 argparser.add_argument('-q', '--quiet',
                        action='store_true',
@@ -451,6 +462,11 @@ else:
     for opt in args.forbidden_optimizations:
         setattr(solver_config.optimizations, opt_to_config_field[opt], False)
 
+# `--astp-cse` is experimental and deliberately kept out of `solver_config`/`opt_to_config_field`
+# (see `amaya/cse_cache.py`): enabling it does not flip a `SolverConfig` field, it wraps the
+# evaluation call below in `amaya.cse_cache.cse_enabled()`.
+use_astp_cse = args.astp_cse
+
 def ensure_output_destination_valid(output_destination: str):
     """Ensures that the given output destination is a folder. Creates the folder if it does not exist."""
     if os.path.exists(output_destination):
@@ -798,5 +814,13 @@ running_modes_procedure_table = {
     RunnerMode.CONVERT_FORMULA: convert_smt_to_other_format,
 }
 
-run_successful = running_modes_procedure_table[runner_mode](args)
+cse_context: contextlib.AbstractContextManager = contextlib.nullcontext()
+if use_astp_cse:
+    # Imported lazily so that the module (and the `MTBDD_NFA.renamed_copy` it installs) is only
+    # ever touched when explicitly requested via `--astp-cse`.
+    from amaya.cse_cache import cse_enabled
+    cse_context = cse_enabled()
+
+with cse_context:
+    run_successful = running_modes_procedure_table[runner_mode](args)
 sys.exit(0 if run_successful else 1)
