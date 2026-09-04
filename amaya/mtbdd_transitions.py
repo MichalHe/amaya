@@ -143,6 +143,17 @@ class MTBDDTransitionFn():
             _add_transition(new_nfa, origin, dest, new_symbol)
         self._nfa = new_nfa
 
+    def rename_vars(self, renaming: Dict[int, int]):
+        """
+        Rename the tracks (MTBDD variables) referenced within this transition function's underlying
+        automaton according to `renaming` (old var id -> new var id; vars with no entry keep their
+        id). Must be order-preserving: if `old_a < old_b` among the automaton's vars, then
+        `renaming[old_a] < renaming[old_b]` must hold too - see `libamaya.rename_vars` for why.
+        Violating this raises `ValueError`.
+        """
+        self._nfa = libamaya.rename_vars(self._nfa, renaming)
+        self.alphabet_variables = [renaming.get(var, var) for var in self.alphabet_variables]
+
     def get_union_mtbdd_for_states(self, states: List[int]):
         raise NotImplementedError('get_union_mtbdd_for_states is no longer supported - it exposed raw MTBDD handles')
 

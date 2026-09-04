@@ -182,6 +182,15 @@ std::set<State> compute_states_reaching_set(NFA nfa, std::set<State>& states_to_
 NFA determinize_nfa(NFA& nfa);
 NFA minimize_hopcroft(NFA& nfa);
 
+/*
+Renames the automaton's tracks (MTBDD variables) according to `renaming` (old var id -> new var id;
+vars with no entry keep their id). The renaming must be order-preserving - if `old_a < old_b` among
+the automaton's vars, then `renaming[old_a] < renaming[old_b]` must hold too (this is what MTBDD
+canonicity requires, since a var's numeric id doubles as its level in the absence of dynamic variable
+reordering). Violating this throws std::invalid_argument rather than producing a corrupt MTBDD.
+*/
+NFA rename_vars(NFA& nfa, const unordered_map<u32, u32>& renaming);
+
 
 std::vector<struct Transition> nfa_unpack_transitions(struct NFA& nfa);
 std::string transition_to_str(const struct Transition& transition);

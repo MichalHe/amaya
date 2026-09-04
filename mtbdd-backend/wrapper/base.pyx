@@ -131,6 +131,7 @@ cdef extern from "base.hpp":
     void c_remove_nonfinishing_states "remove_nonfinishing_states"(NFA& nfa) except +
     NFA c_determinize_nfa "determinize_nfa"(NFA& nfa) except +
     NFA c_minimize_hopcroft "minimize_hopcroft"(NFA& nfa) except +
+    NFA c_rename_vars "rename_vars"(NFA& nfa, unordered_map[u32, u32]& renaming) except +
 
 
 cdef bint _machinery_initialized = False
@@ -337,6 +338,27 @@ def remove_nonfinishing_states(PyNFA nfa):
         c_remove_nonfinishing_states(nfa._c_nfa[0])
     except RuntimeError as err:
         _reraise_interrupt(err)
+
+
+def rename_vars(PyNFA nfa, dict renaming):
+    """
+    Rename the automaton's tracks (MTBDD variables) according to `renaming` (old var id -> new var
+    id; vars with no entry keep their id). Must be order-preserving: if `old_a < old_b` among the
+    automaton's vars, then `renaming[old_a] < renaming[old_b]` must hold too - violating this raises
+    ValueError rather than silently producing a corrupt automaton.
+    """
+    cdef unordered_map[u32, u32] c_renaming
+    for old_var, new_var in renaming.items():
+        c_renaming[<u32> old_var] = <u32> new_var
+
+    result = PyNFA()
+    del result._c_nfa
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_rename_vars(nfa._c_nfa[0], c_renaming))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
+    return result
 
 
 def perform_pad_closure_using_bit_sets(PyNFA nfa):

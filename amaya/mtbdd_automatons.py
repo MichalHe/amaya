@@ -116,6 +116,16 @@ class MTBDD_NFA(NFA):
         assert state in self.states, 'Cannot retrieve post of a non automaton state'
         return self.transition_fn.get_state_post(state)
 
+    def rename_vars(self, renaming: Dict[Var, Var]) -> None:
+        """
+        Rename this automaton's tracks (MTBDD variables) according to `renaming` (vars with no
+        entry keep their id). Must be order-preserving - see `MTBDDTransitionFn.rename_vars`/
+        `libamaya.rename_vars` for what that means and what happens if it is violated.
+        """
+        id_renaming = {old_var.id: new_var.id for old_var, new_var in renaming.items()}
+        self.transition_fn.rename_vars(id_renaming)
+        self.used_variables = sorted(renaming.get(var, var) for var in self.used_variables)
+
     def union(self, other: MTBDD_NFA) -> MTBDD_NFA:
         logger.debug('Entering MTBDD NFA union procedure.')
         first_unreached_state = self.renumber_states(start_from=0)

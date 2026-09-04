@@ -566,6 +566,59 @@ void remove_nonfinishing_states(NFA& nfa) {
 }
 
 
+NFA rename_vars(NFA& nfa, const unordered_map<u32, u32>& renaming) {
+    LACE_ME;
+    Interrupt_Guard interrupt_guard;
+
+    const u64 vars_cnt = sylvan::mtbdd_set_count(nfa.vars);
+    std::vector<u32> old_vars(vars_cnt);
+    sylvan::mtbdd_set_to_array(nfa.vars, old_vars.data());  // Sylvan hands these back in ascending order
+
+    sylvan::BDDSET new_vars = sylvan::mtbdd_set_empty();
+    sylvan::MTBDDMAP compose_map = sylvan::mtbdd_map_empty();
+
+    s64 prev_new_var = -1;
+    for (u32 old_var: old_vars) {
+        auto renaming_it = renaming.find(old_var);
+        u32 new_var = (renaming_it != renaming.end()) ? renaming_it->second : old_var;
+
+        // A renaming that does not preserve the order of the vars it touches (including one that
+        // maps two distinct old vars onto the same new one) would hand mtbdd_compose an out-of-order
+        // substitution and corrupt the resulting MTBDD's canonical form - catch it here instead.
+        if (static_cast<s64>(new_var) <= prev_new_var) {
+            throw std::invalid_argument("rename_vars: renaming does not preserve the order of the automaton's vars");
+        }
+        prev_new_var = new_var;
+
+        new_vars = sylvan::mtbdd_set_add(new_vars, new_var);
+        if (new_var != old_var) {
+            compose_map = sylvan::mtbdd_map_add(compose_map, old_var, sylvan::mtbdd_ithvar(new_var));
+        }
+    }
+
+    sylvan::mtbdd_refs_push(compose_map);
+
+    NFA result(new_vars, vars_cnt);
+    result.states         = nfa.states;
+    result.initial_states = nfa.initial_states;
+    result.final_states   = nfa.final_states;
+    result.flags          = nfa.flags;
+
+    for (auto& [state, state_mtbdd]: nfa.transitions) {
+        AMAYA_CHECK_INTERRUPT();
+
+        using namespace sylvan;
+        MTBDD renamed_mtbdd = mtbdd_compose(state_mtbdd, compose_map);
+        sylvan::mtbdd_ref(renamed_mtbdd);
+        result.transitions.emplace(state, renamed_mtbdd);
+    }
+
+    sylvan::mtbdd_refs_pop(1);
+
+    return result;
+}
+
+
 void setup_intersection_info_for_postless_pruning(Intersection_Info2& info, NFA& left, NFA& right) {
 #if INTERSECTION_DETECT_STATES_WITH_NO_POST
     for (auto& final_state: left.final_states) {
