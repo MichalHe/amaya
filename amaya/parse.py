@@ -37,9 +37,11 @@ import amaya.presburger.constructions.integers as relations_to_nfa
 from amaya import preprocessing
 from amaya.preprocessing import (
     antiprenexing,
-    flatten_bool_nary_connectives
+    flatten_bool_nary_connectives,
+    remove_double_negations_handler
 )
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars, resolve_conditional_equalities
+from amaya.preprocessing.connective_child_dedup import remove_duplicit_connective_children
 from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
@@ -56,6 +58,7 @@ from amaya.relations_structures import (
     Connective_Type,
     FunctionSymbol,
     Relation,
+    Value_Interval,
     Var,
     VariableType,
     pprint_formula,
@@ -207,12 +210,13 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -
     if solver_config.optimizations.reason_about_models:
         model_properties = Asserted_Model_Properties()
 
-        # pprint_formula(astp)
         astp = simplify_formula_using_model_properties(astp, model_properties)
         astp = simplify_formula_using_model_properties(astp, model_properties)
 
         var_uses = Variable_Use_Info()
         scan_variable_use(astp, var_uses)
+        astp = remove_atoms_satisfied_by_unconstrained_vars(astp, var_uses, desired_polarity=True)
+        astp = remove_atoms_satisfied_by_unconstrained_vars(astp, var_uses, desired_polarity=True)
         astp = remove_atoms_satisfied_by_unconstrained_vars(astp, var_uses, desired_polarity=True)
         # pprint_formula(astp)
         # sys.exit(0)
@@ -256,6 +260,12 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -
         astp = flatten_bool_nary_connectives(astp)
         astp = resolve_conditional_equalities(astp)
         logger.debug('Conditional equalities resolved. Result:  %s', astp)
+
+    if solver_config.optimizations.deduplicate_connective_children:
+        logger.debug('Removing duplicit children of connectives:  %s', astp)
+        astp = remove_duplicit_connective_children(astp)
+        astp = flatten_bool_nary_connectives(astp)
+        logger.debug('Duplicit connective children removed. Result:  %s', astp)
 
     return astp
 
@@ -408,19 +418,23 @@ def perform_whole_evaluation_on_source_text(source_text: str, emit_introspect: O
     return None
 
 
-def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> NFA:
-    """ Construct an automaton accepting the solutions of the given congruence """
+def order_congruence_vars(congruence: Congruence) -> Congruence:
+    """ Sort the congruence's variables (the automaton constructions expect its tracks in that order) and normalize its RHS. """
     vars: List[Var] = []
     coefs: List[int] = []
 
     terms = sorted(zip(congruence.vars, congruence.coefs), key = lambda pair: pair[0])
-    vars, coefs = [], []
     for var, coef in terms:
         vars.append(var)
         coefs.append(coef)
 
     normalized_rhs = congruence.rhs % congruence.modulus
-    ordered_congruence = Congruence(vars=vars, coefs=coefs, rhs=normalized_rhs, modulus=congruence.modulus)
+    return Congruence(vars=vars, coefs=coefs, rhs=normalized_rhs, modulus=congruence.modulus)
+
+
+def make_nfa_for_congruence(congruence: Congruence, ctx: EvaluationContext) -> NFA:
+    """ Construct an automaton accepting the solutions of the given congruence """
+    ordered_congruence = order_congruence_vars(congruence)
 
     logger.debug(f'Reordered congruence from: %s to %s', congruence, ordered_congruence)
 
@@ -927,8 +941,171 @@ def try_lazy_construct_conjunction(exists_node: AST_Quantifier, ctx: EvaluationC
     return nfa
 
 
+@dataclass
+class Bounded_Congruence_Match:
+    """ A bound variable that the bounded-congruence construction can eliminate, and what it takes to do so. """
+    var: Var
+    """ The variable to be eliminated. """
+    congruence: Congruence
+    """ The only congruence the variable occurs in. """
+    bounds: Value_Interval
+    """ The (both-sided) bounds implied by the conjuncts constraining the variable. """
+    other_children: List[ASTp_Node]
+    """ The conjuncts that do not mention the variable at all, and thus survive the construction. """
+
+
+def find_var_eliminable_by_bounded_congruence_construction(exists_node: AST_Quantifier) -> Optional[Bounded_Congruence_Match]:
+    """
+    Look for a bound variable of the given quantifier that can be eliminated by the bounded-congruence
+    construction, i.e. one that is bounded from both sides by hard bounds and, apart from those bounds,
+    occurs in a single congruence and nowhere else.
+
+    Example (`x` is such a variable):
+        (exists ((x Int)) (and (<= 0 x) (<= x 3) (= (mod (+ (* 3 x) y) 8) 1) (<= y 10)))
+
+    :returns: The match describing how to eliminate the variable, or None if no bound variable qualifies.
+    """
+    if not (isinstance(exists_node.child, AST_Connective) and exists_node.child.type == Connective_Type.AND):
+        return None
+
+    and_node: AST_Connective = exists_node.child
+
+    for var in exists_node.bound_vars:
+        congruence_on_var: Optional[Congruence] = None
+        bounds = Value_Interval()
+        other_children: List[ASTp_Node] = []
+        is_var_eliminable = True
+
+        for child in and_node.children:
+            if var not in antiprenexing.get_referenced_vars(child):
+                other_children.append(child)
+                continue
+
+            if isinstance(child, Congruence):
+                if congruence_on_var is not None:
+                    # The variable is spread over multiple congruences - only a single one can be folded
+                    # into the construction.
+                    is_var_eliminable = False
+                    break
+                congruence_on_var = child
+                continue
+
+            # A hard bound implies the right bound for any coefficient (`get_hard_bound_semantics` rounds
+            # towards the satisfiable side), but an equality is only exact for a unit coefficient - `2x = 5`
+            # has no solution at all, while `Value_Interval` would read it as `x = 2`.
+            is_bound_on_var = child.is_hard_bound() if isinstance(child, Relation) else False
+            pins_var_to_a_value = (isinstance(child, Relation) and child.specifies_a_single_value_for_var()
+                                   and abs(child.coefs[0]) == 1)
+            if is_bound_on_var or pins_var_to_a_value:
+                bounds.apply_assertion(cast(Relation, child))
+                continue
+
+            # The variable leaks somewhere the construction cannot account for - it would remain
+            # constrained after the congruence and the bounds have been consumed.
+            is_var_eliminable = False
+            break
+
+        if not is_var_eliminable or congruence_on_var is None:
+            continue
+
+        # The construction instantiates the variable with every value it can take, so both bounds have
+        # to be known. An empty range makes the entire conjunction unsatisfiable - leave that to the
+        # ordinary evaluation, which does not need a special case for an automaton with no initial state.
+        if bounds.lower_limit is None or bounds.upper_limit is None or bounds.implies_contradiction():
+            continue
+
+        # Something has to be left in the automaton once the variable is projected away.
+        if len(congruence_on_var.vars) < 2:
+            continue
+
+        if congruence_on_var.modulus <= 0:
+            continue
+
+        return Bounded_Congruence_Match(var=var, congruence=congruence_on_var, bounds=bounds,
+                                        other_children=other_children)
+
+    return None
+
+
+def try_construct_bounded_congruence(exists_expr: AST_Quantifier, ctx: EvaluationContext,
+                                     _depth: int) -> Optional[Tuple[NFA, Tuple[Var, ...]]]:
+    """
+    Try to evaluate the given quantifier using the bounded-congruence construction, which folds a bound
+    variable's bounds and its congruence into a single automaton instead of building the conjunction and
+    projecting the variable away afterwards. See BOUNDED_CONGRUENCE.md.
+
+    :returns: The automaton for the quantifier's body with the eliminated variable already projected
+              away, together with the bound variables that still have to be projected. None if no bound
+              variable qualifies.
+    """
+    match = find_var_eliminable_by_bounded_congruence_construction(exists_expr)
+    if not match:
+        return None
+
+    lower_limit = cast(int, match.bounds.lower_limit)
+    upper_limit = cast(int, match.bounds.upper_limit)
+
+    if upper_limit - lower_limit > 256:
+        return None
+
+    logger.info('Using the bounded-congruence construction to eliminate %s from %s bounded by %s',
+                match.var, match.congruence, match.bounds)
+
+    ordered_congruence = order_congruence_vars(match.congruence)
+
+    from amaya import mtbdd_transitions
+    ctx.stats_operation_starts(ParsingOperation.BUILD_NFA_FROM_BOUNDED_CONGRUENCE, None, None)
+    nfa = mtbdd_transitions.MTBDDTransitionFn.construct_nfa_for_congruence_with_bounded_var(
+        ordered_congruence,
+        match.var,
+        cast(int, match.bounds.lower_limit),
+        cast(int, match.bounds.upper_limit),
+        ctx.get_alphabet()
+    )
+    ctx.stats_operation_ends(operand1=None, operand2=None, output=nfa)
+
+    emit_evaluation_progress_info(
+        f' >> {ParsingOperation.BUILD_NFA_FROM_BOUNDED_CONGRUENCE.value}({match.var} in {match.bounds}, '
+        f'{ordered_congruence}) (result size: {len(nfa.states)})',
+        _depth
+    )
+
+    # The eliminated variable does not occur in the remaining conjuncts, so conjoining them after the
+    # construction is equivalent to having them inside the quantifier.
+    if match.other_children:
+        if len(match.other_children) == 1:
+            rest = match.other_children[0]
+        else:
+            referenced_vars: Set[Var] = set()
+            for child in match.other_children:
+                referenced_vars.update(antiprenexing.get_referenced_vars(child))
+            rest = AST_Connective(referenced_vars=tuple(sorted(referenced_vars)),
+                                  type=Connective_Type.AND,
+                                  children=tuple(match.other_children))
+        rest_nfa = get_automaton_for_operand(rest, ctx, _depth)
+
+        ctx.stats_operation_starts(ParsingOperation.NFA_INTERSECT, nfa, rest_nfa)
+        intersection = nfa.intersection(cast(MTBDD_NFA, rest_nfa))
+        ctx.stats_operation_ends(operand1=nfa, operand2=rest_nfa, output=intersection)
+        nfa = intersection
+
+    remaining_bound_vars = tuple(var for var in exists_expr.bound_vars if var != match.var)
+    return nfa, remaining_bound_vars
+
+
 def evaluate_exists_expr(exists_expr: AST_Quantifier, ctx: EvaluationContext, _depth: int) -> NFA:
     """Construct an NFA corresponding to the given formula of the form (exists (vars) (phi))."""
+    # The bounded-congruence construction eliminates one of the bound variables while building the body,
+    # so it also dictates which variables are left to be projected away below.
+    vars_to_project: Tuple[Var, ...] = exists_expr.bound_vars
+    nfa: Optional[NFA] = None
+
+    solving_over_ints = (solver_config.solution_domain == SolutionDomain.INTEGERS)
+    using_mtbdds = (solver_config.backend_type == BackendType.MTBDD)
+    if solving_over_ints and using_mtbdds and solver_config.optimizations.use_bounded_congruence_construction:
+        construction_result = try_construct_bounded_congruence(exists_expr, ctx, _depth)
+        if construction_result:
+            nfa, vars_to_project = construction_result
 
     # Perform a look-ahead to see whether we can construct the NFA for the entire conjunction using a lazy approach
     if solver_config.backend_type == BackendType.MTBDD and solver_config.optimizations.do_lazy_evaluation:
@@ -936,16 +1113,23 @@ def evaluate_exists_expr(exists_expr: AST_Quantifier, ctx: EvaluationContext, _d
         if nfa:
             return nfa
 
-    nfa = get_automaton_for_operand(exists_expr.child, ctx, _depth)
+    if nfa is None:
+        nfa = get_automaton_for_operand(exists_expr.child, ctx, _depth)
+
+    if not vars_to_project:
+        # Every bound variable has already been eliminated by the construction above
+        nfa = minimize_automaton_if_configured(exists_expr, nfa, ctx)
+        emit_evaluation_progress_info(f' >> projection({exists_expr.bound_vars}) (result_size: {len(nfa.states)})', _depth)
+        return nfa
 
     # We need to establish an order of individual projections applied, so that we can tell when we are projecting away
     # the last variable in this quantifier, because we don't need to do padding closure after every single variable
     # projection - we have to do it only after the variable has been projected away.
 
-    logger.debug(f'Established projection order: {exists_expr.bound_vars}')
+    logger.debug(f'Established projection order: {vars_to_project}')
 
-    last_var_to_project = exists_expr.bound_vars[-1]
-    for var in exists_expr.bound_vars:
+    last_var_to_project = vars_to_project[-1]
+    for var in vars_to_project:
         logger.debug(f'Projecting away variable {var}')
         ctx.stats_operation_starts(ParsingOperation.NFA_PROJECTION, nfa, None)
 

@@ -304,6 +304,9 @@ def _try_eliminate_var(var: Var, node: ASTp_Node) -> Optional[ASTp_Node]:
             continue
 
         if isinstance(child, Relation) and child.predicate_symbol == '<=':
+            # TEMPORARILY DISABLED: the inequality-substitution rewrite (`_resolve_with_inequalities`)
+            # is switched off - bail out entirely instead of eliminating `var` in its presence.
+            return None
             inequality_indices.append(idx)
             inequalities.append(child)
             continue

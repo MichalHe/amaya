@@ -170,7 +170,9 @@ opt_to_config_field = {
     'model-reasoning': 'reason_about_models',
     'infinite-domain': 'remove_vars_used_only_in_disequalities',
     'iniline-bool-definitions': 'inline_bool_var_definitions',
+    'dedup-connective-children': 'deduplicate_connective_children',
     'rce': 'resolve_conditional_equalities',
+    'bounded-congruence': 'use_bounded_congruence_construction',
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
 
@@ -210,6 +212,11 @@ argparser.add_argument('-O',
                              '      overapproximate relation RHS and check whether they are always True/False.\n'
                              '> model-reasoning:\n'
                              '      reason about models of the superformula to simplify subformulae.\n'
+                             '> dedup-connective-children:\n'
+                             '      Remove duplicit children of the AND/OR/EQUIV connectives.\n'
+                             '> bounded-congruence:\n'
+                             '      Build the automaton for an existentially quantified variable bounded from both sides and\n'
+                             '         occurring only in a single congruence using a specialized construction. Requires -m MTBDD.\n'
                              '> all:\n'
                              '      Enable all above optimizations'))
 

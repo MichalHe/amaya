@@ -24,7 +24,15 @@ class MinimizationAlgorithms(IntEnum):
 
 @dataclass
 class BackendConfig(object):
-    use_bit_set_pad_closure: bool = False
+    use_bit_set_pad_closure: bool = True
+    """
+    Represent the pad-closure frontier as a bit set indexed by state number instead of a sorted
+    vector of states. Both implementations compute the same frontier with the same number of MTBDD
+    applications; the bit set makes every leaf update a fixed-width word copy instead of copying and
+    re-sorting a vector that grows with the frontier, which is where the old representation spent
+    its time. Only worth turning off for automata so large that a full |Q|-bit frontier leaf costs
+    more to copy than the handful of states the frontier actually holds.
+    """
 
 
 @dataclass
@@ -118,6 +126,16 @@ class OptimizationsConfig:
         (and (= b (or x y)) (or b z))   --->   (or x y z)
     """
 
+    deduplicate_connective_children: bool = False
+    """
+    Remove duplicit children of the AND/OR/EQUIV connectives. The subformulae are identified using
+    IDs assigned to them based on their structure, so the duplicities are detected modulo the ordering
+    of the children of a connective and the ordering of the terms of an atom.
+
+    Example:
+        (and (<= x 0) (or A B) (<= x 0))   --->   (and (<= x 0) (or A B))
+    """
+
     resolve_conditional_equalities: bool = False
     """
     Eliminate existentially quantified variables occurring only in "conditional equalities" hidden
@@ -125,6 +143,20 @@ class OptimizationsConfig:
 
     Example:
         (exists ((x Int)) (and (or A (= x t1)) (or B (= x t2))))   --->   (or A B (= t1 t2))
+    """
+
+    use_bounded_congruence_construction: bool = False
+    """
+    Build the automaton for an existentially quantified variable that is bounded from both sides and
+    occurs (besides the bounds themselves) only in a single congruence using a specialized construction
+    instead of projecting the variable away afterwards. Requires -m MTBDD.
+
+    Example:
+        (exists ((x Int)) (and (<= 0 x) (<= x 3) (= (mod (+ (* 3 x) y) 8) 1)))
+
+    All instantiations of the bounded variable share a single congruence state graph, so the resulting
+    automaton is built in one sweep and holds at most `2*modulus` states regardless of how wide the
+    bounds are. See BOUNDED_CONGRUENCE.md.
     """
 
 

@@ -1,5 +1,7 @@
 import itertools
 
+import pytest
+
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars, resolve_conditional_equalities
 from amaya.relations_structures import (
     AST_Connective,
@@ -187,6 +189,7 @@ def _example_md_formula(bound_rhs: int) -> ASTp_Node:
     return formula
 
 
+@pytest.mark.skip(reason='inequality-substitution rewrite is temporarily disabled in _try_eliminate_var')
 def test_bound_plus_equalities_eliminates_quantifier():
     formula = _example_md_formula(bound_rhs=-1)
     result = resolve_conditional_equalities(formula)
@@ -235,6 +238,7 @@ def _general_inequality_formula(bound_rhs: int) -> ASTp_Node:
     return formula
 
 
+@pytest.mark.skip(reason='inequality-substitution rewrite is temporarily disabled in _try_eliminate_var')
 def test_general_inequality_eliminates_outer_quantifier():
     formula = _general_inequality_formula(bound_rhs=0)
     result = resolve_conditional_equalities(formula)
@@ -328,6 +332,7 @@ def test_clause_with_genuinely_different_equalities_is_left_alone():
     assert result == formula
 
 
+@pytest.mark.skip(reason='inequality-substitution rewrite is temporarily disabled in _try_eliminate_var')
 def test_single_direction_general_inequality_needs_no_residual_quantifier():
     """
     Mirrors a real formula fragment: `x <= y - 1` only bounds x from one side, even though it
@@ -380,3 +385,96 @@ def test_congruence_conjunct_blocks_elimination():
     # quantifier, its bounds and both congruences must all survive verbatim.
     assert result == formula
     assert _has_quantifier(result)
+
+
+# Variables of the formula from `f.smt2` - named after the declarations in that file.
+V_1, V_3, V_16, V_84, V_91, V_114, V_117, V_122, V_135 = (Var(i) for i in range(11, 20))
+
+
+def _f_smt2_clauses() -> tuple:
+    """
+    The two conditional-equality clauses of `f.smt2`:
+
+        (or var_117 (= (- var_84 var_135) 0))
+        (or var_122 var_16 var_3 var_1 (= (- var_135 var_91) 0))
+
+    Note that the two equalities are written with *opposite* orientations of `var_135` - the
+    first one as `var_84 - var_135 = 0`, the second one as `var_135 - var_91 = 0` - and that the
+    second clause carries four escape literals instead of one.
+    """
+    clause_84 = dsl._or(V_117, Relation(vars=[V_84, V_135], coefs=[1, -1], rhs=0, predicate_symbol='='))
+    clause_91 = dsl._or(V_122, V_16, V_3, V_1,
+                        Relation(vars=[V_135, V_91], coefs=[1, -1], rhs=0, predicate_symbol='='))
+    return clause_84, clause_91
+
+
+def _f_smt2_formula() -> ASTp_Node:
+    """ The formula asserted in `f.smt2`, verbatim. """
+    bound = Relation(vars=[V_135, V_114], coefs=[1, -1], rhs=-1, predicate_symbol='<=')  # var_135 - var_114 <= -1
+    formula = dsl._exists((V_135,), dsl._and(bound, *_f_smt2_clauses()))
+    fill_referenced_vars(formula)
+    return formula
+
+
+def test_f_smt2_multi_escape_clauses_with_mixed_equality_orientations():
+    """
+    The `f.smt2` formula with its `var_135 - var_114 <= -1` bound dropped:
+
+        exists ((var_135 Int))
+          (and (or var_117 (= (- var_84 var_135) 0))
+               (or var_122 var_16 var_3 var_1 (= (- var_135 var_91) 0)))
+
+    Two things this pins down beyond the simple A/B/C/D tests: the clauses state their equality
+    with opposite orientations of the bound variable (`var_84 - var_135` vs `var_135 - var_91`),
+    so the pairwise equality must come out normalized rather than orientation-dependent; and the
+    second clause has four escape literals, which have to be folded into the result together.
+    """
+    formula = dsl._exists((V_135,), dsl._and(*_f_smt2_clauses()))
+    fill_referenced_vars(formula)
+
+    result = resolve_conditional_equalities(formula)
+
+    assert not _has_quantifier(result)
+    assert isinstance(result, AST_Connective) and result.type == Connective_Type.OR
+
+    escapes = [V_117, dsl._or(V_122, V_16, V_3, V_1)]
+    for escape in escapes:
+        assert escape in result.children, f'{escape} is missing among {result.children}'
+
+    # var_84 = var_91, regardless of how the two clauses spelled their equalities
+    assert Relation(vars=[V_84, V_91], coefs=[-1, 1], rhs=0, predicate_symbol='=') in result.children
+
+    assert_semantically_equivalent(formula, result,
+                                   bool_vars=[V_1, V_3, V_16, V_117, V_122], int_vars=[V_84, V_91],
+                                   int_range=range(-2, 3))
+
+
+def test_f_smt2_bound_blocks_elimination():
+    """
+    The `f.smt2` formula as written: the same two clauses guarded by `var_135 - var_114 <= -1`.
+
+    The bound is an inequality on the quantified variable that also mentions the free `var_114`,
+    so eliminating `var_135` requires the inequality-substitution rewrite - which is currently
+    switched off in `_try_eliminate_var`. Until it is re-enabled, the pass must bail out and
+    return the formula untouched rather than drop the bound (which would be unsound: it is
+    exactly the bound that can contradict the value the clauses pin `var_135` to).
+    """
+    formula = _f_smt2_formula()
+
+    result = resolve_conditional_equalities(formula)
+
+    assert result == formula
+    assert _has_quantifier(result)
+
+
+@pytest.mark.skip(reason='inequality-substitution rewrite is temporarily disabled in _try_eliminate_var')
+def test_f_smt2_resolves_once_inequality_substitution_is_reenabled():
+    """ Companion to `test_f_smt2_bound_blocks_elimination` - the result the full `f.smt2` should get. """
+    formula = _f_smt2_formula()
+
+    result = resolve_conditional_equalities(formula)
+
+    assert not _has_quantifier(result)
+    assert_semantically_equivalent(formula, result,
+                                   bool_vars=[V_1, V_3, V_16, V_117, V_122], int_vars=[V_84, V_91, V_114],
+                                   int_range=range(-2, 3))

@@ -422,6 +422,23 @@ class MTBDDTransitionFn():
         return _nfa_from_pynfa(pynfa, alphabet)
 
     @staticmethod
+    def construct_nfa_for_congruence_with_bounded_var(congruence: Congruence, bound_var: Var,
+                                                     lower_bound: int, upper_bound: int,
+                                                     alphabet: LSBF_Alphabet) -> MTBDD_NFA:
+        """
+        Construct an automaton for `exists bound_var. (lower_bound <= bound_var <= upper_bound and congruence)`.
+
+        The bound variable is projected away by the construction itself - the resulting automaton is over
+        the congruence's remaining variables. See BOUNDED_CONGRUENCE.md.
+        """
+        var_ids = [var.id for var in congruence.vars]
+        bound_var_idx = congruence.vars.index(bound_var)
+        pynfa = libamaya.construct_nfa_from_congruence_with_bounded_var(
+            list(congruence.coefs), congruence.modulus, congruence.rhs, bound_var_idx,
+            lower_bound, upper_bound, var_ids)
+        return _nfa_from_pynfa(pynfa, alphabet)
+
+    @staticmethod
     def construct_nfa_for_ineq(ineq: Relation, alphabet: LSBF_Alphabet) -> MTBDD_NFA:
         var_ids = [var.id for var in ineq.vars]
         pynfa = libamaya.construct_nfa_from_ineq(list(ineq.coefs), ineq.rhs, var_ids)

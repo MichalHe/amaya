@@ -47,6 +47,7 @@ class Relation(object):
     predicate_symbol: str
 
     id: int = -1
+    _id: int = field(default=-1, compare=False, repr=False)
 
     def are_all_coefficients_zero(self) -> bool:
         """Returns true if all relation variable coefficients are zero."""
@@ -202,6 +203,7 @@ class Congruence:
     modulus: int
 
     id: int = -1
+    _id: int = field(default=-1, compare=False, repr=False)
 
     def linear_terms(self) -> Generator[Tuple[int, Var], None, None]:
         for term in zip(self.coefs, self.vars):
@@ -229,6 +231,7 @@ class Congruence:
 class BoolLiteral:
     """True or False formula"""
     value: bool
+    _id: int = field(default=-1, compare=False, repr=False)
 
 Frozen_AST = Union[int, str, Tuple['Raw_AST', ...]]
 Raw_AST = Union[int, str, List['Raw_AST']]
@@ -380,12 +383,14 @@ class ASTp_Node_Base:
 @dataclass
 class AST_Negation(ASTp_Node_Base):
     child: ASTp_Node
+    _id: int = field(default=-1, compare=False, repr=False)
 
 
 @dataclass
 class AST_Quantifier(ASTp_Node_Base):
     bound_vars: Tuple[Var, ...]
     child: ASTp_Node
+    _id: int = field(default=-1, compare=False, repr=False)
 
 
 class Connective_Type(IntEnum):
@@ -399,6 +404,7 @@ class AST_Connective(ASTp_Node_Base):
     type: Connective_Type
     children: Tuple[ASTp_Node, ...]
     variable_bounds: Optional[Dict[Var, Value_Interval]] = field(default=None, repr=False)
+    _id: int = field(default=-1, compare=False, repr=False)
 
     def replace_children(self, new_children: Tuple[ASTp_Node, ...]) -> AST_Connective:
         return AST_Connective(referenced_vars=self.referenced_vars,

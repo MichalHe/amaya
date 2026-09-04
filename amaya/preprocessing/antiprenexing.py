@@ -17,7 +17,7 @@ from amaya.relations_structures import (
 )
 
 
-def _get_referenced_vars(ast: ASTp_Node) -> Iterable[Var]:
+def get_referenced_vars(ast: ASTp_Node) -> Iterable[Var]:
     match ast:
         case Var():
             return (ast,)
@@ -57,7 +57,7 @@ def _perform_miniscoping(quantif_node: AST_Quantifier) -> ASTp_Node:
         # Select var with min scope
         var_to_child_indices: Dict[Var, List[int]] = defaultdict(list)
         for child_idx, child in enumerate(scope_range):
-            for var in _get_referenced_vars(child):
+            for var in get_referenced_vars(child):
                 if var not in bound_vars:
                     continue
                 var_to_child_indices[var].append(child_idx)
@@ -73,7 +73,7 @@ def _perform_miniscoping(quantif_node: AST_Quantifier) -> ASTp_Node:
 
         # Make a new node capturing the min scope
         min_scope = tuple(scope_range[child_idx] for child_idx in var_to_child_indices[min_scope_var])
-        _referenced_vars: Set[Var] = functools.reduce(set.union, tuple(_get_referenced_vars(child) for child in min_scope), set())
+        _referenced_vars: Set[Var] = functools.reduce(set.union, tuple(get_referenced_vars(child) for child in min_scope), set())
         referenced_vars = tuple(sorted(_referenced_vars))
 
         if len(min_scope) > 1:
