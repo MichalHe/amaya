@@ -23,6 +23,8 @@ u64 count_bits_needed_to_index_states(NFA* nfa) {
 NFA do_pad_closure_using_bit_sets(NFA* nfa, Bit_Set::Block_Arena_Allocator* allocator) {
     if (nfa->states.empty()) return *nfa;
 
+    Interrupt_Guard interrupt_guard;
+
     g_pad_closure_stats.calls += 1;
     g_pad_closure_stats.states_seen += nfa->states.size();
     auto pad_stats_frontier_start = std::chrono::steady_clock::now();
@@ -48,6 +50,7 @@ NFA do_pad_closure_using_bit_sets(NFA* nfa, Bit_Set::Block_Arena_Allocator* allo
 
     bool was_frontier_modified = true;
     while (was_frontier_modified) {
+        AMAYA_CHECK_INTERRUPT();
 
         MTBDD this_iter_start_frontier = frontier;  // Frontier created at the end of this iteration
         MTBDD this_iter_end_frontier   = frontier;  // Frontier after we propagate everything in this iteration

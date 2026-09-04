@@ -266,6 +266,8 @@ The MTBDD pad closure works in two steps:
 void NFA::perform_pad_closure() {
     if (states.empty()) return;
 
+    Interrupt_Guard interrupt_guard;
+
     g_pad_closure_stats.calls += 1;
     g_pad_closure_stats.states_seen += states.size();
     auto pad_stats_frontier_start = std::chrono::steady_clock::now();
@@ -282,6 +284,7 @@ void NFA::perform_pad_closure() {
     bool was_frontier_modified = true;
 
     while (was_frontier_modified) {
+        AMAYA_CHECK_INTERRUPT();
 
         MTBDD this_iter_start_frontier = frontier;  // Frontier created at the end of this iteration
         MTBDD this_iter_end_frontier   = frontier;  // Frontier after we propagate everything in this iteration
@@ -468,6 +471,8 @@ MTBDD compute_states_reaching_set_by_repeated_symbol(NFA& nfa, std::set<State>& 
 
     bool was_frontier_modified = true;
     while (was_frontier_modified) {
+        AMAYA_CHECK_INTERRUPT();
+
         MTBDD new_frontier = frontier;
         sylvan::mtbdd_refs_push(new_frontier);
 
@@ -513,6 +518,8 @@ std::set<State> compute_states_reaching_set(NFA nfa, std::set<State>& states_to_
     // std::cout << "Average post size: " << static_cast<double>(total_post_size) / static_cast<double>(state_posts.size()) << std::endl;
 
     while (!was_fixed_point_found) {
+        AMAYA_CHECK_INTERRUPT();
+
         for (auto potential_states_it = potential_states.begin(); potential_states_it != potential_states.end(); ) {
             auto state = *potential_states_it;
             auto& state_post = state_posts[state];
@@ -534,6 +541,8 @@ std::set<State> compute_states_reaching_set(NFA nfa, std::set<State>& states_to_
 
 void remove_nonfinishing_states(NFA& nfa) {
     if (nfa.states.empty()) return;
+
+    Interrupt_Guard interrupt_guard;
 
     auto states_reaching_final = compute_states_reaching_set(nfa, nfa.final_states);
 
@@ -578,6 +587,7 @@ void setup_intersection_info_for_postless_pruning(Intersection_Info2& info, NFA&
 
 NFA compute_nfa_intersection(NFA& left, NFA& right) {
     LACE_ME;
+    Interrupt_Guard interrupt_guard;
     typedef std::pair<State, State> Product_State;
 
     std::vector<Intersection_Discovery> work_queue;
@@ -612,6 +622,8 @@ NFA compute_nfa_intersection(NFA& left, NFA& right) {
     const u64 current_intersection_op_id = get_next_operation_id();
 
     while (!work_queue.empty()) {
+        AMAYA_CHECK_INTERRUPT();
+
         auto explored_product = work_queue.back();
         work_queue.pop_back();
 
@@ -642,6 +654,7 @@ extern u64 union_applied_cnt;
 
 NFA determinize_nfa(NFA& nfa) {
     LACE_ME;
+    Interrupt_Guard interrupt_guard;
     NFA result(nfa.vars, nfa.var_count);
 
     std::vector<std::pair<const Macrostate, State>*> work_queue;
@@ -673,6 +686,8 @@ NFA determinize_nfa(NFA& nfa) {
     union_applied_cnt = 0;
 
     while (!work_queue.empty()) {
+        AMAYA_CHECK_INTERRUPT();
+
         auto current_macrostate_entry = work_queue.back();
         work_queue.pop_back();
 
@@ -826,6 +841,7 @@ struct std::hash<Partition_Refinement> {
 
 NFA minimize_hopcroft(NFA& nfa) {
     LACE_ME;
+    Interrupt_Guard interrupt_guard;
 
     if (nfa.final_states.empty()) {
         NFA result(nfa.vars, nfa.var_count);
@@ -870,6 +886,8 @@ NFA minimize_hopcroft(NFA& nfa) {
     std::unordered_map<Partition_Refinement, EqClass> mtbdd_to_eq_class;
 
     do {
+        AMAYA_CHECK_INTERRUPT();
+
         sylvan::mtbdd_refs_pop(mtbdd_to_eq_class.size());
         mtbdd_to_eq_class.clear();
 

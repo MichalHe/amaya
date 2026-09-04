@@ -17,6 +17,8 @@
 
 #include <sylvan.h>
 
+#include "interrupt.hpp"
+
 #if DEBUG
 #define PRINT_DEBUG(it) do { std::cerr << it << std::endl; } while (0)
 #define PRINTF_DEBUG(...) do { fprintf(stderr, __VA_ARGS__); } while (0)

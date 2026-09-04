@@ -26,6 +26,22 @@ class Atom_Type:
     CONGRUENCE = 3
 
 
+def _reraise_interrupt(RuntimeError err):
+    """
+    Long-running C++ algorithms (pad closure, intersection, determinization, ...) install their own
+    SIGINT/SIGTERM handler for the duration of the call (see mtbdd-backend/include/interrupt.hpp) and
+    abort with a RuntimeError carrying the signal name once one fires - Ctrl-C would otherwise be
+    silently swallowed while control never returns to the Python interpreter. Turn that back into the
+    exception Python code actually expects; anything else just propagates unchanged.
+    """
+    message = str(err)
+    if message == 'amaya: interrupted by SIGINT':
+        raise KeyboardInterrupt() from None
+    if message == 'amaya: interrupted by SIGTERM':
+        raise SystemExit(143) from None
+    raise err
+
+
 cdef extern from "<sstream>" namespace "std":
     cdef cppclass ostream:
         pass
@@ -254,7 +270,10 @@ cdef class PyNFA:
         self._c_nfa.remove_states(states)
 
     def perform_pad_closure(self):
-        self._c_nfa.perform_pad_closure()
+        try:
+            self._c_nfa.perform_pad_closure()
+        except RuntimeError as err:
+            _reraise_interrupt(err)
 
     def clone(self):
         """Return an independent copy of this automaton (deep-copies the underlying NFA,
@@ -283,32 +302,51 @@ cdef class PyNFA:
 def compute_nfa_intersection(PyNFA left, PyNFA right):
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_compute_nfa_intersection(left._c_nfa[0], right._c_nfa[0]))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_compute_nfa_intersection(left._c_nfa[0], right._c_nfa[0]))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result
 
 
 def determinize_nfa(PyNFA nfa):
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_determinize_nfa(nfa._c_nfa[0]))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_determinize_nfa(nfa._c_nfa[0]))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result
 
 
 def minimize_hopcroft(PyNFA nfa):
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_minimize_hopcroft(nfa._c_nfa[0]))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_minimize_hopcroft(nfa._c_nfa[0]))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result
 
 
 def remove_nonfinishing_states(PyNFA nfa):
-    c_remove_nonfinishing_states(nfa._c_nfa[0])
+    try:
+        c_remove_nonfinishing_states(nfa._c_nfa[0])
+    except RuntimeError as err:
+        _reraise_interrupt(err)
 
 
 def perform_pad_closure_using_bit_sets(PyNFA nfa):
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_perform_pad_closure_using_bit_sets(nfa._c_nfa[0]))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_perform_pad_closure_using_bit_sets(nfa._c_nfa[0]))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result
 
 
@@ -328,7 +366,11 @@ def construct_nfa_from_ineq(coefs, s64 rhs, vars):
     cdef BDDSET var_set = mtbdd_set_from_array(c_vars.data(), c_vars.size())
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_construct_nfa_from_ineq(&atom, rhs, var_set, c_vars.size()))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_construct_nfa_from_ineq(&atom, rhs, var_set, c_vars.size()))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result
 
 
@@ -344,7 +386,11 @@ def construct_nfa_from_eq(coefs, s64 rhs, vars):
     cdef BDDSET var_set = mtbdd_set_from_array(c_vars.data(), c_vars.size())
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_construct_nfa_from_eq(&atom, rhs, var_set, c_vars.size()))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_construct_nfa_from_eq(&atom, rhs, var_set, c_vars.size()))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result
 
 
@@ -360,7 +406,11 @@ def construct_nfa_from_congruence(coefs, s64 modulus, s64 rhs, vars):
     cdef BDDSET var_set = mtbdd_set_from_array(c_vars.data(), c_vars.size())
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_construct_nfa_from_congruence(&atom, rhs, var_set, c_vars.size()))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_construct_nfa_from_congruence(&atom, rhs, var_set, c_vars.size()))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result
 
 
@@ -406,8 +456,12 @@ def construct_nfa_from_congruence_with_bounded_var(coefs, s64 modulus, s64 rhs, 
     cdef BDDSET var_set = mtbdd_set_from_array(c_vars.data(), c_vars.size())
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_construct_nfa_from_congruence_with_bounded_var(
-        &atom, rhs, c_bound_var_idx, lower_bound, upper_bound, var_set, c_vars.size()))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_construct_nfa_from_congruence_with_bounded_var(
+            &atom, rhs, c_bound_var_idx, lower_bound, upper_bound, var_set, c_vars.size()))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result
 
 
@@ -453,5 +507,9 @@ def construct_dfa_for_atom_conjunction(atoms, initial_state, vars, quantified_va
 
     result = PyNFA()
     del result._c_nfa
-    result._c_nfa = new NFA(c_construct_dfa_for_atom_conjunction(&conjunction))
+    result._c_nfa = NULL
+    try:
+        result._c_nfa = new NFA(c_construct_dfa_for_atom_conjunction(&conjunction))
+    except RuntimeError as err:
+        _reraise_interrupt(err)
     return result

@@ -1305,6 +1305,8 @@ Formula_Structure describe_formula(const Dep_Graph* graph) {
 
 
 NFA build_nfa_with_formula_entailement(const Formula* formula, Conjunction_State& init_state, sylvan::BDDSET bdd_vars, Formula_Pool& formula_pool) {
+    Interrupt_Guard interrupt_guard;
+
     vector<Finalized_Macrostate> work_queue;
     Lazy_Construction_State constr_state = {.formula_pool = formula_pool, .output_queue = work_queue};
 
@@ -1396,6 +1398,8 @@ NFA build_nfa_with_formula_entailement(const Formula* formula, Conjunction_State
     u64 processed = 0;
     u64 processed_batch = 0;
     while (!work_queue.empty()) {
+        AMAYA_CHECK_INTERRUPT();
+
         auto macrostate = work_queue.back();
         work_queue.pop_back();
 

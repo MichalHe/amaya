@@ -65,6 +65,8 @@ void shutdown_machinery()
 }
 
 NFA construct_dfa_for_atom_conjunction(Serialized_Quantified_Atom_Conjunction* raw_formula) {
+    Interrupt_Guard interrupt_guard;
+
     Formula_Description formula_desc;
     formula_desc.var_count = raw_formula->var_cnt;
     for (u64 atom_i = 0; atom_i < raw_formula->atom_cnt; atom_i++) {
@@ -182,6 +184,8 @@ static void explore_congruence_states(NFA& nfa,
     vector<u8> symbol_arr(var_count);
 
     while (!worklist.empty()) {
+        AMAYA_CHECK_INTERRUPT();
+
         auto [state, handle] = worklist.back();
         worklist.pop_back();
 
@@ -189,6 +193,8 @@ static void explore_congruence_states(NFA& nfa,
         nfa.states.insert(handle);
 
         for (u64 symbol = 0; symbol < (1ull << var_count); symbol++) {
+            if ((symbol & 0xFFFF) == 0) AMAYA_CHECK_INTERRUPT();
+
             s64 dot = 0;
             for (u64 i = 0; i < var_count; i++) {
                 s64 is_bit_set = (symbol & (1ull << i)) > 0;
@@ -246,6 +252,8 @@ static void explore_congruence_states(NFA& nfa,
 static const Congruence_State FINAL_STATE_KEY = {1, 299993, -1};
 
 NFA construct_nfa_from_congruence(Serialized_Atom* congruence, s64 init_val, BDDSET vars, u64 var_count) {
+    Interrupt_Guard interrupt_guard;
+
     auto moduli = decompose_modulus(congruence->modulus);
     Congruence_State initial_state = {
         .modulus_odd = moduli.modulus_odd,
@@ -277,6 +285,8 @@ NFA construct_nfa_from_congruence(Serialized_Atom* congruence, s64 init_val, BDD
 NFA construct_nfa_from_congruence_with_bounded_var(Serialized_Atom* congruence, s64 rhs, u64 bound_var_idx,
                                                   s64 lower_bound, s64 upper_bound,
                                                   BDDSET vars, u64 var_count) {
+    Interrupt_Guard interrupt_guard;
+
     assert(var_count >= 2);              // Something has to be left once the bound variable is projected away
     assert(bound_var_idx < var_count);
     assert(congruence->modulus > 0);
@@ -341,6 +351,8 @@ NFA construct_nfa_from_congruence_with_bounded_var(Serialized_Atom* congruence, 
     // bound ranges far wider than the modulus.
     std::unordered_set<s64> seen_rhs;
     for (u64 offset = 0; ; offset++) {
+        AMAYA_CHECK_INTERRUPT();
+
         if (!seen_rhs.insert(instantiated_rhs).second) break;
 
         Congruence_State seed = {
@@ -373,6 +385,8 @@ NFA construct_nfa_from_congruence_with_bounded_var(Serialized_Atom* congruence, 
 
 
 NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, BDDSET vars, u64 var_count) {
+    Interrupt_Guard interrupt_guard;
+
     s64 final_state_handle = 0;
     s64 init_state_handle  = 1;
     s64 final_state = std::numeric_limits<s64>::max();
@@ -392,12 +406,16 @@ NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, BDDSET vars, 
     constructed_nfa.add_state_final(final_state_handle);
 
     while (!worklist.empty()) {
+        AMAYA_CHECK_INTERRUPT();
+
         auto [state, handle] = worklist.back();
         worklist.pop_back();
 
         constructed_nfa.states.insert(handle);
 
         for (u64 symbol = 0; symbol < (1 << var_count); symbol++) {
+            if ((symbol & 0xFFFF) == 0) AMAYA_CHECK_INTERRUPT();
+
             s64 dot = 0;
             for (int i = 0; i < var_count; i++) {
                 s64 is_bit_set = (symbol & (1u << i)) > 0;
@@ -436,6 +454,8 @@ NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, BDDSET vars, 
 }
 
 NFA construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 var_count) {
+    Interrupt_Guard interrupt_guard;
+
     s64 final_state_handle = 0;
     s64 init_state_handle  = 1;
     s64 final_state = std::numeric_limits<s64>::max();
@@ -457,6 +477,8 @@ NFA construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 
     s64 states_processed = 0;
 
     while (!worklist.empty()) {
+        AMAYA_CHECK_INTERRUPT();
+
         auto [state, handle] = worklist.back();
         worklist.pop_back();
 
@@ -465,6 +487,8 @@ NFA construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 
         states_processed += 1;
 
         for (u64 symbol = 0; symbol < (1 << var_count); symbol++) {
+            if ((symbol & 0xFFFF) == 0) AMAYA_CHECK_INTERRUPT();
+
             s64 dot = 0;
             for (int i = 0; i < var_count; i++) {
                 s64 is_bit_set = (symbol & (1u << i)) > 0;

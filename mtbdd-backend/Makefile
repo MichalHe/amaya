@@ -17,7 +17,7 @@ AMAYA_PKG_DIR := ../amaya
 # a build from a fresh checkout, would fail with "No such file or directory" on build/*.o.
 OBJECTS := build/lazy-tests.o build/lazy.o build/wrapper.o build/operations.o build/custom_leaf.o \
            build/base.o build/vectors.o build/pareto_set.o build/rewrites.o build/tfa_leaf.o \
-           build/bit_set.o build/bit_set_leaf.o build/algorithms.o build/sylvan-extra.o build/test.o
+           build/bit_set.o build/bit_set_leaf.o build/algorithms.o build/interrupt.o build/sylvan-extra.o build/test.o
 
 $(OBJECTS): | build
 
@@ -31,7 +31,7 @@ libamaya:
 	cd wrapper && $(PYTHON) compile_wrapper.py build_ext --inplace
 	cp wrapper/libamaya*.so $(AMAYA_PKG_DIR)/
 
-lazy-tests: build/lazy-tests.o build/lazy.o build/base.o build/custom_leaf.o build/operations.o build/sylvan-extra.o build/pareto_set.o build/tfa_leaf.o build/rewrites.o build/bit_set.o build/bit_set_leaf.o build/algorithms.o
+lazy-tests: build/lazy-tests.o build/lazy.o build/base.o build/custom_leaf.o build/operations.o build/sylvan-extra.o build/pareto_set.o build/tfa_leaf.o build/rewrites.o build/bit_set.o build/bit_set_leaf.o build/algorithms.o build/interrupt.o
 	$(CXX) -o $@ $^ $(CXXLIBS)
 
 build/lazy-tests.o: src/lazy-tests.cpp
@@ -76,6 +76,9 @@ build/bit_set_leaf.o: src/bit_set_leaf.cpp include/bit_set.hpp
 build/algorithms.o: src/algorithms.cpp include/custom_leaf.hpp
 	$(CXX) -c $(CXXFLAGS) src/algorithms.cpp -o $@
 
+build/interrupt.o: src/interrupt.cpp include/interrupt.hpp
+	$(CXX) -c $(CXXFLAGS) src/interrupt.cpp -o $@
+
 build/sylvan-extra.o: include/sylvan-extra.h src/sylvan-extra.c
 	$(CC) -c $(CFLAGS) -o $@ src/sylvan-extra.c
 
@@ -95,6 +98,6 @@ clean:
 build/test.o: src/test.cpp
 	$(CXX) -c $(CXXFLAGS) src/test.cpp -o build/test.o
 
-test: build/test.o build/wrapper.o build/operations.o build/custom_leaf.o build/base.o
+test: build/test.o build/wrapper.o build/operations.o build/custom_leaf.o build/base.o build/interrupt.o
 	$(CXX) -o $@ $^ $(CXXLIBS)
 

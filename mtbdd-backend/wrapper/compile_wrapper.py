@@ -17,6 +17,7 @@ backend_sources = [
     "../src/bit_set.cpp",
     "../src/bit_set_leaf.cpp",
     "../src/algorithms.cpp",
+    "../src/interrupt.cpp",
     "../src/sylvan-extra.c",
 ]
 
