@@ -508,11 +508,11 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
             if isinstance(root_node.child, Var):
                 var_value = assertions.get_asserted_values_for_bool_atom(root_node.child)
 
-                if not var_value:
+                if var_value is None:
                     assertions.assert_bool_atom(root_node.child, False)
                     return root_node
 
-                return BoolLiteral(value=var_value)
+                return BoolLiteral(value=not var_value)
 
             
             assertions.enter_negation()
@@ -573,21 +573,6 @@ class Variable_Use_Info:
         rel_uses = self.relation_uses[var]
         congruence_uses = self.congruence_uses[var]
         return len(rel_uses) + len(congruence_uses) <= 1
-
-    def delete_all_relatations_containing_to_a_var(self, var: Var):
-        """
-        Delete all stored relations that contain a var.
-        """
-        relation_ids_to_delete_from_other_vars = list(rel.id for rel in self.relation_uses[var])
-
-        assert all(_id != -1 for _id in relation_ids_to_delete_from_other_vars)
-
-        del self.relation_uses[var]
-
-        for var in self.relation_uses:
-            var_relations = self.relation_uses[var]
-            var_relations = [rel for rel in var_relations if rel.id not in relation_ids_to_delete_from_other_vars]
-            self.relation_uses[var] = var_relations
 
     def get_bool_var_desired_value(self, var: Var) -> bool | None:
         var_uses = self.bool_var_uses[var]
@@ -668,7 +653,6 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
         case Relation():
             for var in root_node.vars:
                 if var_uses.is_var_used_only_once(var):
-                    var_uses.delete_all_relatations_containing_to_a_var(var)
                     result = BoolLiteral(True)  # This relation gives us no information about models
                     return result
             return root_node
@@ -720,7 +704,6 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
                 relation: Relation = root_node.child
                 for var in relation.vars:
                     if var_uses.is_var_used_only_once(var):
-                        var_uses.delete_all_relatations_containing_to_a_var(var)
                         result = BoolLiteral(True)
                         return result
 

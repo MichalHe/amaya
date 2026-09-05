@@ -417,8 +417,27 @@ def test_simplification_fragment_with_negated_shared_vars():
     assertions = Asserted_Model_Properties()
     result = simplify_formula_using_model_properties(formula, assertions)
     pprint_formula(result)
-    assert False
-    # TODO: write assertions once the expected behaviour under negation is settled
+
+    # V48, V44, V39 are each fully aliased away (V48=V47, V44=V43, V39=V38) and their now-unused
+    # binders dropped - the substitution correctly reaches eq_24_48, which turns into an equation
+    # over V47 (not V48). None of eq_15_16, eq_23_47 or the substituted eq_24_47 get turned into
+    # aliases themselves: each sits under a NOT relative to the AND/OR branch it was found in, so
+    # `_register_unresolved_equation` must leave them as plain (negated) relations.
+    eq_24_47 = dsl._eq([(1, Var(24)), (-1, Var(47))], 0)
+    expected_result = dsl._neg(
+        dsl._or(
+            dsl._neg(eq_15_16),
+            dsl._and(
+                Var(34),
+                dsl._or(
+                    dsl._neg(eq_23_47),
+                    dsl._neg(eq_24_47),
+                ),
+            ),
+        ),
+    )
+
+    assert result == expected_result
 
 
 def test_asserted_bool_atom_values_are_read_back_faithfully():
