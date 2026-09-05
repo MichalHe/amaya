@@ -61,6 +61,15 @@ class Asserted_Model_Properties:
     Consumed (and removed from this set) by the AST_Quantifier node that binds them.
     """
 
+    vars_referenced_unsubstituted: set[Var] = field(default_factory=set)
+    """
+    Variables that appear literally (i.e. with no alias applied - either because none was known yet,
+    or none exists) in a Relation/Congruence that has already been fixed into the result tree. AND
+    processes its children in a single left-to-right pass, so a later child can derive an alias for a
+    variable that an earlier, already-finalized sibling still references raw - that alias must not be
+    allowed to drop the variable's binder, or the earlier reference is left dangling with none.
+    """
+
     def insert_stack(self):
         self.equations.append([])
         self.bool_atom_values.append(dict())
@@ -115,6 +124,27 @@ class Asserted_Model_Properties:
             if var in bound_vars:
                 return entry_branch_depth == self.branch_depth and entry_negation_depth == self.negation_depth
         return False
+
+    def find_owning_quantifier_scope_index(self, var: Var) -> int | None:
+        """
+        Index into `quantifier_scopes` (0 = outermost) of the innermost currently open quantifier
+        that binds `var`, or None if `var` is not bound by any currently open quantifier (e.g. it is
+        a free/global formula parameter).
+        """
+        for i in range(len(self.quantifier_scopes) - 1, -1, -1):
+            bound_vars, _, _, _ = self.quantifier_scopes[i]
+            if var in bound_vars:
+                return i
+        return None
+
+    def get_own_body_stack_depth(self, scope_index: int) -> int:
+        """
+        The equations/var_aliases frame that stays alive for the whole body of `quantifier_scopes[scope_index]`.
+        That quantifier's body may not itself be an AND/OR (e.g. a bare relation, or another quantifier
+        directly) and so may never have pushed its own frame - clamp to the current topmost frame, the
+        most conservative (least-promoted) valid target, in that case.
+        """
+        return min(self.quantifier_scopes[scope_index][3] + 1, len(self.var_aliases) - 1)
 
     def get_widest_valid_stack_depth(self) -> int:
         """
@@ -264,7 +294,7 @@ def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asser
         return Congruence(vars=new_vars, coefs=new_coefs, rhs=new_rhs, modulus=relation.modulus)
 
 
-def _try_extract_alias(equation: Relation) -> tuple[Var, Var_Alias] | None:
+def _try_extract_alias(equation: Relation, assertions: Asserted_Model_Properties) -> tuple[Var, Var_Alias] | None:
     """
     If `equation` has a variable with a unit coefficient, express it as an alias of the remaining terms,
     e.g. `x - y = 1` (x has a unit coefficient) becomes the alias `x = y + 1`.
@@ -273,8 +303,25 @@ def _try_extract_alias(equation: Relation) -> tuple[Var, Var_Alias] | None:
     if not unit_coef_vars:
         return None
 
-    # Prefer eliminating the variable with the largest id, keeping lower-id variables as canonical.
-    elim_var, elim_coef = max(unit_coef_vars, key=lambda var_coef: var_coef[0].id)
+    # Prefer eliminating the variable owned by the most deeply nested currently open quantifier -
+    # this guarantees every other variable remaining in the alias expression is bound at an
+    # equal-or-wider scope than elim_var, so the expression stays meaningful for as long as
+    # elim_var's own binder could have been referenced. Picking an outer-scoped variable instead
+    # (e.g. by id, as before) can alias it to an expression that mentions an *inner*-scoped
+    # variable; once that inner variable's own (unrelated) binder is later dropped, the alias
+    # becomes a dangling reference wherever it still gets substituted in.
+    scoped_candidates = [
+        (var, coef, scope_index)
+        for var, coef in unit_coef_vars
+        if (scope_index := assertions.find_owning_quantifier_scope_index(var)) is not None
+    ]
+    if scoped_candidates:
+        elim_var, elim_coef, _ = max(scoped_candidates, key=lambda item: (item[2], item[0].id))
+    else:
+        # None of the candidates are bound by any currently open quantifier (e.g. they are all
+        # free/global formula parameters) - there is no binder at stake, so the original
+        # (arbitrary but deterministic) choice is fine.
+        elim_var, elim_coef = max(unit_coef_vars, key=lambda var_coef: var_coef[0].id)
 
     remaining_terms = [(var, coef) for var, coef in zip(equation.vars, equation.coefs) if var != elim_var]
 
@@ -309,13 +356,33 @@ def _register_unresolved_equation(equation: Relation, assertions: Asserted_Model
     # under the same enclosing quantifier(s) instead of disappearing once its own frame is popped.
     target_depth = assertions.get_widest_valid_stack_depth()
 
-    alias = _try_extract_alias(equation)
+    alias = _try_extract_alias(equation, assertions)
     if alias is None:
         assertions.assert_equation(equation, depth=target_depth)
         return None
 
     elim_var, var_alias = alias
+
+    # The alias expression can reference other bound variables (e.g. `x = y + z`, all three
+    # existentially bound). It must never be promoted past the point where any of those variables'
+    # own binder could be dropped - otherwise, once that happens, substituting the alias elsewhere
+    # would reintroduce that variable with no binder left anywhere in the formula. Cap the depth to
+    # the innermost (most restrictive) such dependency's own body frame.
+    for dependency_var in var_alias.vars:
+        dependency_scope_index = assertions.find_owning_quantifier_scope_index(dependency_var)
+        if dependency_scope_index is None:
+            continue
+        dependency_body_depth = assertions.get_own_body_stack_depth(dependency_scope_index)
+        target_depth = max(target_depth, dependency_body_depth)
+
     assertions.assert_alias(elim_var, var_alias, depth=target_depth)
+
+    # If elim_var already appears, unsubstituted, in some earlier-processed sibling that has been
+    # fixed into the result tree, its binder must stay - dropping it now would leave that earlier
+    # reference with no binder anywhere in the formula. The alias itself is still recorded above, so
+    # it keeps being applied to substitute elim_var away everywhere it is still *about* to be seen.
+    if elim_var in assertions.vars_referenced_unsubstituted:
+        return None
 
     if assertions.is_unconditionally_true_for_owning_quantifier(elim_var):
         assertions.vars_eliminated_via_alias.add(elim_var)
@@ -352,8 +419,12 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
 
         case Congruence():
             rewritten_congruence: Congruence = _substitute_known_aliases(root_node, assertions)
+            # No alias is known for any variable still left in `rewritten_congruence` (aliases were
+            # already substituted above) - fix that in, so a later alias for one of them can no
+            # longer be used to drop its binder without leaving this reference dangling.
+            assertions.vars_referenced_unsubstituted.update(rewritten_congruence.vars)
             return rewritten_congruence
-                       
+
         case Relation():
             # Replace every variable with a known alias (e.g. x = y - 1) before doing anything else - this
             # also makes the duplicate/implied-equation detection below strictly more effective, since two
@@ -365,6 +436,7 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
                 return BoolLiteral(is_constant)
 
             if substituted.predicate_symbol != '=':
+                assertions.vars_referenced_unsubstituted.update(substituted.vars)
                 return substituted
 
             # TODO: This is sketchy, we should have a heuristic that tries to combine similar-enough equations
@@ -372,6 +444,8 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
             similar_eq = assertions.search_similar_eq(substituted)
             if not similar_eq:
                 absorbed = _register_unresolved_equation(substituted, assertions)
+                if absorbed is None:
+                    assertions.vars_referenced_unsubstituted.update(substituted.vars)
                 return absorbed if absorbed is not None else substituted
 
             implication = _eliminate_known_info_from_eq(substituted, similar_eq)
@@ -381,6 +455,8 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
                 # TODO: Maybe we should keep the simplified relation here instead? For example, if there are less variables, or
                 # the coefficients are smaller? Right now we do nothing
                 absorbed = _register_unresolved_equation(substituted, assertions)
+                if absorbed is None:
+                    assertions.vars_referenced_unsubstituted.update(substituted.vars)
                 return absorbed if absorbed is not None else substituted
 
             return BoolLiteral(simplified_value)
