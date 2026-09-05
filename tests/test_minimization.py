@@ -140,11 +140,7 @@ def make_automaton2(automaton_cls: Type[T]) -> Tuple[T, NFA]:
     [
         (make_automaton2(NFA), NFA.minimize_brzozowski),
         (make_automaton2(NFA), NFA.minimize_hopcroft),
-        pytest.param(make_automaton2(MTBDD_NFA), MTBDD_NFA.minimize_hopcroft, marks=pytest.mark.skip(
-            reason='MTBDD_NFA.minimize_hopcroft() produces 4 states instead of the expected 2 on this '
-                   'automaton (a real behavioral divergence from the plain NFA backend, not a stale API '
-                   'issue) - needs its own investigation.'
-        )),
+        (make_automaton2(MTBDD_NFA), MTBDD_NFA.minimize_hopcroft),
         (make_wiki_automaton(NFA), NFA.minimize_brzozowski),
         (make_wiki_automaton(NFA), NFA.minimize_hopcroft),
         (make_wiki_automaton(MTBDD_NFA), MTBDD_NFA.minimize_hopcroft),

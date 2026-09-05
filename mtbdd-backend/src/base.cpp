@@ -897,7 +897,12 @@ NFA minimize_hopcroft(NFA& nfa) {
     Interrupt_Guard interrupt_guard;
 
     if (nfa.final_states.empty()) {
-        NFA result(nfa.vars, nfa.var_count);
+        // The empty-language automaton still needs a state to be well-formed (an initial, non-final
+        // state with a universal self-loop) - unlike the accept-all case just below, this used to
+        // default-construct `result` with no states/initial_states at all, silently returning a
+        // 0-state NFA that every caller downstream (complement, intersection, satisfiability checks)
+        // assumes cannot happen.
+        NFA result(nfa.vars, nfa.var_count, {0}, {}, {0});
         result.add_universal_transition(0, 0);
         return result;
     }
@@ -1032,6 +1037,34 @@ NFA minimize_hopcroft(NFA& nfa) {
     }
 
     sylvan::mtbdd_refs_pop(mtbdd_to_eq_class.size());
+
+    // A state of `nfa` that is unreachable from its initial state still gets its own equivalence
+    // class(es) above, since partition refinement runs over every state in `nfa.states` regardless
+    // of reachability - unlike the plain NFA backend's minimize_hopcroft, which only ever explores
+    // partitions reachable from the initial one. Drop everything not reachable from
+    // `result_nfa`'s initial state so the two backends agree on what "minimal" means here.
+    {
+        std::set<State> reachable = result_nfa.initial_states;
+        std::vector<State> frontier(reachable.begin(), reachable.end());
+        while (!frontier.empty()) {
+            State state = frontier.back();
+            frontier.pop_back();
+            for (State successor : result_nfa.get_state_post(state)) {
+                if (reachable.insert(successor).second) {
+                    frontier.push_back(successor);
+                }
+            }
+        }
+
+        std::set<State> unreachable;
+        std::set_difference(result_nfa.states.begin(), result_nfa.states.end(),
+                            reachable.begin(), reachable.end(),
+                            std::inserter(unreachable, unreachable.begin()));
+
+        if (!unreachable.empty()) {
+            result_nfa.remove_states(unreachable);
+        }
+    }
 
     PRINT_DEBUG("Result has #states=" << result_nfa.states.size());
 
