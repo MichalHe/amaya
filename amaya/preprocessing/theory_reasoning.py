@@ -39,10 +39,20 @@ class Asserted_Model_Properties:
     negation_depth: int = 0
     """ How many NOTs we are currently nested under. """
 
-    quantifier_scopes: list[tuple[frozenset[Var], int, int]] = field(default_factory=list)
+    quantifier_scopes: list[tuple[frozenset[Var], int, int, int]] = field(default_factory=list)
     """
-    Stack of currently open quantifiers: (their bound vars, branch_depth, negation_depth) as they
-    were when we entered that quantifier's body.
+    Stack of currently open quantifiers: (their bound vars, branch_depth, negation_depth, stack_depth)
+    as they were when we entered that quantifier's body. `stack_depth` is `len(var_aliases)` at that
+    point, i.e. the equations/var_aliases frame that is guaranteed to stay alive for the quantifier's
+    whole body.
+    """
+
+    stack_entry_negation_depths: list[int] = field(default_factory=lambda: [0])
+    """
+    negation_depth as it was when the corresponding level of `equations`/`var_aliases`/`bool_atom_values`
+    was pushed (i.e. when we entered the enclosing AND/OR). An equation encountered at a negation_depth
+    different from the top of this stack sits under a NOT (or an odd number of them) relative to its
+    enclosing conjunction/disjunction, so it is not implied by that branch and must not be remembered.
     """
 
     vars_eliminated_via_alias: set[Var] = field(default_factory=set)
@@ -55,11 +65,22 @@ class Asserted_Model_Properties:
         self.equations.append([])
         self.bool_atom_values.append(dict())
         self.var_aliases.append(dict())
+        self.stack_entry_negation_depths.append(self.negation_depth)
 
     def pop_stack(self):
         self.bool_atom_values.pop(-1)
         self.equations.pop(-1)
         self.var_aliases.pop(-1)
+        self.stack_entry_negation_depths.pop(-1)
+
+    def is_unconditionally_true_for_current_stack_frame(self) -> bool:
+        """
+        True if we are still in a position unconditionally within the innermost open AND/OR branch -
+        i.e. no NOT has been crossed since that branch was entered. An equation found here is implied
+        by the branch and can safely be remembered (as an alias or verbatim) for later substitution;
+        one found under a mismatched negation depth is not implied by anything and must be discarded.
+        """
+        return self.negation_depth == self.stack_entry_negation_depths[-1]
 
     def enter_branch(self):
         self.branch_depth += 1
@@ -74,7 +95,10 @@ class Asserted_Model_Properties:
         self.negation_depth -= 1
 
     def enter_quantifier_scope(self, bound_vars: tuple[Var, ...]):
-        self.quantifier_scopes.append((frozenset(bound_vars), self.branch_depth, self.negation_depth))
+        # The topmost frame that already exists when we enter this quantifier - the one that stays
+        # alive for its *whole* body (any frame the body itself pushes gets popped before the body
+        # is done, so it cannot be used to share facts between the body's own sibling branches).
+        self.quantifier_scopes.append((frozenset(bound_vars), self.branch_depth, self.negation_depth, len(self.var_aliases) - 1))
 
     def exit_quantifier_scope(self):
         self.quantifier_scopes.pop(-1)
@@ -87,19 +111,35 @@ class Asserted_Model_Properties:
         treated as asserted throughout the quantifier's whole body, and can therefore be dropped
         (together with `var`'s binding) once it has been substituted away everywhere else.
         """
-        for bound_vars, entry_branch_depth, entry_negation_depth in reversed(self.quantifier_scopes):
+        for bound_vars, entry_branch_depth, entry_negation_depth, _entry_stack_depth in reversed(self.quantifier_scopes):
             if var in bound_vars:
                 return entry_branch_depth == self.branch_depth and entry_negation_depth == self.negation_depth
         return False
+
+    def get_widest_valid_stack_depth(self) -> int:
+        """
+        The shallowest (outermost) currently-open equations/var_aliases frame that the current
+        position is unconditionally still within - i.e. no OR/EQUIV branch and no NOT has been
+        crossed since the owning quantifier of that frame was entered. An equation registered at
+        this depth (instead of the innermost frame it was actually found in) stays visible to
+        sibling conjuncts elsewhere in the same quantifier's body - e.g. a sibling AND branch nested
+        under the same quantifier - rather than disappearing once its immediate AND/OR is popped.
+        """
+        widest_depth = len(self.var_aliases) - 1
+        for _bound_vars, entry_branch_depth, entry_negation_depth, entry_stack_depth in reversed(self.quantifier_scopes):
+            if entry_branch_depth != self.branch_depth or entry_negation_depth != self.negation_depth:
+                break
+            widest_depth = entry_stack_depth
+        return widest_depth
 
     def negate_last_level(self):
         last_level = self.bool_atom_values[-1]
         for var, var_value in last_level.items():
             last_level[var] = not var_value
 
-    def assert_equation(self, eq: Relation):
+    def assert_equation(self, eq: Relation, depth: int = -1):
         eq.sort_variables()
-        self.equations[-1].append(eq)
+        self.equations[depth].append(eq)
 
     def search_similar_eq(self, eq: Relation) -> Relation | None:
         eq_vars = sorted(eq.vars)
@@ -127,8 +167,8 @@ class Asserted_Model_Properties:
         last_level = self.bool_atom_values[-1]
         del last_level[atom]
 
-    def assert_alias(self, var: Var, alias: Var_Alias):
-        self.var_aliases[-1][var] = alias
+    def assert_alias(self, var: Var, alias: Var_Alias, depth: int = -1):
+        self.var_aliases[depth][var] = alias
 
     def get_alias(self, var: Var) -> Var_Alias | None:
         for level in reversed(self.var_aliases):
@@ -258,13 +298,24 @@ def _register_unresolved_equation(equation: Relation, assertions: Asserted_Model
     binding once this bubbles back up to it. Otherwise, returns None - the caller should keep the
     (possibly already-substituted) equation as-is.
     """
+    if not assertions.is_unconditionally_true_for_current_stack_frame():
+        # We are nested under a NOT relative to the enclosing AND/OR branch, so `equation` is not
+        # implied by that branch - remembering it (as an alias or verbatim) would let it leak into
+        # unrelated positions that share the same branch but not the same negation context.
+        return None
+
+    # Record at the widest frame this equation is unconditionally valid throughout (not just the
+    # innermost AND/OR branch it was found in), so it stays visible to sibling branches nested
+    # under the same enclosing quantifier(s) instead of disappearing once its own frame is popped.
+    target_depth = assertions.get_widest_valid_stack_depth()
+
     alias = _try_extract_alias(equation)
     if alias is None:
-        assertions.assert_equation(equation)
+        assertions.assert_equation(equation, depth=target_depth)
         return None
 
     elim_var, var_alias = alias
-    assertions.assert_alias(elim_var, var_alias)
+    assertions.assert_alias(elim_var, var_alias, depth=target_depth)
 
     if assertions.is_unconditionally_true_for_owning_quantifier(elim_var):
         assertions.vars_eliminated_via_alias.add(elim_var)
