@@ -134,7 +134,12 @@ def mark_and_collect_ite_conditions(ast: Raw_AST, cond_table: ITE_Table, inside_
         #        (or (and (or (and B B1) (and (not B) B2)) P) (and (nor (or (and B B1) (and (not B) B2))) N)
 
         node_id = cond_table.store_node(condition_id=condition_id, positive_branch=pos_branch_marked_ast, negative_branch=neg_branch_marked_ast)
-        replacement_var = make_ite_var(node_id)
+        # The variable substituted for the expression must be the one the constraints will be written
+        # about, i.e. the globally unique variable the `Variable_Manager` handed out - *not* `node_id`,
+        # which only counts nodes within this atom's own table and therefore restarts at 0 for every
+        # atom. Using `node_id` here made the k-th if-then-else of every atom collapse onto `ite_k`
+        # while its defining constraints were emitted about some other, unused variable.
+        replacement_var = cond_table.node_table[node_id].var_name
         return replacement_var
 
     elif node_type == '+':  # The sum can be N-ary
@@ -245,7 +250,17 @@ def rewrite_ite_expressions(ast: Raw_AST, variable_manager: Variable_Manager) ->
             ite_constraints.append(condition_holds_branch)
             ite_constraints.append(condition_does_not_hold_branch)
 
-        return ['and', marked_ast, *ite_constraints]
+        # The fresh variables must be bound by an existential *at the atom*, not declared globally.
+        #
+        # Their value is a function of the if-then-else condition and branches, which may mention
+        # variables bound by enclosing quantifiers - a single global variable cannot track a value that
+        # depends on a universally quantified one, and forcing it to try loses models. Binding them here
+        # also makes the encoding correct under negation: `NOT (atom AND definition)` is satisfied by
+        # simply violating the definition, whereas `NOT (EXISTS v. definition(v) AND atom(v))` is not,
+        # because the definition determines `v` uniquely from the condition, so the existential is
+        # equivalent to the original atom in either polarity.
+        ite_var_binders = [(node_info.var_name, 'Int') for node_info in cond_table.node_table.values()]
+        return ['exists', ite_var_binders, ['and', marked_ast, *ite_constraints]]
         
     else:
         return [node_type, *(rewrite_ite_expressions(subtree, variable_manager) for subtree in ast[1:])]

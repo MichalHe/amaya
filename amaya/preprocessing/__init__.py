@@ -310,10 +310,9 @@ def preprocess_ast(ast: Raw_AST,
     variable_manager = Variable_Manager()
     ast = rewrite_ite_expressions(ast, variable_manager)
 
-    declared_vars: list[FunctionSymbol] = list(global_fn_symbols) + [
-        FunctionSymbol(name=var_name, arity=0, args=[], return_type=VariableType.INT)
-        for var_name in variable_manager.allocated_var_names
-    ]
+    # The variables `rewrite_ite_expressions` introduces are existentially bound at the atom they came
+    # from (see `ite_preprocessing`), so they are not formula parameters and must not be declared here.
+    declared_vars: list[FunctionSymbol] = list(global_fn_symbols)
 
     third_pass_transformations = {
         'forall': replace_forall_with_exists_handler,

@@ -99,7 +99,8 @@ def test_rewrite_ite_expressions_nested_condition_in_boolean_position():
 
 def _eval(expr, env):
     """Tiny evaluator for the small arithmetic/Boolean fragment used below - understands both the
-    pre-rewrite ('ite' present) and post-rewrite (fresh ite_N vars + '=' constraints) forms."""
+    pre-rewrite ('ite' present) and post-rewrite (fresh ite_N vars + '=' constraints, bound by the
+    'exists' the rewrite puts at the atom) forms."""
     if isinstance(expr, int):
         return expr
     if isinstance(expr, str):
@@ -122,6 +123,14 @@ def _eval(expr, env):
         return any(_eval(arg, env) for arg in expr[1:])
     if op == 'not':
         return not _eval(expr[1], env)
+    if op == 'exists':
+        # The rewrite binds the variables it introduces right at the atom, so the AST quantifies them
+        # itself rather than leaving them free for the caller to quantify.
+        bound_var_names = [binder[0] for binder in expr[1]]
+        return any(
+            _eval(expr[2], {**env, **dict(zip(bound_var_names, values))})
+            for values in _fresh_var_assignments(len(bound_var_names))
+        )
     raise ValueError(f'Unhandled node in test evaluator: {expr!r}')
 
 
@@ -158,6 +167,9 @@ def _collect_leaves(ast) -> set:
         return set()
     if isinstance(ast, str):
         return {ast}
+    if ast and ast[0] == 'exists':
+        # Variables the rewrite bound itself are not free, so the test must not quantify them again.
+        return _collect_leaves(ast[2]) - {binder[0] for binder in ast[1]}
     leaves = set()
     for child in ast[1:]:
         leaves |= _collect_leaves(child)
