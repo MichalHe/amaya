@@ -226,6 +226,21 @@ class Congruence:
         rhs = (self.rhs * coef_inv) % self.modulus
         return Congruence(vars=list(self.vars), coefs=[1], rhs=rhs, modulus=self.modulus)
 
+    def is_unsat(self) -> bool:
+        """
+        Returns True if `coefs . vars = rhs (mod modulus)` has no integer solution for any assignment
+        of `vars`, e.g. `4194304*x = 1048576 (mod 2**32)` (every value the left-hand side can take is
+        a multiple of gcd(4194304, 2**32) = 4194304, but 1048576 is not).
+
+        A linear congruence is solvable over the integers iff gcd(coefs..., modulus) divides rhs -
+        substitute k*modulus for the "mod modulus" part and this is exactly the classical
+        Diophantine-equation solvability condition with `modulus` treated as one more coefficient
+        of an unconstrained integer variable. `math.gcd(*self.coefs, self.modulus)` handles the
+        no-variables case too (gcd() of an empty sequence plus `modulus` is just `modulus`).
+        """
+        coefs_and_modulus_gcd = math.gcd(*self.coefs, self.modulus)
+        return self.rhs % coefs_and_modulus_gcd != 0
+
 
 @dataclass
 class BoolLiteral:

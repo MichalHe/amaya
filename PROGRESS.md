@@ -207,6 +207,56 @@ and left alone).
     run this at scale on a bigger server) and the `smtcomp25-results/` corpus (still has no local
     `.smt2` files).
 
+  **Follow-up: fixed the `jain_7_..._i_11.smt2` memout above, at the user's request, by teaching
+  `model-reasoning` to check satisfiability of a congruence right after substituting an alias into
+  it.** Added `Congruence.is_unsat()` (`amaya/relations_structures.py`) - a congruence
+  `coefs . vars = rhs (mod modulus)` has no integer solution iff `gcd(coefs..., modulus)` does not
+  divide `rhs` (the classical Diophantine-solvability condition, treating `modulus` as one more
+  coefficient of an unconstrained integer variable; `math.gcd(*coefs, modulus)` handles the
+  no-variables case too, since `gcd()` of nothing plus `modulus` is just `modulus`). Wired into
+  `simplify_formula_using_model_properties`'s `case Congruence():` in
+  `amaya/preprocessing/theory_reasoning.py`, right after `_substitute_known_aliases`: if the
+  rewritten congruence is unsat, return `BoolLiteral(False)` instead of the congruence. This is
+  the shared model-reasoning code path (used by both legacy and the pipeline), so both paths
+  benefit, not just the scheduler.
+  Root cause confirmed by hand: substituting `x`'s alias `4194304*(v4+v5+v6+v7)` into the
+  `[v1,v2,v3,v16]` congruence concentrates what used to be four independent variables' worth of
+  freedom into terms that are all multiples of 4194304, so `gcd(coefs, 2**32) = 4194304`, which
+  does not divide the remaining `rhs = 1048576` - unsatisfiable, exactly as the modular arithmetic
+  by hand predicts (worked out independently as a sanity check: `4194304*(k1-k2+k3) = 1048576 (mod
+  2**32)` has no solution since `1048576` is not a multiple of `gcd(4194304, 2**32) = 4194304`).
+  Tests: `tests/test_simplifications_using_models.py::test_congruence_is_unsat_gcd_check` (the
+  method in isolation, including the zero-variable edge case) and
+  `::test_simplify_formula_using_model_properties_detects_unsat_congruence_after_substitution`
+  (the same case through the actual pass - alias substitution turning a satisfiable congruence
+  into an unsatisfiable one must collapse the whole `AND` to `BoolLiteral(False)`).
+  Verified in-process: `jain_7_..._i_11.smt2` under `--opt-fixpoint --opt-report -O all` now
+  preprocesses straight to `BoolLiteral(False)` and `get-sat` returns `unsat` in ~0.2s (matching
+  legacy, and no longer memouting) - confirmed under `-O model-reasoning` alone too.
+  Re-ran the containerized 30-formula sweeps after rebuilding the image:
+  - `--mode verdict -O all --fast`: **0/30 mismatches**, and `jain_7_..._i_11.smt2` (item 9) now
+    agrees with legacy (`unsat`/`unsat`, ~0.6s both sides - down from a 71-77s memout on the
+    pipeline side before this fix).
+  - `--mode verdict -O model-reasoning`: **1/30 mismatch on the very same formula** - but this one
+    is not a bug in the new check. Hand-verified the ground truth again (same gcd computation):
+    the formula **is** unsat, and the pipeline (now) correctly says `unsat`; **legacy says `sat`,
+    which is wrong**. Traced this down to `remove_atoms_satisfied_by_unconstrained_vars`
+    (`amaya/preprocessing/theory_reasoning.py:664-669`): it drops a `Relation` to `BoolLiteral(True)`
+    whenever *any* of its variables is used nowhere else in the formula, with **no check on that
+    variable's coefficient** - here it drops `v3 - 4194304*(v4+v5+v6+v7) = 0` because `v4..v7` are
+    each used only once, even though their shared coefficient (4194304, not ±1) means they can only
+    ever make `v3` a multiple of 4194304, not any value. This is the exact bug already flagged in
+    `TODO.md` ("unsoundly drops an atom whenever any of its variables is used nowhere else... only
+    valid when that variable's coefficient is +-1"), just triggered by a different concrete
+    formula than the one already recorded there. It only surfaces under `-O model-reasoning` in
+    isolation - under `-O all` the other passes restructure the tree (or my new gcd-unsat check
+    fires first) before this pass gets a chance to unsoundly fire, so `-O all` (the set that
+    actually matters for the `enabled` default) still agrees with legacy on this formula. **Not
+    fixed here** - pre-existing, already tracked, and a strictly separate bug from anything asked
+    of this session; flagging the concrete second repro case for whoever picks up the TODO.md item.
+  - Verified no other regressions: full non-broken test suite still green (161 passed, 8 skipped,
+    1 xfailed - two more tests than before, both new).
+
 - **Step 8 — reporting.** `optimize_formula_structure` gained an optional `report_sink: list |
   None = None` parameter (both existing call sites still work with no argument); when the
   pipeline runs, its `Pipeline_Report` is appended there and also logged at `INFO` under

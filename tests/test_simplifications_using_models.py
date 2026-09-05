@@ -3,6 +3,7 @@ from amaya.relations_structures import (
     AST_Connective,
     AST_Negation,
     BoolLiteral,
+    Congruence,
     Connective_Type,
     Relation,
     Var,
@@ -469,3 +470,47 @@ def test_asserted_bool_atom_values_are_scoped_innermost_first():
 
     assertions.pop_stack()
     assert assertions.get_asserted_values_for_bool_atom(atom) is False
+
+
+def test_congruence_is_unsat_gcd_check():
+    """
+    `4194304*x = 1048576 (mod 2**32)` has no solution: every value the left-hand side can take is a
+    multiple of gcd(4194304, 2**32) = 4194304, but 1048576 is not - regression for the real
+    formula (jain_7_..._i_11.smt2, see PROGRESS.md) where a wide substituted congruence like this
+    slipped past preprocessing and blew up automaton construction instead of being recognised as
+    unsatisfiable up front.
+    """
+    unsat_congruence = Congruence(vars=[Var(1)], coefs=[4194304], rhs=1048576, modulus=2**32)
+    assert unsat_congruence.is_unsat()
+
+    sat_congruence = Congruence(vars=[Var(1)], coefs=[1], rhs=1048576, modulus=2**32)
+    assert not sat_congruence.is_unsat()
+
+    # No variables at all - solvability collapses to a plain rhs % modulus check.
+    assert Congruence(vars=[], coefs=[], rhs=1, modulus=4).is_unsat()
+    assert not Congruence(vars=[], coefs=[], rhs=4, modulus=4).is_unsat()
+
+
+def test_simplify_formula_using_model_properties_detects_unsat_congruence_after_substitution():
+    """
+    Regression for the same case as `test_congruence_is_unsat_gcd_check`, exercised through the
+    actual pass: substituting a known alias into a congruence can turn a satisfiable congruence
+    into an unsatisfiable one (e.g. `x` aliased to `4194304*y` turns `1*x = 1048576 (mod 2**32)`,
+    trivially satisfiable, into the unsatisfiable congruence above) - this must be caught right
+    after the substitution, not left for the backend to discover by exhausting memory on an
+    automaton for an atom that can never hold.
+    """
+    x, y = Var(1), Var(2)
+    formula = AST_Connective(
+        referenced_vars=(x, y),
+        type=Connective_Type.AND,
+        children=(
+            Relation(vars=[x, y], coefs=[1, -4194304], rhs=0, predicate_symbol='='),
+            Congruence(vars=[x], coefs=[1], rhs=1048576, modulus=2**32),
+        ),
+    )
+
+    assertions = Asserted_Model_Properties()
+    simplified_formula = simplify_formula_using_model_properties(formula, assertions)
+
+    assert simplified_formula == BoolLiteral(False)

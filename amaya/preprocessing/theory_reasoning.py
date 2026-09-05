@@ -419,6 +419,17 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
 
         case Congruence():
             rewritten_congruence: Congruence = _substitute_known_aliases(root_node, assertions)
+
+            # Substituting an alias in can concentrate what used to be several independent
+            # variables' worth of "wiggle room" into one coefficient shared by all of them (e.g.
+            # x = 4194304*(a+b+c+d) turns a lone `x` coefficient into one shared by a, b, c, d) -
+            # gcd(coefs, modulus) can end up not dividing rhs even though it did before the
+            # substitution. Catch that here, right after each substitution, instead of leaving it
+            # for the backend to discover the hard way by building (and blowing up on) an automaton
+            # for an atom that can never be satisfied.
+            if rewritten_congruence.is_unsat():
+                return BoolLiteral(False)
+
             # No alias is known for any variable still left in `rewritten_congruence` (aliases were
             # already substituted above) - fix that in, so a later alias for one of them can no
             # longer be used to drop its binder without leaving this reference dangling.
