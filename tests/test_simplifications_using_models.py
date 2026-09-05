@@ -253,6 +253,51 @@ def test_simplify_on_unconstrained_vars():
     assert result == expected_result
 
 
+def test_remove_atoms_satisfied_by_unconstrained_vars_requires_unit_gcd_for_equations():
+    """
+    Regression for the TODO.md-documented unsoundness: dropping an equation to `BoolLiteral(True)`
+    just because some variable in it is used nowhere else is only valid if that variable (or,
+    jointly, every such unconstrained variable in the equation) can reach *every* residue - i.e.
+    their combined gcd is 1. A variable with a non-unit coefficient can only ever contribute a
+    multiple of that coefficient, so the equation still constrains the *other* variables even
+    though the unconstrained one looks "free".
+
+    `(and (= (+ (* 3 x) z) 3) (<= z 0))` (the exact counter-example from TODO.md: satisfied by
+    z=-1, x irrelevant to the <=, but no integer x solves 3x - 1 = 3) must NOT collapse to True.
+    """
+    x, z = Var(1), Var(2)
+    formula = dsl._and(
+        dsl._eq([(3, x), (1, z)], 3),
+        Relation(vars=[z], coefs=[1], rhs=0, predicate_symbol='<='),
+    )
+
+    var_use_info = Variable_Use_Info()
+    scan_variable_use(formula, var_use_info)
+
+    result = remove_atoms_satisfied_by_unconstrained_vars(formula, var_use_info, desired_polarity=True)
+
+    assert result == formula
+
+
+def test_remove_atoms_satisfied_by_unconstrained_vars_drops_equations_solvable_for_any_residue():
+    """
+    The flip side of the regression above: an equation *should* still be dropped when its
+    unconstrained variable(s) really can reach any residue - a lone unconstrained variable with
+    coefficient +-1, or several unconstrained variables whose coefficients' combined gcd is 1.
+    """
+    unit_coef_var = Var(1)
+    unit_coef_formula = Relation(vars=[unit_coef_var], coefs=[1], rhs=3, predicate_symbol='=')
+    var_use_info = Variable_Use_Info()
+    scan_variable_use(unit_coef_formula, var_use_info)
+    assert remove_atoms_satisfied_by_unconstrained_vars(unit_coef_formula, var_use_info, desired_polarity=True) == BoolLiteral(True)
+
+    a, b = Var(1), Var(2)
+    joint_gcd_one_formula = Relation(vars=[a, b], coefs=[2, 3], rhs=7, predicate_symbol='=')
+    var_use_info = Variable_Use_Info()
+    scan_variable_use(joint_gcd_one_formula, var_use_info)
+    assert remove_atoms_satisfied_by_unconstrained_vars(joint_gcd_one_formula, var_use_info, desired_polarity=True) == BoolLiteral(True)
+
+
 def test_alias_substitution_replaces_equals_by_equals():
     '''
     and                              and

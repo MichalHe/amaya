@@ -662,11 +662,29 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
             return root_node
 
         case Relation():
-            for var in root_node.vars:
-                if var_uses.is_var_used_only_once(var):
-                    result = BoolLiteral(True)  # This relation gives us no information about models
-                    return result
-            return root_node
+            unconstrained_var_coefs = [
+                coef for var, coef in zip(root_node.vars, root_node.coefs) if var_uses.is_var_used_only_once(var)
+            ]
+
+            if not unconstrained_var_coefs:
+                return root_node
+
+            if root_node.predicate_symbol == '=':
+                # A variable used nowhere else can absorb any value the relation's other terms take
+                # (making the relation trivially true regardless of them) only if it - or, jointly,
+                # the unconstrained variables together - can reach every residue, i.e. their combined
+                # gcd is 1 (e.g. a lone unconstrained variable needs coefficient +-1; two of them with
+                # coefficients 2 and 3 can jointly reach any residue too). A coefficient (or gcd) like
+                # 4194304 can only ever make the relation's variable(s) land on a multiple of 4194304,
+                # not an arbitrary value - dropping the relation in that case would silently discard a
+                # real constraint (e.g. `x = 4194304*y` does NOT mean x is unconstrained).
+                if math.gcd(*unconstrained_var_coefs) != 1:
+                    return root_node
+            # For '<'/'<=', any nonzero coefficient on an otherwise-unconstrained variable already
+            # lets it be driven towards +-infinity in the right direction to satisfy the relation
+            # regardless of the other terms' value - no gcd condition needed.
+
+            return BoolLiteral(True)  # This relation gives us no information about models
 
         case Congruence():
             return root_node

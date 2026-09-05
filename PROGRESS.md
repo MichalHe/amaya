@@ -251,11 +251,39 @@ and left alone).
     formula than the one already recorded there. It only surfaces under `-O model-reasoning` in
     isolation - under `-O all` the other passes restructure the tree (or my new gcd-unsat check
     fires first) before this pass gets a chance to unsoundly fire, so `-O all` (the set that
-    actually matters for the `enabled` default) still agrees with legacy on this formula. **Not
-    fixed here** - pre-existing, already tracked, and a strictly separate bug from anything asked
-    of this session; flagging the concrete second repro case for whoever picks up the TODO.md item.
+    actually matters for the `enabled` default) still agrees with legacy on this formula.
   - Verified no other regressions: full non-broken test suite still green (161 passed, 8 skipped,
     1 xfailed - two more tests than before, both new).
+
+  **Follow-up: fixed the TODO.md `remove_atoms_satisfied_by_unconstrained_vars` bug at the user's
+  request** (`amaya/preprocessing/theory_reasoning.py`'s `Relation()` case). It used to drop a
+  relation to `BoolLiteral(True)` whenever *any* variable in it was used nowhere else in the
+  formula, with no check on that variable's coefficient - only valid when the unconstrained
+  variable(s) can jointly reach *every* residue, i.e. `gcd` of their coefficients is 1 (a lone
+  unconstrained variable needs coefficient +-1; several unconstrained variables in the same
+  relation can also jointly qualify, e.g. coefficients 2 and 3). Now computes that gcd for `=`
+  relations and only drops when it's 1; `<`/`<=` relations are unaffected (any nonzero coefficient
+  on an otherwise-unconstrained variable already lets it be driven to +-infinity in the right
+  direction, so no gcd check is needed there - this matches what the old code already did
+  correctly for those two predicates). Confirmed against both known repros: the original TODO.md
+  counter-example `(and (= (+ (* 3 x) z) 3) (<= z 0))` no longer collapses to `True`, and
+  `jain_7_..._i_11.smt2` under `-O model-reasoning` alone now correctly declines to shortcut to
+  `sat` (it instead falls through to real automaton construction and times out under a 30s local
+  check - expected and acceptable, since `-O model-reasoning` alone was never a complete/fast
+  path; the fix is about soundness, not speed, under a deliberately narrow flag set).
+  `-O all` (the flag set that actually matters for the pipeline's `enabled` default) is
+  unaffected: still resolves the same formula correctly in ~0.2s on both legacy and pipeline,
+  confirmed via a direct (non-containerized, single-formula) re-check rather than re-running the
+  full containerized subset sweep.
+  Tests: `tests/test_simplifications_using_models.py::test_remove_atoms_satisfied_by_unconstrained_vars_requires_unit_gcd_for_equations`
+  (the TODO.md counter-example, must NOT simplify) and
+  `::test_remove_atoms_satisfied_by_unconstrained_vars_drops_equations_solvable_for_any_residue`
+  (unit-coefficient and joint-gcd-1 cases, must still simplify). Full non-broken test suite still
+  green (161 passed, 8 skipped, 1 xfailed - the two counts above are new but net-neutral since one
+  pre-existing test already covered a unit-coefficient case). `TODO.md` updated to mark this item
+  `[FIXED]`; also flagged, in passing, that TODO.md's second item (a supposedly-missing
+  `case Congruence():` in `simplify_formula_using_model_properties`) looks stale - that case
+  already exists on `devel` - without spending time chasing it down further this session.
 
 - **Step 8 — reporting.** `optimize_formula_structure` gained an optional `report_sink: list |
   None = None` parameter (both existing call sites still work with no argument); when the
