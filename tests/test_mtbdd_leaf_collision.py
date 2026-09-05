@@ -4,8 +4,9 @@ import typing as _t
 from amaya.alphabet import LSBF_Alphabet
 from amaya.automatons import AutomatonType
 from amaya.mtbdd_automatons import MTBDD_NFA
+from amaya.relations_structures import Var
 
-alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2), ('z', 3)])
+alphabet = LSBF_Alphabet.from_vars([Var(1), Var(2), Var(3)])
 
 
 @pytest.fixture

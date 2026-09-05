@@ -9,7 +9,7 @@ from amaya.automatons import (
     NFA,
 )
 from amaya.mtbdd_automatons import MTBDD_NFA
-from amaya.relations_structures import Relation
+from amaya.relations_structures import Relation, Var
 from amaya.presburger.constructions.integers import build_nfa_from_linear_inequality
 
 import pytest
@@ -17,10 +17,10 @@ import pytest
 
 @pytest.mark.parametrize('nfa_type', (NFA, MTBDD_NFA))
 def test_state_renaming(nfa_type):
-    alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
-    ineq = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1],
+    alphabet = LSBF_Alphabet.from_vars([Var(1), Var(2)])
+    ineq = Relation.new_lin_relation(variable_names=[Var(1), Var(2)], variable_coefficients=[2, -1],
                                      absolute_part=3, predicate_symbol="<=")
-    nfa = build_nfa_from_linear_inequality(nfa_type, alphabet, ineq, [('x', 1), ('y', 2)])
+    nfa = build_nfa_from_linear_inequality(nfa_type, alphabet, ineq)
 
     state_names_translat: Dict[Any, int] = dict()
 

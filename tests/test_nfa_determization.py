@@ -15,18 +15,19 @@ from amaya.automatons import (
 )
 from amaya.mtbdd_automatons import MTBDD_NFA
 from amaya.automaton_algorithms import abstract_determinize
+from amaya.relations_structures import Var
 from tests.conftest import ResolutionState
 
 import pytest
 
 
-alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
+alphabet = LSBF_Alphabet.from_vars([Var(1), Var(2)])
 
 
 @pytest.fixture()
 def nfa_for_inequality(automaton_cls: AutomatonConstructor) -> NFA:
-    ineq = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1], absolute_part=2, predicate_symbol='<=')
-    return build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq, [('x', 1), ('y', 2)])
+    ineq = Relation.new_lin_relation(variable_names=[Var(1), Var(2)], variable_coefficients=[2, -1], absolute_part=2, predicate_symbol='<=')
+    return build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq)
 
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))

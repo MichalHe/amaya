@@ -8,36 +8,36 @@ from amaya.alphabet import LSBF_Alphabet
 from amaya.automatons import NFA
 from amaya.mtbdd_automatons import MTBDD_NFA
 from amaya.presburger.constructions.integers import build_nfa_from_linear_inequality
-from amaya.relations_structures import Relation
+from amaya.relations_structures import Relation, Var
 from tests.conftest import ResolutionState
 
 import pytest
 
-alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
+alphabet = LSBF_Alphabet.from_vars([Var(1), Var(2)])
 
 
 @pytest.fixture()
 def relation1() -> Relation:
     """Returns relation: x - y <= 0."""
-    relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, -1],
+    relation = Relation.new_lin_relation(variable_names=[Var(1), Var(2)], variable_coefficients=[1, -1],
                                          absolute_part=0, predicate_symbol="<=")
     return relation
 
 
 @pytest.fixture()
 def relation2() -> Relation:
-    relation = Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+    relation = Relation.new_lin_relation(variable_names=[Var(1), Var(2)], variable_coefficients=[1, 1],
                                          absolute_part=1, predicate_symbol="<=")
     return relation
 
 
 @pytest.mark.parametrize('automaton_cls', (NFA, MTBDD_NFA))
 def test_intersection(automaton_cls: NFA, relation1: Relation, relation2: Relation):
-    var_id_pairs = [('x', 1), ('y', 2)]
-    nfa1 = build_nfa_from_linear_inequality(automaton_cls, alphabet, relation1, var_id_pairs)
-    nfa2 = build_nfa_from_linear_inequality(automaton_cls, alphabet, relation2, var_id_pairs)
+    nfa1 = build_nfa_from_linear_inequality(automaton_cls, alphabet, relation1)
+    nfa2 = build_nfa_from_linear_inequality(automaton_cls, alphabet, relation2)
 
     nfa = nfa1.intersection(nfa2)
+    nfa.remove_nonfinishing_states()
 
     assert len(nfa.states) == 8  # We assume that nonfinishing states are removed after the automaton is constructed
     assert len(nfa.initial_states) == 1

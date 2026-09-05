@@ -9,7 +9,7 @@ from amaya.automatons import (
     AutomatonVisRepresentation,
     NFA,
 )
-from amaya.relations_structures import Relation
+from amaya.relations_structures import Relation, Var
 from amaya.semantics_tracking import (
     AH_Atom,
     AH_AtomType
@@ -19,14 +19,14 @@ from amaya.visualization import convert_ast_into_latex_tree
 import pytest
 
 
-alphabet = LSBF_Alphabet.from_variable_id_pairs((('x', 1), ('y', 2)))
+alphabet = LSBF_Alphabet.from_vars([Var(1), Var(2)])
 
 @pytest.fixture()
 def simple_automaton() -> NFA:
     nfa = NFA(alphabet=alphabet,
               automaton_type=AutomatonType.NFA,
               initial_states={0}, final_states={1}, states={0, 1},
-              used_variables=[1, 2],
+              used_variables=[Var(1), Var(2)],
               state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
     nfa.update_transition_fn(0, ('*', 0), 1)
     return nfa
@@ -59,7 +59,7 @@ def test_convert_simple_nfa_into_vtf(simple_automaton: NFA):
 
 def test_colorize_dot():
     nfa = NFA(automaton_type=AutomatonType.NFA, alphabet=alphabet,
-              states={0, 1, 2}, initial_states={0}, final_states={1}, used_variables=[1, 2],
+              states={0, 1, 2}, initial_states={0}, final_states={1}, used_variables=[Var(1), Var(2)],
               state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
 
     # SCCs: {0, 1}, {2}
@@ -74,7 +74,7 @@ def test_colorize_dot():
 
     # SCCs: {0, 1}, {2, 3}
     nfa = NFA(automaton_type=AutomatonType.NFA, alphabet=alphabet,
-              states={0, 1, 2, 3}, initial_states={0}, final_states={1}, used_variables=[1, 2],
+              states={0, 1, 2, 3}, initial_states={0}, final_states={1}, used_variables=[Var(1), Var(2)],
               state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
 
     nfa.update_transition_fn(0, (0, 0), 1)
@@ -119,26 +119,29 @@ def test_uncompress_transition_symbols(compressed_symbol, expected_symbols):
     ('ast', 'expected_tree'),  # expected and actual will have whitespaces removed when compared
     (
         (
+            # `Var` no longer carries a name, so the raw quantifier binders (['x', 'Int']) still print
+            # as friendly names, but a Relation's own variables print as Var(id=N) - there is no name
+            # mapping available to `convert_ast_into_latex_tree` to render them any other way.
             ['exists', [['x', 'Int'], ['y', 'Int']],
                 ['and',
-                    Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, 1],
+                    Relation.new_lin_relation(variable_names=[Var(1), Var(2)], variable_coefficients=[1, 1],
                                               absolute_part=0, predicate_symbol='<='),
-                    Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[1, -1],
+                    Relation.new_lin_relation(variable_names=[Var(1), Var(2)], variable_coefficients=[1, -1],
                                               absolute_part=0, predicate_symbol='>=')]],
                 (r'\node {$\exists(x, y)$} child{ \node {$\land$} '
-                 r'child{ \node {$x + y \le 0$}} child{ \node {$x - y \ge 0$}}};')
+                 r'child{ \node {$Var(id=1) + Var(id=2) \le 0$}} child{ \node {$Var(id=1) - Var(id=2) \ge 0$}}};')
         ),
         (
             # Frobenius coin problem
             ['forall', [['x', 'Int'], ['y', 'Int']],
-                ['not', Relation.new_lin_relation(variable_names=['x', 'y', 'p'], variable_coefficients=[7, 9, -1],
+                ['not', Relation.new_lin_relation(variable_names=[Var(1), Var(2), Var(3)], variable_coefficients=[7, 9, -1],
                                                   absolute_part=0, predicate_symbol='=')]],
-            r'\node {$\forall(x, y)$} child{ \node {$\neg$} child{ \node {$7x + 9y - p = 0$}}};'
+            r'\node {$\forall(x, y)$} child{ \node {$\neg$} child{ \node {$7Var(id=1) + 9Var(id=2) - Var(id=3) = 0$}}};'
         ),
         (
-            Relation.new_lin_relation(variable_names=['x', 'y', 'p'], variable_coefficients=[7, 9, -1],
+            Relation.new_lin_relation(variable_names=[Var(1), Var(2), Var(3)], variable_coefficients=[7, 9, -1],
                                       absolute_part=0, predicate_symbol='='),
-            r'\node {$ 7x + 9y - p = 0$} ;'
+            r'\node {$ 7Var(id=1) + 9Var(id=2) - Var(id=3) = 0$} ;'
         )
     )
 )

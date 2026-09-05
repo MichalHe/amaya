@@ -1,6 +1,7 @@
 import pytest
 
 from amaya.alphabet import LSBF_Alphabet
+from amaya.relations_structures import Var
 from amaya.automatons import (
     AutomatonType,
     NFA, 
@@ -18,7 +19,7 @@ from amaya.semantics_tracking import (
 
 def nfa_containing_model(constr: AutomatonConstructor) -> NFA:
     nfa = constr(
-        alphabet=LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)]),
+        alphabet=LSBF_Alphabet.from_vars([Var(1), Var(2)]),
         automaton_type=AutomatonType.NFA,
         states={0, 1, 2, 3, 4},
         final_states={4},
@@ -46,7 +47,7 @@ def nfa_containing_model(constr: AutomatonConstructor) -> NFA:
 
 def nfa_without_model(constr: AutomatonConstructor) -> NFA:
     nfa = constr(
-        alphabet=LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)]),
+        alphabet=LSBF_Alphabet.from_vars([Var(1), Var(2)]),
         automaton_type=AutomatonType.NFA,
         states={0, 1, 2, 3, 4},
         initial_states={0},

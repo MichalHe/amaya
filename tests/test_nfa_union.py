@@ -4,26 +4,27 @@ from typing import (
     Any
 )
 
+from amaya import logger
 from amaya.alphabet import LSBF_Alphabet
 from amaya.automatons import NFA
 from amaya.mtbdd_automatons import MTBDD_NFA
 from amaya.presburger.constructions.integers import build_nfa_from_linear_inequality
-from amaya.relations_structures import Relation
+from amaya.relations_structures import Relation, Var
 
 import pytest
 
-alphabet = LSBF_Alphabet.from_variable_id_pairs([('x', 1), ('y', 2)])
+alphabet = LSBF_Alphabet.from_vars([Var(1), Var(2)])
 
 
 @pytest.fixture
 def ineq0() -> Relation:
-    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[2, -1],
+    return Relation.new_lin_relation(variable_names=[Var(1), Var(2)], variable_coefficients=[2, -1],
                                      predicate_symbol='<=', absolute_part=2)
 
 
 @pytest.fixture
 def ineq1() -> Relation:
-    return Relation.new_lin_relation(variable_names=['x', 'y'], variable_coefficients=[3, -1],
+    return Relation.new_lin_relation(variable_names=[Var(1), Var(2)], variable_coefficients=[3, -1],
                                      predicate_symbol='<=', absolute_part=3)
 
 
@@ -32,8 +33,8 @@ def ineq1() -> Relation:
 def test_automaton_union(automaton_cls: NFA, ineq0: Relation, ineq1: Relation):
     StateSizes = namedtuple('AutomatonSizeStats', ['states', 'initial_states', 'final_states'])
 
-    nfa0 = build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq0, [('x', 1), ('y', 2)])
-    nfa1 = build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq1, [('x', 1), ('y', 2)])
+    nfa0 = build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq0)
+    nfa1 = build_nfa_from_linear_inequality(automaton_cls, alphabet, ineq1)
 
     nfa0_sizes = StateSizes(len(nfa0.states), len(nfa0.initial_states), len(nfa0.final_states))
     nfa1_sizes = StateSizes(len(nfa1.states), len(nfa1.initial_states), len(nfa1.final_states))

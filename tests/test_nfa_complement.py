@@ -5,6 +5,7 @@ from amaya.automatons import (
 )
 from amaya.alphabet import LSBF_Alphabet
 from amaya.mtbdd_automatons import MTBDD_NFA
+from amaya.relations_structures import Var
 from amaya.semantics_tracking import (
     AH_Atom,
     AH_AtomType,
@@ -16,8 +17,7 @@ import pytest
 
 @pytest.fixture()
 def mtbdd_nfa1() -> MTBDD_NFA:
-    variable_id_pairs = [('x', 1)]
-    alphabet = LSBF_Alphabet.from_variable_id_pairs(variable_id_pairs)
+    alphabet = LSBF_Alphabet.from_vars([Var(1)])
     nfa = MTBDD_NFA(alphabet=alphabet, automaton_type=AutomatonType.DFA,
                     state_semantics=AH_Atom(atom_type=AH_AtomType.CUSTOM, atom=None))
 
