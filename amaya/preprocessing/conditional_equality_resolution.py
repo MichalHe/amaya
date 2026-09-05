@@ -91,9 +91,20 @@ def _extract_referenced_vars(node: ASTp_Node) -> Tuple[Var, ...]:
 
 def fill_referenced_vars(node: ASTp_Node):
     """
-    The dsl `_and`/`_or`/`_neg`/`_exists` helpers default `referenced_vars` to `()`. The pass under
-    test relies on that field being accurate (as it always is for real, preprocessed formulae), so
-    hand-built test trees must have it filled in bottom-up before being fed to the pass.
+    Recompute `referenced_vars` bottom-up so it is accurate for `node` and every subtree of it.
+
+    Originally written so hand-built test trees (the dsl `_and`/`_or`/`_neg`/`_exists` helpers
+    default `referenced_vars` to `()`) could be fed to `resolve_conditional_equalities`, which
+    relies on the field being accurate. It has since been promoted to a scheduled invariant
+    repair in `amaya.preprocessing.pipeline.Optimization_Pipeline` (see
+    `Pass_Descriptor.requires_referenced_vars`): every rewrite pass except this one and
+    `remove_duplicit_connective_children` is functional (`f(ast) -> ast`, rebuilding rather than
+    mutating), and shares unmodified subtrees between its input and output, but this function
+    **mutates nodes in place**. That is safe here - the values it writes are correct for any tree
+    containing the node - but it means a repair made to one tree (e.g. the pipeline's `current`)
+    is also visible from any other tree still holding the same node (e.g. `best`, or a discarded
+    candidate). Do not reuse this mechanism for an annotation whose correct value depends on a
+    node's ancestors.
     """
     match node:
         case AST_Connective():

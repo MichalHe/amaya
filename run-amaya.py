@@ -26,6 +26,7 @@ from collections.abc import Iterable
 import functools
 import contextlib
 from enum import Enum
+import json
 import os
 import logging
 import sys
@@ -46,6 +47,7 @@ from amaya.config import (
 from amaya.converters import generate_optimization_problem, write_ast_in_lash, write_ast_in_smt2
 from amaya.preprocessing import preprocess_ast
 from amaya.preprocessing.eval import NonlinearArithmeticError, VarInfo, convert_ast_into_evaluable_form
+from amaya.preprocessing.pipeline import Pipeline_Report
 from amaya.relations_structures import AST_NaryNode, AST_Node, AST_Node_Names, ASTp_Node, FunctionSymbol, Var, VariableType
 from amaya.stats import RunStats, StatPoint
 from amaya.tokenize import tokenize
@@ -64,6 +66,8 @@ class BenchmarkStat:
     path: str
     runtimes_ns: List[int]
     failed: bool
+    pipeline_report: Optional[Pipeline_Report] = None
+    """The last run's `Pipeline_Report`, if `optimization_pipeline.enabled` (see plan step 8)."""
 
     @property
     def avg_runtime_ns(self) -> Optional[float]:
@@ -72,13 +76,32 @@ class BenchmarkStat:
         return sum(self.runtimes_ns) / len(self.runtimes_ns)
 
     def as_dict(self) -> Dict:
-        return {
+        result = {
             'name': self.name,
             'path': self.path,
             'runtimes_ns': self.runtimes_ns,
             'avg_runtime_ns': self.avg_runtime_ns,
             'failed': self.failed,
         }
+        if self.pipeline_report is not None:
+            result['pipeline_report'] = {
+                'rounds': self.pipeline_report.rounds,
+                'termination': self.pipeline_report.termination,
+                'input_size': self.pipeline_report.input_size,
+                'output_size': self.pipeline_report.output_size,
+                'pass_sequence': self.pipeline_report.pass_sequence,
+                'pass_stats': {
+                    name: {
+                        'invocations': stat.invocations,
+                        'productive': stat.productive,
+                        'discarded_for_growth': stat.discarded_for_growth,
+                        'total_time_ns': stat.total_time_ns,
+                        'nodes_removed': stat.nodes_removed,
+                    }
+                    for name, stat in self.pipeline_report.pass_stats.items()
+                },
+            }
+        return result
 
 
 argparser = ap.ArgumentParser(description=__doc__, formatter_class=ap.RawTextHelpFormatter)
@@ -133,6 +156,39 @@ argparser.add_argument('--toplevel-sat-exact-blocking',
                              'Boolean assignment exactly, instead of blocking every assignment that agrees with it\n'
                              'on the variables the refuted residual actually depended on. Strictly weaker pruning;\n'
                              'exists to measure what the generalized blocking clauses buy. See SAT_TOP_LEVEL.md.'))
+
+# --opt-fixpoint / --opt-budget / --opt-report are NOT -O options and must stay out of
+# `opt_to_config_field`: `-O all` iterates that table and would otherwise flip the pipeline on for
+# every run, exactly the failure mode --astp-cse and --use-toplevel-sat are also kept out of it to
+# avoid. See OPTIMIZATION_PIPELINE_PLAN.md step 5.
+argparser.add_argument('--opt-fixpoint',
+                       action='store_true',
+                       dest='opt_fixpoint',
+                       default=None,
+                       help=('(EXPERIMENTAL) Run the enabled -O optimizations to a fixpoint via the scheduler in\n'
+                             'amaya/preprocessing/pipeline.py, instead of the legacy fixed hand-unrolled sequence.\n'
+                             'See OPTIMIZATION_PIPELINE.md.'))
+
+argparser.add_argument('--no-opt-fixpoint',
+                       action='store_false',
+                       dest='opt_fixpoint',
+                       default=None,
+                       help='Force the legacy optimization sequence even if the pipeline defaults to enabled.')
+
+argparser.add_argument('--opt-budget',
+                       type=int,
+                       dest='opt_budget',
+                       default=None,
+                       metavar='N',
+                       help='Cap the fixpoint pipeline (--opt-fixpoint) to N pass applications. Default: derived '
+                            'from formula size (32 per 1000 nodes, clamped to [256, 512]).')
+
+argparser.add_argument('--opt-report',
+                       action='store_true',
+                       dest='opt_report',
+                       default=False,
+                       help='Log the fixpoint pipeline\'s per-pass statistics table (invocations, productive runs, '
+                            'growth discards, time, nodes removed) after preprocessing finishes.')
 
 argparser.add_argument('-q', '--quiet',
                        action='store_true',
@@ -202,7 +258,8 @@ opt_to_config_field = {
     'overapprox-rhs': 'rewrite_by_overapprox_relation_rhs',
     'model-reasoning': 'reason_about_models',
     'infinite-domain': 'remove_vars_used_only_in_disequalities',
-    'iniline-bool-definitions': 'inline_bool_var_definitions',
+    'iniline-bool-definitions': 'inline_bool_var_definitions',  # historical misspelling, kept for benchmark scripts
+    'inline-bool-definitions': 'inline_bool_var_definitions',
     'dedup-connective-children': 'deduplicate_connective_children',
     'rce': 'resolve_conditional_equalities',
     'bounded-congruence': 'use_bounded_congruence_construction',
@@ -387,7 +444,9 @@ benchmark_subparser.add_argument('--csv-fields',
                                  default='benchmark,avg_runtime,std',
                                  help=('Comma separated fields to print when outputting CSV. Available choices: '
                                        'benchmark (benchmark name), avg_time (average runtime in seconds), '
-                                       'std (standard deviation)'))
+                                       'std (standard deviation), opt_rounds/opt_termination/opt_pass_sequence/'
+                                       'opt_pass_stats (the fixpoint pipeline\'s Pipeline_Report, empty unless '
+                                       '--opt-fixpoint was used - see OPTIMIZATION_PIPELINE_PLAN.md step 8)'))
 
 formula_conversion_subparser = subparsers.add_parser('convert')
 formula_conversion_subparser.add_argument('file_to_convert', help='File containing SMT2 formula to convert to other format.')
@@ -483,6 +542,13 @@ if 'all' in args.forbidden_optimizations:
 else:
     for opt in args.forbidden_optimizations:
         setattr(solver_config.optimizations, opt_to_config_field[opt], False)
+
+if args.opt_fixpoint is not None:
+    solver_config.optimization_pipeline.enabled = args.opt_fixpoint
+if args.opt_budget is not None:
+    solver_config.optimization_pipeline.max_pass_applications = args.opt_budget
+if args.opt_report:
+    solver_config.optimization_pipeline.report = True
 
 # `--astp-cse` is experimental and deliberately kept out of `solver_config`/`opt_to_config_field`
 # (see `amaya/cse_cache.py`): enabling it does not flip a `SolverConfig` field, it wraps the
@@ -689,7 +755,10 @@ def print_benchmark_results_as_csv(results: Dict[str, BenchmarkStat], args, sepa
     """Prints the benchmark results as a CSV with fields given by the args.csv_fields."""
 
     requested_csv_fields = args.csv_fields.split(',')
-    supported_csv_fields = {'benchmark', 'avg_runtime', 'std'}
+    # opt_* fields surface the `Pipeline_Report` collected under `--opt-report`/`--opt-fixpoint`
+    # (plan step 8); they are empty for a benchmark run without the pipeline enabled.
+    supported_csv_fields = {'benchmark', 'avg_runtime', 'std', 'opt_rounds', 'opt_termination',
+                            'opt_pass_sequence', 'opt_pass_stats'}
 
     csv_fields = []
     for field in requested_csv_fields:
@@ -705,6 +774,24 @@ def print_benchmark_results_as_csv(results: Dict[str, BenchmarkStat], args, sepa
         }
         if 'std' in columns:
             column_map['std'] = str(round(statistics.stdev(result.runtimes_ns) / 1_000_000_000))
+
+        report = result.pipeline_report
+        if 'opt_rounds' in columns:
+            column_map['opt_rounds'] = str(report.rounds) if report else ''
+        if 'opt_termination' in columns:
+            column_map['opt_termination'] = report.termination if report else ''
+        if 'opt_pass_sequence' in columns:
+            column_map['opt_pass_sequence'] = ' '.join(report.pass_sequence) if report else ''
+        if 'opt_pass_stats' in columns:
+            if report is None:
+                column_map['opt_pass_stats'] = ''
+            else:
+                column_map['opt_pass_stats'] = json.dumps({
+                    name: {'invocations': stat.invocations, 'productive': stat.productive,
+                          'discarded_for_growth': stat.discarded_for_growth,
+                          'total_time_ns': stat.total_time_ns, 'nodes_removed': stat.nodes_removed}
+                    for name, stat in report.pass_stats.items()
+                })
         return column_map
 
     rows = []
@@ -772,6 +859,9 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
                 if not result:
                     continue
 
+                if result.pipeline_report is not None:
+                    executed_benchmarks[benchmark_file].pipeline_report = result.pipeline_report
+
                 expected_sat_str = result.smt_info.get(':status', 'unknown')
                 if expected_sat_str in ('sat', 'unsat'):
                     sat = result.model is not None
@@ -791,7 +881,6 @@ def run_in_benchmark_mode(args) -> bool:  # NOQA
     report = list(map(BenchmarkStat.as_dict, executed_benchmarks.values()))
 
     if args.output_format == 'json':
-        import json
         print(json.dumps(report))
     elif args.output_format == 'csv':
         print_benchmark_results_as_csv(executed_benchmarks, args)

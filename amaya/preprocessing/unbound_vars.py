@@ -1209,7 +1209,11 @@ def _are_exists_and_trees_isomorphic(left: ASTp_Node, right: ASTp_Node, isomorph
 
         for left_var in left.vars:
             left_coef = left_vars_to_coefs[left_var]
-            right_var = isomorphism[left_var]
+            right_var = isomorphism.get(left_var, left_var)
+            if right_var not in right_vars_to_coefs:
+                # `left_var` maps to a variable that does not occur (at this position) on the
+                # right side at all - not an isomorphism, not a crash.
+                return False
             right_coef = right_vars_to_coefs[right_var]
 
             if left_coef != right_coef:
@@ -1521,6 +1525,11 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
     if isinstance(node, Relation):
         relation: Relation = node
 
+        if not relation.vars:
+            # A fully constant atom (e.g. `0 <= 5`) - nothing to reason about against parent
+            # context, but the code below indexes vars[0]/coefs[0] and would crash on it.
+            return BoolLiteral(relation.is_always_satisfied())
+
         if len(relation.vars) > 1:
             rel_rewritten_using_bounds = rewrite_using_bounds_on_lhs_lin_term(relation, contexter)
             if rel_rewritten_using_bounds is not None:
@@ -1587,8 +1596,11 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
 
         case AST_Negation():
             child = node.child
-            if isinstance(child, Relation) and child.predicate_symbol == '=':
-                # Check if what the negated equation implies is already implied from parent context
+            if isinstance(child, Relation) and child.predicate_symbol == '=' and len(child.vars) == 1:
+                # Check if what the negated equation implies is already implied from parent context.
+                # Only applies to a single-variable equation - the code below indexes vars[0]/coefs[0]
+                # and reasons about one variable's asserted interval, so a 0-variable (constant) or
+                # multi-variable equation must fall through to the generic handling below instead.
                 eq = child
                 var, coef, rhs = eq.vars[0], eq.coefs[0], eq.rhs
                 if (rhs % coef) != 0:

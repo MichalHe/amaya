@@ -21,10 +21,15 @@ by the variable itself.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 from amaya import logger
+from amaya.preprocessing.structural_id import (
+    Node_Key,
+    Structural_Id_Table,
+    _make_atom_key,
+    _make_linear_terms_key,
+)
 from amaya.relations_structures import (
     AST_Connective,
     AST_Negation,
@@ -38,43 +43,9 @@ from amaya.relations_structures import (
 )
 
 
-Node_Key = Tuple
-
-
-@dataclass
-class Node_Id_Table:
-    """Assigns a unique ID to every distinct (sub)formula seen so far."""
-    key_to_id: Dict[Node_Key, int] = field(default_factory=dict)
-    next_id: int = 0
-
-    def get_id(self, key: Node_Key) -> int:
-        node_id = self.key_to_id.get(key)
-        if node_id is None:
-            node_id = self.next_id
-            self.next_id += 1
-            self.key_to_id[key] = node_id
-        return node_id
-
-
-def _make_linear_terms_key(coefs: List[int], vars: List[Var]) -> Tuple[Tuple[int, int], ...]:
-    """Make an ordering-insensitive key out of the linear terms of an atom."""
-    return tuple(sorted((var.id, coef) for coef, var in zip(coefs, vars)))
-
-
-def _make_atom_key(atom: ASTp_Node) -> Node_Key:
-    match atom:
-        case Var():
-            return ('var', atom.id)
-        case BoolLiteral():
-            return ('lit', atom.value)
-        case Relation():
-            terms = _make_linear_terms_key(atom.coefs, atom.vars)
-            return ('rel', atom.predicate_symbol, atom.rhs, terms)
-        case Congruence():
-            terms = _make_linear_terms_key(atom.coefs, atom.vars)
-            return ('congruence', atom.modulus, atom.rhs, terms)
-        case _:
-            raise NotImplementedError(f'Cannot make an atom key for: {atom=}')
+# Kept as an alias so `remove_duplicit_connective_children(ast, id_table=None)`'s public
+# signature, and its callers/tests, keep working unchanged.
+Node_Id_Table = Structural_Id_Table
 
 
 def _deduplicate_children(children: Tuple[Tuple[ASTp_Node, int], ...]) -> Tuple[Tuple[ASTp_Node, ...], Tuple[int, ...]]:

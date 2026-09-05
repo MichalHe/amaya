@@ -43,6 +43,7 @@ from amaya.preprocessing import (
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars, resolve_conditional_equalities
 from amaya.preprocessing.connective_child_dedup import remove_duplicit_connective_children
 from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd
+from amaya.preprocessing.pipeline import Optimization_Pipeline, Pipeline_Report, build_registry
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
     AST_Atom,
@@ -154,7 +155,33 @@ def build_syntax_tree(tokens: Iterable[str]):
     return stack
 
 
-def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
+def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo],
+                               report_sink: Optional[list] = None) -> ASTp_Node:
+    """
+    `report_sink`, if given, has the pipeline's `Pipeline_Report` appended to it when the pipeline
+    runs (nothing is appended on the legacy path). This function returns only the rewritten AST -
+    it runs before `Evaluation_Result` exists, so a sink list is the cheapest way for a caller to
+    get the report out without a global or changing the return type (see plan step 8).
+    """
+    if not solver_config.optimization_pipeline.enabled:
+        return _optimize_formula_structure_legacy(astp, var_table)
+
+    pipeline = Optimization_Pipeline(
+        build_registry(solver_config),
+        var_table,
+        max_pass_applications=solver_config.optimization_pipeline.max_pass_applications,
+        max_wall_time_seconds=solver_config.optimization_pipeline.max_wall_time_seconds,
+    )
+    result = pipeline.run(astp)
+    if pipeline.report is not None:
+        if solver_config.optimization_pipeline.report:
+            logger.info('Optimization pipeline report: %s', pipeline.report)
+        if report_sink is not None:
+            report_sink.append(pipeline.report)
+    return result
+
+
+def _optimize_formula_structure_legacy(astp: ASTp_Node, var_table: Dict[Var, VarInfo]) -> ASTp_Node:
     if solver_config.optimizations.simplify_variable_bounds:
         logger.debug('Simplifying variable bounds of formula: %s', astp)
         astp = cast(ASTp_Node, var_bounds_lib.simplify_bounded_atoms(astp))
@@ -307,6 +334,8 @@ class Evaluation_Result:
     solutions_nfa: Optional[NFA] = None
     smt_info: Dict[str, str] = field(default_factory=dict)
     var_table: Dict[Var, VarInfo] = field(default_factory=dict)
+    pipeline_report: Optional[Pipeline_Report] = None
+    """Set only when `optimization_pipeline.enabled` - see `optimize_formula_structure`."""
 
 
 def evaluate_prepared_formula_with_automata(astp: ASTp_Node, eval_ctx: EvaluationContext) -> Evaluation_Result:
@@ -409,7 +438,8 @@ def perform_whole_evaluation_on_source_text(
             logger.info('Preprocessing resulted in the following AST: %s', ast_to_evaluate)
 
             assert ast_to_evaluate
-            astp = optimize_formula_structure(ast_to_evaluate, var_table)
+            pipeline_report_sink: List[Pipeline_Report] = []
+            astp = optimize_formula_structure(ast_to_evaluate, var_table, report_sink=pipeline_report_sink)
 
             should_exit_without_evaluation = False
             if solver_config.preprocessing.show_preprocessed_formula:
@@ -430,7 +460,10 @@ def perform_whole_evaluation_on_source_text(
 
             logger.info('Setup done. Proceeding to AST evaluation (backend: %s).', solver_config.backend_type.name)
 
-            return evaluate_prepared_formula(astp, eval_ctx)
+            eval_result_final = evaluate_prepared_formula(astp, eval_ctx)
+            if pipeline_report_sink:
+                eval_result_final.pipeline_report = pipeline_report_sink[0]
+            return eval_result_final
 
         elif statement_root == 'exit':
             return None

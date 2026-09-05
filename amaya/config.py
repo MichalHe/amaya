@@ -3,7 +3,7 @@ from dataclasses import (
     field,
 )
 from enum import IntEnum
-from typing import Optional
+from typing import Dict, Optional
 
 
 class SolutionDomain(IntEnum):
@@ -161,6 +161,37 @@ class OptimizationsConfig:
 
 
 @dataclass
+class OptimizationPipelineConfig:
+    """See OPTIMIZATION_PIPELINE.md / OPTIMIZATION_PIPELINE_PLAN.md."""
+
+    enabled: bool = False
+    """
+    Run the registered optimizations to a fixpoint via `amaya.preprocessing.pipeline`, instead of
+    the legacy hand-unrolled straight-line sequence.
+
+    Defaults to False until the differential validation gate (plan step 7) is clean and step 9
+    has re-tuned the tiers from real benchmark data - so that a bad merge here cannot affect a
+    benchmark run or an SMT-COMP submission that does not explicitly ask for it.
+    """
+
+    max_pass_applications: Optional[int] = None
+    """None = derive from formula size (32 per 1000 nodes, clamped to [256, 512] - see
+    `pipeline._default_max_pass_applications`'s docstring for why the floor is 256, not 32)."""
+
+    max_wall_time_seconds: float = 0.0
+    """0 = no time limit."""
+
+    tier_overrides: Dict[str, int] = field(default_factory=dict)
+    """Pass name -> Pass_Tier value; for experimentation without editing the registry."""
+
+    max_runs_overrides: Dict[str, int] = field(default_factory=dict)
+    """Pass name -> max_runs; for experimentation without editing the registry."""
+
+    report: bool = False
+    """Log the per-pass statistics table after the pipeline finishes."""
+
+
+@dataclass
 class PreprocessingConfig:
     perform_antiprenexing: bool = False
     disambiguate_variables: bool = True
@@ -191,6 +222,9 @@ class SolverConfig(object):
     track_state_semantics: bool = False
 
     optimizations: OptimizationsConfig = field(default_factory=OptimizationsConfig)
+
+    optimization_pipeline: OptimizationPipelineConfig = field(default_factory=OptimizationPipelineConfig)
+    """Fixpoint scheduler configuration - see `OptimizationPipelineConfig`."""
 
     backend: BackendConfig = field(default_factory=BackendConfig)
 
