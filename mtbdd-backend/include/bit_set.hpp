@@ -21,9 +21,20 @@ namespace Bit_Set {
         u64 block_cnt;
         u64* data;
 
-        bool has_state(u64 state) const {
-            u64 target_chunk = state / 64;
-            u64 chunk_offset = state % 64;
+        /*
+        NFA states are arbitrary signed 64-bit values (e.g. states built directly from a linear
+        inequality's RHS are frequently negative), but a bit set only has non-negative indices.
+        `state_bias` is the smallest state number present when the set's generation was opened
+        (`Block_Arena_Allocator::start_new_generation`) - every state is shifted by it before being
+        turned into an index, so `has_state`/`add_state` work for whatever range of (possibly
+        negative) state numbers the generation was sized for.
+        */
+        s64 state_bias;
+
+        bool has_state(s64 state) const {
+            u64 biased_state = static_cast<u64>(state - this->state_bias);
+            u64 target_chunk = biased_state / 64;
+            u64 chunk_offset = biased_state % 64;
 
             assert(target_chunk < this->block_cnt);
             return (this->data[target_chunk] & (1ul << chunk_offset)) > 0;
@@ -46,8 +57,9 @@ namespace Bit_Set {
         }
 
         void add_state(State state) {
-            u64 target_chunk = state / 64;
-            u64 chunk_offset = state % 64;
+            u64 biased_state = static_cast<u64>(state - this->state_bias);
+            u64 target_chunk = biased_state / 64;
+            u64 chunk_offset = biased_state % 64;
 
             assert(target_chunk < this->block_cnt);
             this->data[target_chunk] = this->data[target_chunk] | (1ul << chunk_offset);
@@ -105,6 +117,7 @@ namespace Bit_Set {
         struct Generation {
             u64 id;
             u64 block_cnt;
+            s64 state_bias;                // smallest state number this generation's sets can hold
             u64 bit_set_size;              // bytes: the header plus `block_cnt` blocks
             std::vector<u8*> chunks;
             u8* bump      = nullptr;       // next unused byte of the last chunk
@@ -164,9 +177,10 @@ namespace Bit_Set {
                 current->bump += current->bit_set_size;
             }
 
-            result->generation = current->id;
-            result->block_cnt  = current->block_cnt;
-            result->data       = reinterpret_cast<u64*>(reinterpret_cast<u8*>(result) + HEADER_SIZE);
+            result->generation  = current->id;
+            result->block_cnt   = current->block_cnt;
+            result->state_bias  = current->state_bias;
+            result->data        = reinterpret_cast<u64*>(reinterpret_cast<u8*>(result) + HEADER_SIZE);
 
             current->live_bit_sets += 1;
             return result;
@@ -203,7 +217,7 @@ namespace Bit_Set {
             if (generation->live_bit_sets == 0 && generation->retired) release(generation);
         }
 
-        void start_new_generation(u64 state_cnt) {
+        void start_new_generation(u64 state_cnt, s64 state_bias = 0) {
             if (current != nullptr) {
                 current->retired = true;
                 if (current->live_bit_sets == 0) release(current);
@@ -217,6 +231,7 @@ namespace Bit_Set {
             Generation* generation = new Generation;
             generation->id           = current_generation;
             generation->block_cnt    = current_generation_block_cnt;
+            generation->state_bias   = state_bias;
             generation->bit_set_size = HEADER_SIZE + generation->block_cnt * sizeof(u64);
 
             generations[generation->id] = generation;
@@ -257,6 +272,6 @@ namespace Bit_Set {
     };
 
     Bit_Set* make_union(Block_Arena_Allocator* allocator, const Bit_Set* left, const Bit_Set* right);
-    Bit_Set* add_state(Block_Arena_Allocator* allocator, const Bit_Set* set, u64 state);
-    Block_Arena_Allocator create_allocator_for_n_states(u64 state_cnt, u64 bit_sets_per_chunk);
+    Bit_Set* add_state(Block_Arena_Allocator* allocator, const Bit_Set* set, State state);
+    Block_Arena_Allocator create_allocator_for_n_states(u64 state_cnt, u64 bit_sets_per_chunk, s64 state_bias = 0);
 }

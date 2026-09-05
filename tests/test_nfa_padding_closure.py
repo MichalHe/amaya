@@ -268,12 +268,6 @@ def test_advanced_propagation():
     do_advanced_propagation_tests(nfa)
 
 
-@pytest.mark.skip(
-    reason='Segfaults in the native bit-set pad-closure code (libamaya: '
-           'do_pad_closure_using_bit_sets/build_pad_closure_bit_set_fronier_op_CALL) on this automaton - a real '
-           'crash in the C++ extension, not a stale API issue. Needs its own investigation; must stay skipped '
-           '(not xfail) since a segfault takes down the whole test process, not just this test.'
-)
 def test_mtbdd_advanced_propagation():
     nfa = mk_advanced_nfa(MTBDD_NFA)
     do_advanced_propagation_tests(nfa)

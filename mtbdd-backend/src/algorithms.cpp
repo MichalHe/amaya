@@ -8,15 +8,17 @@
 #include "../include/operations.hpp"
 
 /*
-The bit sets used as the pad-closure frontier are indexed by the state *number* (`Bit_Set::add_state`
-does `data[state / 64] |= ...`), so a generation has to be sized by the largest state number present,
-not by how many states there are. The two coincide only when the states are numbered 0..n-1; amaya
-numbers them from 1, which made the old `states.size()` sizing one bit short and let the frontier
-write a u64 past its allocation whenever the state count was a multiple of 64.
+The bit sets used as the pad-closure frontier are indexed by the state number, shifted by the
+smallest state present (`Bit_Set::state_bias` - see `Bit_Set::add_state`), so a generation has to be
+sized by the *span* of state numbers present (max - min + 1), not by how many states there are. NFA
+states are arbitrary signed 64-bit values - e.g. a state built directly from a linear inequality's
+RHS is frequently negative - so the bias is what lets `state / 64` stay a non-negative index into the
+bit set at all, rather than invoking undefined behaviour (a shift by a huge/negative amount) the
+moment a negative state number shows up.
 */
 u64 count_bits_needed_to_index_states(NFA* nfa) {
     if (nfa->states.empty()) return 0;
-    return static_cast<u64>(*nfa->states.rbegin()) + 1;
+    return static_cast<u64>(*nfa->states.rbegin() - *nfa->states.begin()) + 1;
 }
 
 
@@ -35,7 +37,7 @@ NFA do_pad_closure_using_bit_sets(NFA* nfa, Bit_Set::Block_Arena_Allocator* allo
     Pad_Closure_Info2 pad_closure_info = {};
     g_pad_closure_info = &pad_closure_info;
 
-    allocator->start_new_generation(count_bits_needed_to_index_states(nfa));
+    allocator->start_new_generation(count_bits_needed_to_index_states(nfa), *nfa->states.begin());
 
     Bit_Set::Bit_Set* initial_frontier = allocator->alloc();
     for (s64 state : nfa->final_states) {
