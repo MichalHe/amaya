@@ -13,3 +13,9 @@ mtbdd-backend/build/*
 mtbdd-backend/wrapper/build/*
 mtbdd-backend/wrapper/*.so
 mtbdd-backend/wrapper/base.cpp
+
+# LaTeX build artifacts of tool_paper/
+tool_paper/*.aux
+tool_paper/*.log
+tool_paper/*.out
+tool_paper/*.pdf
