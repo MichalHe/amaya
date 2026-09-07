@@ -536,17 +536,19 @@ def _make_sat_evaluation_result(ctx: EvaluationContext,
     """
     Assemble the model reported for a satisfiable formula.
 
-    The residual's automaton is built over the *whole* alphabet, the substituted-away Bool vars
-    included, so it hands back arbitrary values for them - the SAT layer's assignment overwrites those.
-    The result always carries a `model` dict (never `None`) since callers read `model is not None` as
-    the sat/unsat verdict.
+    `solutions_nfa.used_variables` names the tracks actually present in `binary_model`'s symbols - a
+    variable not among them (e.g. a substituted-away Bool var, or one that never made it into any atom
+    of the residual) is unconstrained by this automaton, so it is reported as 0; the SAT layer's
+    assignment overwrites those for the free Bool vars. The result always carries a `model` dict (never
+    `None`) since callers read `model is not None` as the sat/unsat verdict.
     """
     formula_params = tuple(var for var, var_info in ctx.var_table.items() if var_info.is_formula_param)
 
     if binary_model is None:
         model: Dict[Var, int] = {var: 0 for var in formula_params}
     else:
-        model = convert_binary_model_into_decadic(binary_model, formula_params)
+        assert solutions_nfa is not None
+        model = convert_binary_model_into_decadic(binary_model, solutions_nfa.used_variables, formula_params)
 
     for var, value in bool_assignment.items():
         model[var] = int(value)

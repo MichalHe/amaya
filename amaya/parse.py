@@ -363,7 +363,7 @@ def evaluate_prepared_formula_with_automata(astp: ASTp_Node, eval_ctx: Evaluatio
     binary_model = nfa.find_model()
     if binary_model:
         formula_params = tuple(var for var, var_info in var_table.items() if var_info.is_formula_param)
-        decadic_model = convert_binary_model_into_decadic(binary_model, formula_params)
+        decadic_model = convert_binary_model_into_decadic(binary_model, nfa.used_variables, formula_params)
     else:
         decadic_model = None
 
@@ -836,23 +836,40 @@ def split_conjunction_to_shards(and_expr: AST_Connective) -> Tuple[List[Tuple[in
     return list(partitions_and_atom_indices.values()), list(partitions_and_atom_indices.keys())
 
 
-def convert_binary_model_into_decadic(model: Tuple[LSBF_AlphabetSymbol, ...], vars: Tuple[Var,...]) -> Dict[Var, int]:
+def convert_binary_model_into_decadic(model: Tuple[LSBF_AlphabetSymbol, ...],
+                                      used_vars: Tuple[Var, ...],
+                                      target_vars: Optional[Tuple[Var, ...]] = None) -> Dict[Var, int]:
+    """
+    Decode a binary model (a word accepted by an automaton) into a per-variable integer assignment.
+
+    Each symbol in `model` carries one bit per track, tracks ordered identically to `used_vars`
+    (`NFA.used_variables`, sorted by variable id) - not indexed by `Var.id` directly, since an
+    automaton's tracks are only those variables it actually still constrains (e.g. after variables
+    have been projected away or never made it into any atom of the evaluated formula).
+
+    Params:
+        model: The accepted word, one symbol per bit position (LSB first, last position is the sign bit).
+        used_vars: The variables tracked by `model`'s symbols, in track order.
+        target_vars: The variables to report a value for. Defaults to `used_vars`. A variable not
+                     present in `used_vars` is unconstrained by this automaton and is reported as 0.
+    """
+    if target_vars is None:
+        target_vars = used_vars
+
+    track_of_var: Dict[Var, int] = {var: track for track, var in enumerate(used_vars)}
+
+    var_assignment: Dict[Var, int] = {var: 0 for var in target_vars}
     base = 1
-    var_values: List[int] = [0] * len(vars)
     for symbol_idx, symbol in enumerate(model):
-        if symbol_idx < len(model) - 1: # Nonsign bits
-            for var_idx, var in enumerate(vars):
-                bit_val = 1 if symbol[var.id-1] == 1 else 0
-                var_values[var_idx] += bit_val * base
-        else: # Sign bit
-            for var_idx, var in enumerate(vars):
-                bit_val = 1 if symbol[var.id-1] == 1 else 0
-                var_values[var_idx] -= bit_val * base
+        is_sign_bit = symbol_idx == len(model) - 1
+        for var in target_vars:
+            track = track_of_var.get(var)
+            if track is None:
+                continue
+            bit_val = 1 if symbol[track] == 1 else 0
+            var_assignment[var] += -bit_val * base if is_sign_bit else bit_val * base
         base *= 2
 
-    var_assignment: Dict[Var, int] = {}
-    for var, var_value in zip(vars, var_values):
-        var_assignment[var] = var_value
     return var_assignment
 
 
@@ -898,7 +915,7 @@ def evaluate_using_sharding(and_expr: AST_Connective, ctx: EvaluationContext) ->
             shard_logger.info(f'The shard {shard} has no model!')
             return None
 
-        var_assignment = convert_binary_model_into_decadic(model, shard_vars)
+        var_assignment = convert_binary_model_into_decadic(model, shard_automaton.used_variables, shard_vars)
         overall_model.update(var_assignment)
 
     return overall_model
