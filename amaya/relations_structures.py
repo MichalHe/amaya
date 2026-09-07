@@ -226,6 +226,18 @@ class Congruence:
         rhs = (self.rhs * coef_inv) % self.modulus
         return Congruence(vars=list(self.vars), coefs=[1], rhs=rhs, modulus=self.modulus)
 
+    def with_coefficients_reduced_mod_modulus(self) -> Congruence:
+        """ Return a new Congruence with every coefficient X replaced by (X mod modulus). """
+        new_terms = [(coef % self.modulus, var) for coef, var in self.linear_terms() if coef % self.modulus != 0]
+        coefs, vars = zip(*new_terms)
+
+        return Congruence(
+            vars=list(vars),
+            coefs=list(coefs),
+            rhs=self.rhs,
+            modulus=self.modulus,
+        )
+
     def is_unsat(self) -> bool:
         """
         Returns True if `coefs . vars = rhs (mod modulus)` has no integer solution for any assignment
@@ -515,11 +527,12 @@ def ast_references_var(root_node: ASTp_Node, var: Var) -> bool:
             raise ValueError(f'Unhandled node type when checking variable references: {type(root_node)} :: {root_node}')
 
 
-def pprint_formula(ast: ASTp_Node, indent: int = 0):
+def format_formula(ast: ASTp_Node, indent: int = 0) -> str:
+    """ Same tree layout as `pprint_formula`, returned as a string instead of printed directly. """
     indent_str = '   ' * indent
     match ast:
         case BoolLiteral() | Relation() | Congruence() | Var():
-            print(f'{indent_str}{ast}')
+            return f'{indent_str}{ast}'
         case AST_Connective():
             connective_symbol_table = {
                 Connective_Type.AND:   'and',
@@ -527,19 +540,20 @@ def pprint_formula(ast: ASTp_Node, indent: int = 0):
                 Connective_Type.EQUIV: '<=>'
             }
             symbol = connective_symbol_table[ast.type]
-            print(f'{indent_str}{symbol}')
-            for child in ast.children:
-                pprint_formula(child,  indent=indent+1)
+            lines = [f'{indent_str}{symbol}']
+            lines.extend(format_formula(child, indent=indent+1) for child in ast.children)
+            return '\n'.join(lines)
         case AST_Negation():
-            print(f'{indent_str}NOT')
-            pprint_formula(ast.child,  indent=indent+1)
+            return f'{indent_str}NOT\n' + format_formula(ast.child, indent=indent+1)
         case AST_Quantifier():
-            _var_list = [f'{var}' for var in ast.bound_vars]
-            var_list = ','.join(_var_list)
-            print(f'{indent_str}exists ({var_list})')
-            pprint_formula(ast.child,  indent=indent+1)
+            var_list = ','.join(f'{var}' for var in ast.bound_vars)
+            return f'{indent_str}exists ({var_list})\n' + format_formula(ast.child, indent=indent+1)
         case _:
-            raise NotImplementedError(f'Unhandled node while pprinting formula: {ast=}')
+            raise NotImplementedError(f'Unhandled node while formatting formula: {ast=}')
+
+
+def pprint_formula(ast: ASTp_Node, indent: int = 0):
+    print(format_formula(ast, indent=indent))
 
 
 class Bound_Type(IntEnum):

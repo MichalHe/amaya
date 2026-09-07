@@ -541,6 +541,12 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
             if isinstance(rewritten_congruence, BoolLiteral):
                 return rewritten_congruence
 
+            # Keep coefficients canonical (in [0, modulus)), whether or not the alias substitution
+            # above actually changed anything - substitution combines coefficients (`coef * alias_coef`)
+            # without reducing them, so a substituted congruence's coefficients can otherwise end up
+            # negative or >= modulus.
+            rewritten_congruence = rewritten_congruence.with_coefficients_reduced_mod_modulus()
+
             # Substituting an alias in can concentrate what used to be several independent
             # variables' worth of "wiggle room" into one coefficient shared by all of them (e.g.
             # x = 4194304*(a+b+c+d) turns a lone `x` coefficient into one shared by a, b, c, d) -
