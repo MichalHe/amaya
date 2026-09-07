@@ -214,10 +214,16 @@ optional<Successor> compute_successor(Formula_Pool& formula_pool, const Formula*
 
             for (u64 congruence_i = 0; congruence_i < formula->congruences.size; congruence_i++) {
                 Congruence& old_congruence = formula->congruences.items[congruence_i];
+                // Every congruence steps together with the whole joint automaton, but congruences
+                // with different moduli reach modulus_2pow==0 at different symbols - a congruence
+                // that already bottomed out must stay there instead of being decremented again
+                // whenever some other, larger-modulus congruence in the same conjunction still has
+                // work left to do.
+                s64 new_modulus_2pow = old_congruence.modulus_2pow > 0 ? old_congruence.modulus_2pow - 1 : old_congruence.modulus_2pow;
                 Congruence new_congruence = {
                     .coefs = old_congruence.coefs,
                     .modulus_odd = old_congruence.modulus_odd,
-                    .modulus_2pow = old_congruence.modulus_2pow - 1
+                    .modulus_2pow = new_modulus_2pow
                 };
                 new_congruences.items[congruence_i] = new_congruence;
             }

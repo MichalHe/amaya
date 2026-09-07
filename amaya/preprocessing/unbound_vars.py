@@ -35,6 +35,7 @@ from amaya.relations_structures import (
     Var,
     VariableType,
     Value_Interval,
+    ast_references_var,
     get_hard_bound_semantics,
     pprint_formula,
     unzip_lin_terms,
@@ -639,8 +640,8 @@ def _drop_vars_with_no_consequences_to_models(ast: ASTp_Node, var_use_info: Var_
             return AST_Negation(referenced_vars=_referenced_vars_of(new_child), child=new_child)
 
         case AST_Quantifier():
-            new_bound_vars = tuple(var for var in ast.bound_vars if not var_use_info.is_var_inconsequential_to_models(var))
             new_child = _drop_vars_with_no_consequences_to_models(ast.child, var_use_info)
+            new_bound_vars = tuple(var for var in ast.bound_vars if ast_references_var(new_child, var))
             if not new_bound_vars:
                 return new_child
             return AST_Quantifier(referenced_vars=_referenced_vars_of(new_child), bound_vars=tuple(new_bound_vars),
@@ -1117,6 +1118,10 @@ def _try_rewrite_congruence_on_unbund_vars(exists_and_tree: AST_Quantifier, var_
         # Modulus and GCD have some common divisor > 1, meaning that the rhs (-b.y + k) can generate only
         # some cyclic subset of Z_mod and we cannot further simplify the songruence
         if len(component) == 1:
+            # The congruences are kept exactly as they were, so the component's original variable is
+            # still referenced in them - it must remain part of the quantifier's binding list instead
+            # of being dropped as if it had been eliminated.
+            new_bound_vars.append(component[0][1])
             new_congruences.extend(congruences[idx] for idx in congruence_indices)
             continue
 

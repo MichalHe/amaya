@@ -490,6 +490,31 @@ ASTp_Leaf_Type_List = (Relation, Congruence, BoolLiteral, Var)
 ASTp_Node = Union[AST_Connective, AST_Negation, AST_Quantifier, Relation, Congruence, BoolLiteral, Var]
 
 
+def ast_references_var(root_node: ASTp_Node, var: Var) -> bool:
+    """
+    Check whether `var` still occurs in `root_node`.
+
+    Recomputes the answer directly from the tree instead of trusting a `referenced_vars` field or a
+    variable-use count gathered before some subtree was simplified away - a node's cached
+    `referenced_vars` can go stale once its children are rewritten (e.g. `AST_Connective.replace_children`
+    keeps the original value), and a pre-simplification usage count does not tell you whether the atom
+    that used the variable actually got dropped by the simplification.
+    """
+    match root_node:
+        case Var():
+            return root_node == var
+        case BoolLiteral():
+            return False
+        case Relation() | Congruence():
+            return var in root_node.vars
+        case AST_Connective():
+            return any(ast_references_var(child, var) for child in root_node.children)
+        case AST_Negation() | AST_Quantifier():
+            return ast_references_var(root_node.child, var)
+        case _:
+            raise ValueError(f'Unhandled node type when checking variable references: {type(root_node)} :: {root_node}')
+
+
 def pprint_formula(ast: ASTp_Node, indent: int = 0):
     indent_str = '   ' * indent
     match ast:
