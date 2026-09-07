@@ -2494,6 +2494,7 @@ def _optimize_bottom_quantifiers(root: ASTp_Node) -> Tuple[ASTp_Node, bool]:
             return new_node, any_quantifier_present
 
         case AST_Quantifier():
+            # import pdb; pdb.set_trace()
             optimized_child, subtree_contains_quantifiers = _optimize_bottom_quantifiers(root.child)
             new_node = AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=root.bound_vars, child=optimized_child)
 

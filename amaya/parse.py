@@ -179,6 +179,7 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo],
             logger.info('Optimization pipeline report: %s', pipeline.report)
         if report_sink is not None:
             report_sink.append(pipeline.report)
+
     return result
 
 

@@ -34,7 +34,7 @@ from amaya.preprocessing.theory_reasoning import (
     simplify_formula_using_model_properties,
 )
 import amaya.preprocessing.unbound_vars as var_bounds_lib
-from amaya.relations_structures import AST_Connective, AST_Negation, AST_Quantifier, ASTp_Node, Var
+from amaya.relations_structures import AST_Connective, AST_Negation, AST_Quantifier, ASTp_Node, Var, pprint_formula
 
 
 class Pass_Tier(IntEnum):
@@ -386,14 +386,14 @@ class Optimization_Pipeline:
 
     def run(self, astp: ASTp_Node) -> ASTp_Node:
         main_passes = [d for d in self.registry if d.tier != Pass_Tier.FINALIZE]
-        finalizers = [d for d in self.registry if d.tier == Pass_Tier.FINALIZE]
-        by_name = {d.name: d for d in main_passes}
-        order_index = {d.name: i for i, d in enumerate(main_passes)}
+        finalization_passes = [d for d in self.registry if d.tier == Pass_Tier.FINALIZE]
+        pass_by_name_table = {d.name: d for d in main_passes}
+        pass_order_by_name = {d.name: i for i, d in enumerate(main_passes)}
 
         ctx = Pass_Context(var_table=self.var_table)
         id_table = Structural_Id_Table()
 
-        stats = {d.name: Pass_Stats(name=d.name) for d in main_passes + finalizers}
+        stats = {d.name: Pass_Stats(name=d.name) for d in main_passes + finalization_passes}
         pass_sequence: List[str] = []
         run_count: Dict[str, int] = {d.name: 0 for d in main_passes}
         last_run_fingerprint: Dict[str, int] = {}
@@ -440,72 +440,72 @@ class Optimization_Pipeline:
                                 len(worklist), sorted(worklist))
                 break
 
-            p_name = min(worklist, key=lambda name: (by_name[name].tier, order_index[name]))
-            worklist.discard(p_name)
-            p = by_name[p_name]
+            pass_name = min(worklist, key=lambda name: (pass_by_name_table[name].tier, pass_order_by_name[name]))
+            worklist.discard(pass_name)
+            _pass = pass_by_name_table[pass_name]
 
-            if last_run_fingerprint.get(p_name) == current_fingerprint:
+            if last_run_fingerprint.get(pass_name) == current_fingerprint:
                 continue  # p has already run against exactly this formula
 
-            if p.requires_referenced_vars and refvars_stale:
+            if _pass.requires_referenced_vars and refvars_stale:
                 fill_referenced_vars(current)
                 refvars_stale = False
 
-            pstat = stats[p_name]
+            pass_stats = stats[pass_name]
             t0 = time.perf_counter_ns()
-            candidate = p.run(current, ctx)
-            pstat.total_time_ns += time.perf_counter_ns() - t0
+            candidate_formula = _pass.run(current, ctx)
+            pass_stats.total_time_ns += time.perf_counter_ns() - t0
 
-            run_count[p_name] += 1
+            run_count[pass_name] += 1
             total_applications += 1
-            last_run_fingerprint[p_name] = current_fingerprint
-            pstat.invocations += 1
+            last_run_fingerprint[pass_name] = current_fingerprint
+            pass_stats.invocations += 1
 
-            cand_fingerprint, cand_size = compute_structural_id(candidate, id_table)
+            candidate_fingerprint, cand_size = compute_structural_id(candidate_formula, id_table)
 
-            if p.growth_factor_limit is not None and cand_size > p.growth_factor_limit * current_size:
-                pstat.discarded_for_growth += 1
+            if _pass.growth_factor_limit is not None and cand_size > _pass.growth_factor_limit * current_size:
+                pass_stats.discarded_for_growth += 1
                 continue  # `current` untouched
 
-            if cand_fingerprint == current_fingerprint:
+            if candidate_fingerprint == current_fingerprint:
                 continue  # no facts produced, nothing re-enqueued
 
             # --- the pass was productive ---
-            pstat.productive += 1
+            pass_stats.productive += 1
             if cand_size < current_size:
-                pstat.nodes_removed += current_size - cand_size
-            pass_sequence.append(p_name)
+                pass_stats.nodes_removed += current_size - cand_size
+            pass_sequence.append(pass_name)
 
-            facts = set(p.produces)
+            facts = set(_pass.produces)
             if cand_size < current_size:
                 facts.add(SUBTREE_REMOVED)
 
-            current, current_fingerprint, current_size = candidate, cand_fingerprint, cand_size
+            current, current_fingerprint, current_size = candidate_formula, candidate_fingerprint, cand_size
             refvars_stale = True
 
-            cur_score = score(current, current_size)
-            if cur_score < best_score:
-                best, best_score = current, cur_score
+            current_score = score(current, current_size)
+            if current_score < best_score:
+                best, best_score = current, current_score
 
-            if cand_fingerprint in seen_fingerprints:
+            if candidate_fingerprint in seen_fingerprints:
                 termination = 'cycle'
                 logger.warning('Optimization pipeline detected a cycle after %s; returning the '
-                                'best formula seen so far.', p_name)
+                                'best formula seen so far.', pass_name)
                 break
-            seen_fingerprints.add(cand_fingerprint)
+            seen_fingerprints.add(candidate_fingerprint)
 
-            for q in main_passes:
-                if not (facts & q.consumes):
+            for pass_to_queue in main_passes:
+                if not (facts & pass_to_queue.consumes):
                     continue
-                if q.name == p_name and not q.self_triggering:
+                if pass_to_queue.name == pass_name and not pass_to_queue.self_triggering:
                     continue
-                if q.max_runs is not None and run_count[q.name] >= q.max_runs:
+                if pass_to_queue.max_runs is not None and run_count[pass_to_queue.name] >= pass_to_queue.max_runs:
                     continue
-                worklist.add(q.name)
+                worklist.add(pass_to_queue.name)
 
         result = current if termination == 'fixpoint' else best
 
-        for f in finalizers:
+        for f in finalization_passes:
             fstat = stats[f.name]
             t0 = time.perf_counter_ns()
             result = f.run(result, ctx)

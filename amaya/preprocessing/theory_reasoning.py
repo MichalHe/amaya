@@ -14,6 +14,7 @@ from amaya.relations_structures import (
     Congruence,
     Connective_Type,
     Relation,
+    Value_Interval,
     Var,
     ast_references_var,
     pprint_formula
@@ -33,6 +34,31 @@ class Asserted_Model_Properties:
     equations: list[list[Relation]] = field(default_factory=lambda: [[]])
     bool_atom_values: list[dict[Var, bool]] = field(default_factory=lambda: [{}])
     var_aliases: list[dict[Var, Var_Alias]] = field(default_factory=lambda: [{}])
+    var_bounds: list[dict[Var, Value_Interval]] = field(default_factory=lambda: [{}])
+    """
+    Stack of currently known hard bounds (`X <= C`, `-X <= C`), scoped like `equations`/`var_aliases` -
+    one dict per currently open AND/OR frame, pushed/popped alongside them.
+    """
+
+    var_uses_excluding_hard_bounds: dict[Var, int] = field(default_factory=dict)
+    """
+    Number of times each variable occurs in a Relation that is not a hard bound (an equation, or an
+    inequality over more than one variable) or in a Congruence, counted once over the whole formula
+    before simplification starts. A hard bound on `X` does not count - it is exactly the kind of atom
+    the congruence/bounds simplification below may drop together with the congruence it covers, so it
+    must not make `X` look "used elsewhere". Computed once per top-level call (see
+    `simplify_formula_using_model_properties`), not updated as the tree is rewritten - unlike the
+    order-dependent per-branch tracking above, this must reflect the *whole*, original formula, since
+    understating a variable's use elsewhere would make the congruence-dropping rule unsound (dropping a
+    congruence still needed by an atom the local, in-order scan has not reached yet).
+    """
+
+    vars_covered_by_congruence_bounds: set[Var] = field(default_factory=set)
+    """
+    Variables whose hard bounds were found to cover a congruence's whole period, letting that
+    congruence be replaced by True. Consumed by the Relation() case to also drop the (now redundant)
+    bound atoms themselves.
+    """
 
     branch_depth: int = 0
     """ How many OR/EQUIV branch boundaries we are currently nested under. """
@@ -75,12 +101,14 @@ class Asserted_Model_Properties:
         self.equations.append([])
         self.bool_atom_values.append(dict())
         self.var_aliases.append(dict())
+        self.var_bounds.append(dict())
         self.stack_entry_negation_depths.append(self.negation_depth)
 
     def pop_stack(self):
         self.bool_atom_values.pop(-1)
         self.equations.pop(-1)
         self.var_aliases.pop(-1)
+        self.var_bounds.pop(-1)
         self.stack_entry_negation_depths.pop(-1)
 
     def is_unconditionally_true_for_current_stack_frame(self) -> bool:
@@ -206,6 +234,23 @@ class Asserted_Model_Properties:
             if var in level:
                 return level[var]
         return None
+
+    def assert_hard_bound(self, bound: Relation, depth: int = -1):
+        var = bound.vars[0]
+        self.var_bounds[depth].setdefault(var, Value_Interval()).apply_assertion(bound)
+
+    def get_hard_bounds(self, var: Var) -> Value_Interval:
+        """ Combine the bounds on `var` known at every currently open stack frame into one interval. """
+        combined = Value_Interval()
+        for level in self.var_bounds:
+            interval = level.get(var)
+            if interval is None:
+                continue
+            if interval.lower_limit is not None:
+                combined.try_strengthen_lower(interval.lower_limit)
+            if interval.upper_limit is not None:
+                combined.try_strengthen_upper(interval.upper_limit)
+        return combined
 
 
 def _eliminate_known_info_from_eq(eq1: Relation, eq2: Relation) -> Relation:
@@ -397,9 +442,67 @@ def _register_unresolved_equation(equation: Relation, assertions: Asserted_Model
     return None
 
 
+def _count_var_uses_excluding_hard_bounds(root_node: ASTp_Node, counts: dict[Var, int]) -> None:
+    """ Count, for every variable, how many Relations (other than hard bounds) or Congruences reference it. """
+    match root_node:
+        case Var() | BoolLiteral():
+            pass
+        case Relation():
+            if root_node.is_hard_bound():
+                return
+            for var in root_node.vars:
+                counts[var] = counts.get(var, 0) + 1
+        case Congruence():
+            for var in root_node.vars:
+                counts[var] = counts.get(var, 0) + 1
+        case AST_Connective():
+            for child in root_node.children:
+                _count_var_uses_excluding_hard_bounds(child, counts)
+        case AST_Negation() | AST_Quantifier():
+            _count_var_uses_excluding_hard_bounds(root_node.child, counts)
+        case _:
+            raise ValueError(f'Unhandled node type when counting variable uses: {type(root_node)} :: {root_node}')
+
+
+def _find_vars_covered_by_hard_bounds(congruence: Congruence, assertions: Asserted_Model_Properties) -> set[Var]:
+    """
+    Find the subset of `congruence`'s variables that are free enough - not used anywhere else in the
+    formula, and hard-bounded over an interval at least as wide as the period their own coefficient
+    cycles through modulo `congruence.modulus` - to be picked, independently of everything else, so
+    that their term takes on any value in the residue class it can reach.
+
+    If the combined gcd of such variables' coefficients (and the modulus) is 1, they can jointly reach
+    *every* residue mod `congruence.modulus`, so the congruence holds no matter what the remaining
+    terms add up to, and can be dropped along with its hard bounds. An empty result means no such
+    combination was found.
+    """
+    covering_vars: list[Var] = []
+    covering_coefs: list[int] = []
+
+    for var, coef in zip(congruence.vars, congruence.coefs):
+        if assertions.var_uses_excluding_hard_bounds.get(var, 0) > 1:
+            continue
+
+        bounds = assertions.get_hard_bounds(var)
+        if bounds.lower_limit is None or bounds.upper_limit is None:
+            continue
+
+        period = congruence.modulus // math.gcd(coef, congruence.modulus)
+        if (bounds.upper_limit - bounds.lower_limit + 1) < period:
+            continue
+
+        covering_vars.append(var)
+        covering_coefs.append(coef)
+
+    if not covering_vars or math.gcd(*covering_coefs, congruence.modulus) != 1:
+        return set()
+
+    return set(covering_vars)
+
+
 def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: Asserted_Model_Properties) -> ASTp_Node:
     """
-    Simplify formula by considering its models. 
+    Simplify formula by considering its models.
 
     Examples:
     AND:                    ---->    AND
@@ -412,6 +515,16 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
        x - y = 0                        x - y = 0
        2*y + x + z = 3                  3*x + z = 3     (y is known to equal x, substituted away)
     """
+    # Recomputed on every top-level call (never mid-recursion) against the *current* formula, so the
+    # congruence/hard-bounds simplification below has an accurate, order-independent answer to "is
+    # this variable used anywhere else" - unlike the scope-stacked facts above, this must not miss a
+    # use the in-order traversal has not reached yet, nor go stale across repeated top-level calls.
+    assertions.var_uses_excluding_hard_bounds.clear()
+    _count_var_uses_excluding_hard_bounds(root_node, assertions.var_uses_excluding_hard_bounds)
+    return _simplify_formula_using_model_properties(root_node, assertions)
+
+
+def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: Asserted_Model_Properties) -> ASTp_Node:
     match root_node:
         case Var():
             asserted_value = assertions.get_asserted_values_for_bool_atom(root_node)
@@ -438,6 +551,13 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
             if rewritten_congruence.is_unsat():
                 return BoolLiteral(False)
 
+            covered_vars = _find_vars_covered_by_hard_bounds(rewritten_congruence, assertions)
+            if covered_vars:
+                # These variables' own hard bounds already guarantee the congruence always holds -
+                # the bounds are now redundant too, so the Relation() case drops them on sight.
+                assertions.vars_covered_by_congruence_bounds.update(covered_vars)
+                return BoolLiteral(True)
+
             # No alias is known for any variable still left in `rewritten_congruence` (aliases were
             # already substituted above) - fix that in, so a later alias for one of them can no
             # longer be used to drop its binder without leaving this reference dangling.
@@ -458,6 +578,16 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
                 return BoolLiteral(is_constant)
 
             if substituted.predicate_symbol != '=':
+                if substituted.is_hard_bound():
+                    bound_var = substituted.vars[0]
+                    if bound_var in assertions.vars_covered_by_congruence_bounds:
+                        return BoolLiteral(True)
+                    if assertions.is_unconditionally_true_for_current_stack_frame():
+                        # Promoted to the widest frame the bound is unconditionally valid throughout,
+                        # same as equations, so it stays visible to sibling branches nested under the
+                        # same enclosing quantifier(s) instead of disappearing once its own frame pops.
+                        assertions.assert_hard_bound(substituted, depth=assertions.get_widest_valid_stack_depth())
+
                 assertions.vars_referenced_unsubstituted.update(substituted.vars)
                 return substituted
 
@@ -488,7 +618,7 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
                 case Connective_Type.AND:
                     assertions.insert_stack()
                     new_children = tuple(
-                        simplify_formula_using_model_properties(subformula, assertions)
+                        _simplify_formula_using_model_properties(subformula, assertions)
                         for subformula in root_node.children
                     )
                     assertions.pop_stack()
@@ -496,7 +626,7 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
                     # TODO: We should do these simplifications greedily while we are making progress.
                     # assertions.insert_stack()
                     # new_children = tuple(
-                    #    simplify_formula_using_model_properties(subformula, assertions)
+                    #    _simplify_formula_using_model_properties(subformula, assertions)
                     #    for subformula in new_children
                     # )
                     # assertions.pop_stack()
@@ -506,7 +636,7 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
                     for subformula in root_node.children:
                         assertions.insert_stack()
                         assertions.enter_branch()
-                        new_child = simplify_formula_using_model_properties(subformula, assertions)
+                        new_child = _simplify_formula_using_model_properties(subformula, assertions)
                         assertions.exit_branch()
                         assertions.pop_stack()
 
@@ -538,7 +668,7 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
 
             
             assertions.enter_negation()
-            new_child = simplify_formula_using_model_properties(root_node.child, assertions)
+            new_child = _simplify_formula_using_model_properties(root_node.child, assertions)
             assertions.exit_negation()
 
             if isinstance(new_child, BoolLiteral):
@@ -552,7 +682,7 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
 
         case AST_Quantifier():
             assertions.enter_quantifier_scope(root_node.bound_vars)
-            new_child = simplify_formula_using_model_properties(root_node.child, assertions)
+            new_child = _simplify_formula_using_model_properties(root_node.child, assertions)
             assertions.exit_quantifier_scope()
 
             if isinstance(new_child, BoolLiteral):
