@@ -255,12 +255,12 @@ def _subtract_equations(eq: Relation, other_eq: Relation) -> Relation:
 
 
 @overload
-def _substitute_known_aliases(relation: Relation, assertions: Asserted_Model_Properties) -> Relation: ...
+def _substitute_known_aliases(relation: Relation, assertions: Asserted_Model_Properties) -> Relation | BoolLiteral: ...
 
 @overload
-def _substitute_known_aliases(relation: Congruence, assertions: Asserted_Model_Properties) -> Congruence: ...
+def _substitute_known_aliases(relation: Congruence, assertions: Asserted_Model_Properties) -> Congruence | BoolLiteral : ...
 
-def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asserted_Model_Properties) -> Relation | Congruence:
+def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asserted_Model_Properties) -> Relation | Congruence | BoolLiteral:
     """ Replace every variable in `relation` that has a known alias (e.g. x = y - 1) with its alias expression. """
     new_terms: dict[Var, int] = defaultdict(int)
     abs_term = 0
@@ -287,6 +287,9 @@ def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asser
     new_vars = [var for var, _ in sorted_terms]
     new_coefs = [coef for _, coef in sorted_terms]
     new_rhs = relation.rhs - abs_term
+
+    if not new_coefs:
+        return BoolLiteral(True)
 
     if isinstance(relation, Relation):
         return Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=relation.predicate_symbol)
@@ -420,7 +423,9 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
             return root_node
 
         case Congruence():
-            rewritten_congruence: Congruence = _substitute_known_aliases(root_node, assertions)
+            rewritten_congruence: Congruence | BoolLiteral = _substitute_known_aliases(root_node, assertions)
+            if isinstance(rewritten_congruence, BoolLiteral):
+                return rewritten_congruence
 
             # Substituting an alias in can concentrate what used to be several independent
             # variables' worth of "wiggle room" into one coefficient shared by all of them (e.g.
@@ -443,6 +448,9 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
             # also makes the duplicate/implied-equation detection below strictly more effective, since two
             # equations that only differed by an already-known alias will now compare equal.
             substituted = _substitute_known_aliases(root_node, assertions)
+
+            if isinstance(substituted, BoolLiteral):
+                return substituted
 
             is_constant = substituted.is_true_or_false()
             if is_constant is not None:
