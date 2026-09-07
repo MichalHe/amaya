@@ -262,6 +262,7 @@ opt_to_config_field = {
     'inline-bool-definitions': 'inline_bool_var_definitions',
     'dedup-connective-children': 'deduplicate_connective_children',
     'rce': 'resolve_conditional_equalities',
+    'squeeze-elimination': 'eliminate_squeezed_inner_quantifiers',
     'bounded-congruence': 'use_bounded_congruence_construction',
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
@@ -304,6 +305,9 @@ argparser.add_argument('-O',
                              '      reason about models of the superformula to simplify subformulae.\n'
                              '> dedup-connective-children:\n'
                              '      Remove duplicit children of the AND/OR/EQUIV connectives.\n'
+                             '> squeeze-elimination:\n'
+                             '      Eliminate an existentially quantified integer variable squeezed between two\n'
+                             '         linear bounds whose gap is exactly A - 1, substituting floor(E / A) for it.\n'
                              '> bounded-congruence:\n'
                              '      Build the automaton for an existentially quantified variable bounded from both sides and\n'
                              '         occurring only in a single congruence using a specialized construction. Requires -m MTBDD.\n'

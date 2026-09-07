@@ -3,7 +3,7 @@ Tests for `amaya.preprocessing.pipeline.build_registry` (plan step 3):
 
 (a) registration order is deterministic;
 (b) each descriptor's `config_flag` names a real `OptimizationsConfig` attribute;
-(c) `-O all` (every `OptimizationsConfig` flag enabled) yields all 17 non-finalize passes;
+(c) `-O all` (every `OptimizationsConfig` flag enabled) yields all 18 non-finalize passes;
 (d) every user-visible registry name appears in `run-amaya.py`'s `opt_to_config_field`.
 """
 import ast
@@ -54,13 +54,13 @@ def test_every_config_flag_names_a_real_optimizations_config_attribute():
                 f'{descriptor.name}: unknown config flag {descriptor.config_flag!r}'
 
 
-def test_all_optimizations_enabled_yields_the_17_non_finalize_passes():
+def test_all_optimizations_enabled_yields_the_18_non_finalize_passes():
     solver_config = _all_enabled_config()
 
     registry = build_registry(solver_config)
     non_finalize = [d for d in registry if d.tier != Pass_Tier.FINALIZE]
 
-    assert len(non_finalize) == 17
+    assert len(non_finalize) == 18
     assert len(non_finalize) == len(set(d.name for d in non_finalize))
 
 

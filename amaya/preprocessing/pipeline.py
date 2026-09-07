@@ -24,6 +24,7 @@ from amaya.preprocessing.antiprenexing import miniscope_quantifiers
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars, resolve_conditional_equalities
 from amaya.preprocessing.connective_child_dedup import remove_duplicit_connective_children
 from amaya.preprocessing.eval import VarInfo
+from amaya.preprocessing.inner_quantifier_squeeze_elimination import eliminate_inner_quantifier_squeezes
 from amaya.preprocessing.structural_id import Structural_Id_Table, compute_structural_id
 from amaya.preprocessing.theory_reasoning import (
     Asserted_Model_Properties,
@@ -121,6 +122,10 @@ def _pass_dedup_connective_children(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_N
     return remove_duplicit_connective_children(ast)
 
 
+def _pass_squeeze_elimination(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
+    return eliminate_inner_quantifier_squeezes(ast, ctx.var_table)
+
+
 def _pass_fill_referenced_vars(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
     fill_referenced_vars(ast)
     return ast
@@ -203,6 +208,14 @@ def _registry_definition() -> List[Pass_Descriptor]:
             tier=Pass_Tier.CORE,
             consumes=frozenset({EQUALITY_EXPOSED, NARY_SHAPE, SUBTREE_REMOVED}),
             produces=frozenset({SUBTREE_REMOVED, NARY_SHAPE, VAR_ELIMINATED}),
+        ),
+        Pass_Descriptor(
+            name='squeeze-elimination', config_flag='eliminate_squeezed_inner_quantifiers',
+            run=_pass_squeeze_elimination,
+            tier=Pass_Tier.CORE, growth_factor_limit=1.2,
+            consumes=frozenset({QUANTIFIER_SHAPE, ATOM_REWRITTEN, NARY_SHAPE, BOUNDS_TIGHTENED}),
+            produces=frozenset({VAR_ELIMINATED, QUANTIFIER_SHAPE, ATOM_REWRITTEN, NARY_SHAPE, BOOL_LITERAL}),
+            requires_referenced_vars=True,
         ),
         Pass_Descriptor(
             name='rce', config_flag='resolve_conditional_equalities',

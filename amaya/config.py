@@ -145,6 +145,16 @@ class OptimizationsConfig:
         (exists ((x Int)) (and (or A (= x t1)) (or B (= x t2))))   --->   (or A B (= t1 t2))
     """
 
+    eliminate_squeezed_inner_quantifiers: bool = False
+    """
+    Eliminate an existentially quantified integer variable squeezed between two linear bounds
+    whose gap is exactly `A - 1`, which forces the variable to a unique value `floor(E / A)`. See
+    docs/QSE.md and docs/QSE_IMPLEMENTATION_PLAN.md.
+
+    Example:
+        (exists ((y Int)) (and (<= (* 10 y) (* 9 x)) (<= (* 9 x) (+ (* 10 y) 9))))   --->   True
+    """
+
     use_bounded_congruence_construction: bool = False
     """
     Build the automaton for an existentially quantified variable that is bounded from both sides and

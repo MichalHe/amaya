@@ -43,6 +43,7 @@ from amaya.preprocessing import (
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars, resolve_conditional_equalities
 from amaya.preprocessing.connective_child_dedup import remove_duplicit_connective_children
 from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd
+from amaya.preprocessing.inner_quantifier_squeeze_elimination import eliminate_inner_quantifier_squeezes
 from amaya.preprocessing.pipeline import Optimization_Pipeline, Pipeline_Report, build_registry
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
@@ -287,6 +288,11 @@ def _optimize_formula_structure_legacy(astp: ASTp_Node, var_table: Dict[Var, Var
         astp = flatten_bool_nary_connectives(astp)
         astp = resolve_conditional_equalities(astp)
         logger.debug('Conditional equalities resolved. Result:  %s', astp)
+
+    if solver_config.optimizations.eliminate_squeezed_inner_quantifiers:
+        logger.debug('Eliminating squeezed inner quantifiers:  %s', astp)
+        astp = eliminate_inner_quantifier_squeezes(astp, var_table)
+        logger.debug('Squeezed inner quantifiers eliminated. Result:  %s', astp)
 
     if solver_config.optimizations.deduplicate_connective_children:
         logger.debug('Removing duplicit children of connectives:  %s', astp)
