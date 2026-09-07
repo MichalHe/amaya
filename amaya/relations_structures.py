@@ -226,11 +226,16 @@ class Congruence:
         rhs = (self.rhs * coef_inv) % self.modulus
         return Congruence(vars=list(self.vars), coefs=[1], rhs=rhs, modulus=self.modulus)
 
-    def with_coefficients_reduced_mod_modulus(self) -> Congruence:
+    def with_coefficients_reduced_mod_modulus(self) -> Congruence | BoolLiteral:
         """ Return a new Congruence with every coefficient X replaced by (X mod modulus). """
-        new_terms = [(coef % self.modulus, var) for coef, var in self.linear_terms() if coef % self.modulus != 0]
-        coefs, vars = zip(*new_terms)
+        new_rhs = self.rhs % self.modulus
 
+        new_terms = [(coef % self.modulus, var) for coef, var in self.linear_terms() if coef % self.modulus != 0]
+
+        if not new_terms:
+            return BoolLiteral(value=(new_rhs == 0))
+
+        coefs, vars = zip(*new_terms)
         return Congruence(
             vars=list(vars),
             coefs=list(coefs),
