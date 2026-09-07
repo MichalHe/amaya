@@ -200,6 +200,14 @@ class OptimizationPipelineConfig:
     report: bool = False
     """Log the per-pass statistics table after the pipeline finishes."""
 
+    trace: bool = False
+    """
+    Log the formula produced by every productive pass application, in order, alongside the name of
+    the pass that produced it - a step-by-step record of how the formula was simplified, for
+    debugging a specific pipeline run. Also collected into `Pipeline_Report.trace` for programmatic
+    inspection.
+    """
+
 
 @dataclass
 class PreprocessingConfig:

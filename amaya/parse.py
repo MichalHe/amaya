@@ -172,6 +172,7 @@ def optimize_formula_structure(astp: ASTp_Node, var_table: Dict[Var, VarInfo],
         var_table,
         max_pass_applications=solver_config.optimization_pipeline.max_pass_applications,
         max_wall_time_seconds=solver_config.optimization_pipeline.max_wall_time_seconds,
+        trace=solver_config.optimization_pipeline.trace,
     )
     result = pipeline.run(astp)
     if pipeline.report is not None:

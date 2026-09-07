@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Callable, Dict, List, Literal, Optional
+from typing import Callable, Dict, List, Literal, Optional, Tuple
 
 from amaya import logger
 from amaya.config import OptimizationsConfig, SolverConfig
@@ -34,7 +34,7 @@ from amaya.preprocessing.theory_reasoning import (
     simplify_formula_using_model_properties,
 )
 import amaya.preprocessing.unbound_vars as var_bounds_lib
-from amaya.relations_structures import AST_Connective, AST_Negation, AST_Quantifier, ASTp_Node, Var, pprint_formula
+from amaya.relations_structures import AST_Connective, AST_Negation, AST_Quantifier, ASTp_Node, Var, format_formula
 
 
 class Pass_Tier(IntEnum):
@@ -368,6 +368,12 @@ class Pipeline_Report:
     input_size: int
     output_size: int
     pass_sequence: List[str]  # for reproducing / debugging a specific run
+    trace: List[Tuple[str, ASTp_Node]] = field(default_factory=list)
+    """
+    (pass name, resulting formula) for every productive pass application, in the order they were
+    applied, followed by one entry per finalizer - only populated when `Optimization_Pipeline.trace`
+    is set. See `format_formula` to render an entry's formula.
+    """
 
 
 @dataclass
@@ -381,6 +387,9 @@ class Optimization_Pipeline:
     var_table: Dict[Var, VarInfo]
     max_pass_applications: Optional[int] = None
     max_wall_time_seconds: float = 0.0
+    trace: bool = False
+    """Log (and collect into `report.trace`) the formula produced by every productive pass
+    application, alongside the name of the pass that produced it. See `OptimizationPipelineConfig.trace`."""
 
     report: Optional[Pipeline_Report] = field(default=None, init=False, compare=False)
 
@@ -395,6 +404,7 @@ class Optimization_Pipeline:
 
         stats = {d.name: Pass_Stats(name=d.name) for d in main_passes + finalization_passes}
         pass_sequence: List[str] = []
+        trace: List[Tuple[str, ASTp_Node]] = []
         run_count: Dict[str, int] = {d.name: 0 for d in main_passes}
         last_run_fingerprint: Dict[str, int] = {}
 
@@ -476,6 +486,10 @@ class Optimization_Pipeline:
                 pass_stats.nodes_removed += current_size - cand_size
             pass_sequence.append(pass_name)
 
+            if self.trace:
+                trace.append((pass_name, candidate_formula))
+                logger.info('Optimization pipeline trace - after %s:\n%s', pass_name, format_formula(candidate_formula))
+
             facts = set(_pass.produces)
             if cand_size < current_size:
                 facts.add(SUBTREE_REMOVED)
@@ -513,6 +527,10 @@ class Optimization_Pipeline:
             fstat.invocations += 1
             fstat.productive += 1
 
+            if self.trace:
+                trace.append((f.name, result))
+                logger.info('Optimization pipeline trace - after %s:\n%s', f.name, format_formula(result))
+
         _, output_size = compute_structural_id(result, id_table)
 
         self.report = Pipeline_Report(
@@ -522,6 +540,7 @@ class Optimization_Pipeline:
             input_size=input_size,
             output_size=output_size,
             pass_sequence=pass_sequence,
+            trace=trace,
         )
 
         return result

@@ -190,6 +190,14 @@ argparser.add_argument('--opt-report',
                        help='Log the fixpoint pipeline\'s per-pass statistics table (invocations, productive runs, '
                             'growth discards, time, nodes removed) after preprocessing finishes.')
 
+argparser.add_argument('--opt-trace',
+                       action='store_true',
+                       dest='opt_trace',
+                       default=False,
+                       help='Log the formula produced by every productive fixpoint pipeline pass application, in '
+                            'order, alongside the name of the pass that produced it. Requires --verbose to be '
+                            'visible (uses the same logger as --opt-report).')
+
 argparser.add_argument('-q', '--quiet',
                        action='store_true',
                        default=False,
@@ -553,6 +561,8 @@ if args.opt_budget is not None:
     solver_config.optimization_pipeline.max_pass_applications = args.opt_budget
 if args.opt_report:
     solver_config.optimization_pipeline.report = True
+if args.opt_trace:
+    solver_config.optimization_pipeline.trace = True
 
 # `--astp-cse` is experimental and deliberately kept out of `solver_config`/`opt_to_config_field`
 # (see `amaya/cse_cache.py`): enabling it does not flip a `SolverConfig` field, it wraps the
