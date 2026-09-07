@@ -654,6 +654,32 @@ def scan_variable_use(root_node: ASTp_Node, var_use: Variable_Use_Info):
             raise ValueError(f'Unhandled node type when scanning variable use: {type(root_node)} :: {root_node}')
 
 
+def _ast_references_var(root_node: ASTp_Node, var: Var) -> bool:
+    """
+    Check whether `var` still occurs in `root_node`.
+
+    Used to decide whether a quantifier's bound variable can be dropped after
+    `remove_atoms_satisfied_by_unconstrained_vars` has simplified its body - a variable's
+    single use being in a Relation does not guarantee that Relation was actually replaced by
+    BoolLiteral(True) (the gcd condition may have failed), and a variable used in a Congruence
+    is never dropped by that pass at all (the Congruence() case always keeps the atom as-is).
+    Re-checking the simplified subtree directly is the only way to know for sure.
+    """
+    match root_node:
+        case Var():
+            return root_node == var
+        case BoolLiteral():
+            return False
+        case Relation() | Congruence():
+            return var in root_node.vars
+        case AST_Connective():
+            return any(_ast_references_var(child, var) for child in root_node.children)
+        case AST_Negation() | AST_Quantifier():
+            return _ast_references_var(root_node.child, var)
+        case _:
+            raise ValueError(f'Unhandled node type when checking variable references: {type(root_node)} :: {root_node}')
+
+
 def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
                                                  var_uses: Variable_Use_Info,
                                                  desired_polarity: bool) -> ASTp_Node:
@@ -715,8 +741,8 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
             return result
                     
         case AST_Quantifier():
-            kept_vars = tuple(var for var in root_node.bound_vars if not var_uses.is_var_used_only_once(var))
             new_child = remove_atoms_satisfied_by_unconstrained_vars(root_node.child, var_uses, desired_polarity)
+            kept_vars = tuple(var for var in root_node.bound_vars if _ast_references_var(new_child, var))
 
             if isinstance(new_child, BoolLiteral):
                 return new_child
