@@ -281,6 +281,9 @@ def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asser
         return relation
 
     sorted_terms = sorted((var, coef) for var, coef in new_terms.items() if coef != 0)
+    if isinstance(relation, Congruence):
+        sorted_terms = [(var, coef) for var, coef in sorted_terms if (coef % relation.modulus != 0)]
+    
     new_vars = [var for var, _ in sorted_terms]
     new_coefs = [coef for _, coef in sorted_terms]
     new_rhs = relation.rhs - abs_term
@@ -289,7 +292,6 @@ def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asser
         return Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=relation.predicate_symbol)
     else:
         # We are dealing with a congruence
-        new_coefs = [coef % relation.modulus for coef in new_coefs]
         new_rhs = new_rhs % relation.modulus
         return Congruence(vars=new_vars, coefs=new_coefs, rhs=new_rhs, modulus=relation.modulus)
 
