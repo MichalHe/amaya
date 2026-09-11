@@ -203,6 +203,17 @@ argparser.add_argument('--dpllt-no-bounds-refutation',
                              'the whole implicant, which removes every literal set containing that pair. Exists to\n'
                              'measure what the check buys.'))
 
+argparser.add_argument('--dpllt-bound-propagation-rounds',
+                       type=int,
+                       dest='dpllt_bound_propagation_rounds',
+                       default=None,
+                       metavar='N',
+                       help=('(EXPERIMENTAL) How many rounds the bound reasoning propagates for (default 4). 0\n'
+                             'restricts it to the bounds each literal states on a single variable and the clash\n'
+                             'between a lower and an upper bound on one variable. Each further round derives\n'
+                             'bounds from inequalities whose other variables are already bounded, which is what\n'
+                             'makes an asserted equality act as a substitution.'))
+
 argparser.add_argument('--dpllt-no-bound-var-projection',
                        action='store_true',
                        dest='dpllt_no_bound_var_projection',
@@ -697,6 +708,8 @@ if args.use_dpllt_automata and args.use_toplevel_sat:
 solver_config.dpllt_automata.enabled = (args.use_dpllt_automata or args.dpllt_show_existential_part
                                         or args.dpllt_count_abstraction_models)
 solver_config.dpllt_automata.use_bounds_refutation = not args.dpllt_no_bounds_refutation
+if args.dpllt_bound_propagation_rounds is not None:
+    solver_config.dpllt_automata.bound_propagation_rounds = args.dpllt_bound_propagation_rounds
 solver_config.dpllt_automata.show_positive_existential_part = args.dpllt_show_existential_part
 solver_config.dpllt_automata.count_abstraction_models = args.dpllt_count_abstraction_models
 if args.dpllt_abstraction_model_enumeration_limit is not None:

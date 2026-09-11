@@ -389,33 +389,57 @@ does not produce an automaton for the whole formula, and any caller that reads `
 leaving `solutions_nfa=None` and documenting it, rather than returning an automaton whose language
 is a proper subset of what the field's name states.
 
-### 6.5b Refuting an assertion by its variable bounds
+### 6.5b Refuting an assertion by bound reasoning
 
-Before the theory call, the asserted literals are scanned once for a pair of unit bounds on one
-variable that cannot both hold (`find_bounds_refutation`). For each variable the strongest lower and
-upper bound seen so far is tracked *together with the literal that imposed it*; the first time a
-variable's lower bound exceeds its upper bound, those two literals are reported.
+Before the theory call, `find_bounds_refutation` reasons over the variable bounds the asserted literals
+state, and reports the subset of those literals a contradiction was derived from.
+
+| Rule | From | Concludes |
+|---|---|---|
+| R1 unit bound | `c*x <= r` (`Relation.is_hard_bound`) | a lower or upper bound on `x` |
+| R2 unit equality | `c*x = r` (`Relation.specifies_a_single_value_for_var`) | both bounds on `x`; or `False` when `c` does not divide `r`, as a single-literal core |
+| R3 interval clash | a lower and an upper bound on one variable that cross | `False` |
+| R4 relation minimum | an inequality whose least value under the current bounds exceeds its right-hand side | `False` |
+| R5 bound propagation | an inequality and bounds on all but one of its variables | a bound on the remaining variable |
+
+R1-R4 need no propagation and always run. R5 runs for `bound_propagation_rounds` rounds (default 4);
+each round can only tighten a bound, so the loop reaches a fixpoint on its own and the cap bounds how
+long that takes.
+
+R4 decides what bounds on single variables cannot: from `x <= 5` and `y <= 10`, the literal
+`x + y >= 20` reaches here as `-x - y <= -20`, whose least value is `-15`, and `-15 > -20`. R5 makes an
+equality behave like a substitution: an asserted `x - y = k` contributes the inequality view
+`y - x <= -k`, so a bound on `x` yields one on `y`. A chain of `n` equalities needs `n` rounds to carry
+a bound from one end to the other, which is what the cap limits.
+
+An equality contributes **two** inequality views, one per direction, so R4 and R5 need to know about
+inequalities only (`_make_inequality_views_of_literal`). `Congruence` contributes nothing: it
+constrains a residue, not a range.
+
+**Provenance.** Each derived bound carries `Derived_Bound.justification`, the transitive set of
+*asserted* literals it came from. Propagating that set forward at each inference computes exactly what
+a backward walk over a derivation graph would collect from the contradiction, so no graph is
+materialized; `docs/PIPELINE_UNSAT_CORES.md` §2 states the graph formulation this replaces for this
+fragment. `Bounds_Refutation.derivation_steps` records the inferences in order, for the log and for
+tests.
+
+**Why the core may be blocked.** Every rule concludes from the *presence* of literals and never from
+the absence of any, so the reported set is unsatisfiable on its own and every literal set containing it
+is unsatisfiable too. That is the criterion `docs/PIPELINE_UNSAT_CORES.md` §3 identifies, and it is why
+this fragment is sound while core extraction over the whole pipeline is not.
 
 | | |
 |---|---|
-| Reads | `Relation.is_hard_bound()` (one variable, `<=`) and `Relation.specifies_a_single_value_for_var()` (one variable, `=`), via `amaya/relations_structures.py:get_hard_bound_semantics` |
-| Ignores | `Congruence` (constrains a residue, not a range), relations over two or more variables, and every non-`Relation` literal |
-| Also reports | A unit equality `c*x = r` with `r` not divisible by `c`, as a single-literal core |
-| Cost | One dictionary update per unit-bound literal; no automaton |
+| Cost | One pass over the literals, then at most `bound_propagation_rounds` passes over their inequality views. No automaton |
 | Completeness | None. An assertion it accepts may still be unsatisfiable, and the caller proceeds to the theory call |
 
-The reported core is unsatisfiable *on its own* - independently of `phi` and of every other asserted
-literal - which is what §6.6 uses. `Value_Interval.apply_assertion` performs the same intersection but
-keeps no provenance, and the provenance is the point: it turns "this assertion is unsatisfiable" into
-"these two literals are unsatisfiable".
-
 The check runs on the **unminimized** literal set, and only there. Minimization can only remove
-literals, and removing a bound cannot create a clash, so a set the check accepts has no clashing pair
-in any subset either - re-running it after minimization could find nothing. Checking first also skips
-the minimization and the theory call outright on a hit.
+literals, and removing a bound can only weaken the reasoning, so a set the check accepts yields nothing
+on any subset either. Checking first also skips the minimization and the theory call outright on a hit.
 
-Configured by `use_bounds_refutation` (default on); `--dpllt-no-bounds-refutation` turns it off, which
-exists to measure what it buys.
+Configured by `use_bounds_refutation` (default on) and `bound_propagation_rounds` (default 4);
+`--dpllt-no-bounds-refutation` and `--dpllt-bound-propagation-rounds 0` exist to measure what each
+buys.
 
 ### 6.6 Blocking
 
@@ -425,6 +449,10 @@ literal set containing the core is unsatisfiable by itself, so no theory call is
 removing it, and Claim C's argument applies with `Gamma(core)` in place of the refuted assertion. It
 removes strictly more than blocking the whole implicant would, since the core is a subset of it. The
 core is never empty, so the empty-clause case below is unreachable on this path.
+
+How much more it removes is governed by the number of disjunctions of `chi` the clause spans, not by
+its literal width; `docs/EAGER_THEORY_LEARNING.md` §2 states that relation and the arithmetic behind
+it.
 
 Termination is unaffected: the core is a subset of the asserted set, so the current model still
 falsifies the clause and is still excluded, and Claim T's `2**|L|` bound stands. What does change is
@@ -660,6 +688,7 @@ class DpllTAutomataConfig:
     assertion_optimizer: str = 'restricted'      # 'none' | 'restricted' | 'full'
     minimize_implicants: bool = True
     use_bounds_refutation: bool = True
+    bound_propagation_rounds: int = 4
     project_bound_vars: bool = True
     prefix_cache_max_entries: int = 4096
     max_optimizer_invocations: Optional[int] = None
@@ -680,6 +709,7 @@ that table and would otherwise enable the strategy on every run (the comment abo
 | `--dpllt-assertion-optimizer {none,restricted,full}` | §7.2; `full` is marked unsound in the help text |
 | `--dpllt-no-implicant-minimization` | §6.3 off |
 | `--dpllt-no-bounds-refutation` | §6.5b off; every asserted set goes to the automata engine |
+| `--dpllt-bound-propagation-rounds N` | §6.5b rule R5 round cap (default 4); 0 leaves R1-R4 |
 | `--dpllt-no-bound-var-projection` | §6.4 off |
 | `--dpllt-prefix-cache-entries N` | §8.2 bound |
 | `--dpllt-report` | Log the counters of §12 |

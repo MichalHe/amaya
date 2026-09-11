@@ -245,13 +245,25 @@ class DpllTAutomataConfig:
 
     use_bounds_refutation: bool = True
     """
-    Before the theory call, intersect the unit bounds of the asserted literals and, if they clash,
-    refute the assertion without constructing an automaton.
+    Before the theory call, reason over the variable bounds of the asserted literals and, on a
+    contradiction, refute the assertion without constructing an automaton.
 
-    The clashing pair is an unsatisfiable subset of the assertion on its own, so the blocking clause
-    is built over those one or two literals instead of the whole implicant, which removes every
-    literal set containing them rather than only the supersets of this implicant. See
-    `amaya.dpllt_automata.find_bounds_refutation`.
+    The literals the contradiction was derived from are an unsatisfiable subset of the assertion on
+    their own, so the blocking clause is built over those instead of the whole implicant, which
+    removes every literal set containing them rather than only the supersets of this implicant. See
+    `amaya.dpllt_automata.find_bounds_refutation` for the rules applied.
+    """
+
+    bound_propagation_rounds: int = 4
+    """
+    How many rounds the bound reasoning of `use_bounds_refutation` propagates for.
+
+    0 restricts it to what needs no propagation: the bounds each literal states on a single variable,
+    the clash between a lower and an upper bound on one variable, and the check that no asserted
+    inequality has a least value exceeding its right-hand side. Each further round derives bounds from
+    inequalities whose other variables are already bounded, which is what makes an asserted equality
+    act as a substitution; a chain of `n` equalities needs `n` rounds to carry a bound from one end to
+    the other. See `amaya.dpllt_automata.MAX_BOUND_PROPAGATION_ROUNDS`.
     """
 
     project_bound_vars: bool = True

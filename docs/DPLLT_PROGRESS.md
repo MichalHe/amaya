@@ -24,6 +24,7 @@ selected by `--use-dpllt-automata`.
 | §15 | Test plan T1-T15 | Done |
 | §10 | `--dpllt-show-existential-part`, added after the design was written; covered by T16 | Done |
 | §6.5b, §6.6 | `find_bounds_refutation` plus core blocking, added after the design was written; covered by T18 | Done |
+| §6.5b rules R4, R5 | Relation-minimum and bound propagation, with justification propagation in place of a derivation graph; covered by T19 | Done |
 | §10, §16 item 2 | `--dpllt-count-abstraction-models` / `--dpllt-abstraction-model-limit`, added after the design was written; covered by T17. Makes the worst-case iteration count measurable per formula without constructing an automaton, but no benchmark set has been measured with it | Done |
 | §7.2 | Classification of every pipeline pass as solution-set-preserving or not | **Not done.** This is the design's own open item; the `restricted` mode therefore contains no passes and behaves as `none` |
 | §16 | The ten unmeasured quantities | **Not measured.** Items 1 and 2 are partially addressed by the engagement figures below; the rest are untouched |
@@ -75,9 +76,9 @@ Commands are given relative to the repository root; every number below was produ
 
 ### Unit and end-to-end tests
 
-- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 47 passed (T1-T18; the end-to-end
+- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 57 passed (T1-T19; the end-to-end
   ones are parameterized over the native and MTBDD backends).
-- `venv/bin/python -m pytest tests/ -q` (225 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
+- `venv/bin/python -m pytest tests/ -q` (235 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
   `master` excluded (`test_antiprenexing`, `test_div_support`, `test_let_evaluation`,
   `test_nonlinear_term_rewrites`, `test_process_relations_in_ast`, `test_relations`,
   `test_simplification_on_unbound_vars`, `test_state_compression_functions`,
@@ -134,7 +135,7 @@ see P1 and P2 - with no disagreement.
 - `--use-dpllt-automata --shard` and `--use-dpllt-automata --use-toplevel-sat` both exit with the
   intended error message.
 
-### The bounds refutation on `Problem10_label59`
+### The bound reasoning on `Problem10_label59`
 
 Measured on `benchmarks/formulae/20190429-UltimateAutomizerSvcomp2019/Problem10_label59_true-unreach-call.c_98.smt2`,
 preprocessed with `-O all`. Its positive-existential part has 118 abstracted literals and 13
@@ -145,18 +146,26 @@ disjunctions whose branch counts multiply to 93,312.
 | First 100 assertions refutable by variable bounds alone, in the enumeration order *without* core blocking | 100 |
 | Of those, refutable using only the 48 necessary literals | 0 |
 | Variable contradictory in all 100 | `Var(id=2)`, bounded below by 219 and above by 0 |
-| Iterations to exhaust the abstraction **with** core blocking | 21,884 (21,875 theory calls, 9 bounds refutations), 198 s |
-| Iterations **without** core blocking | > 30,000 (enumeration stopped at that limit), 237 s |
+Iterations to exhaust the abstraction, by which rules of design §6.5b are enabled. Every row was run
+with no automaton constructed and every theory call assumed to refute - the same assumption
+`count_minimal_implicants_of_abstraction` makes - so the theory-call column is what the loop would
+spend on automata.
 
-Both enumerations were run with no automaton constructed and every theory call assumed to refute -
-the same assumption `count_minimal_implicants_of_abstraction` makes. Nine core blockings remove the
-region that all of the first 100 implicants belonged to; what remains are assertions that need a real
-theory call. The reduction in *theory calls* is therefore at least 30,000 -> 21,875 and, against the
-93,312 upper bound, about fourfold.
+| Rules enabled | Iterations | Theory calls | Refutations | Mean core | Time |
+|---|---|---|---|---|---|
+| None (block the whole implicant) | > 30,000 | > 30,000 | 0 | - | 237 s, limit reached |
+| R1-R3 (unit bounds and interval clash) | 21,884 | 21,875 | 9 | 2.0 | 198 s, exhausted |
+| R1-R4 (`--dpllt-bound-propagation-rounds 0`) | 18,386 | 18,375 | 11 | 2.2 | 59 s, exhausted |
+| R1-R5, 4 rounds (default) | **982** | **923** | 59 | 5.1 | 5 s, exhausted |
 
-Not established: the wall-clock effect on a complete solve of this formula. Neither configuration was
-run to completion with automata; at the ~25 iterations/s the loop sustains, 21,875 theory calls is
-still on the order of fifteen minutes.
+The reduction in theory calls from the first row to the last is at least 30,000 -> 923, and against
+the 93,312 branch-count product about a hundredfold. Note the mean core grows from 2.0 to 5.1 literals
+while the iteration count falls by a factor of 22: what a clause removes is governed by the number of
+disjunctions it spans, not by how few literals it names (`docs/EAGER_THEORY_LEARNING.md` §2).
+
+**Wall clock, with automata.** `./reproducer.sh` - `--fast -O all --use-dpllt-automata
+--dpllt-assertion-optimizer full --astp-cse` - did not terminate within 900 s before R4 and R5 were
+added. With them it reports `unsat` in **11.4 s**, after 982 iterations.
 
 ## What this record does not establish
 
@@ -168,6 +177,9 @@ still on the order of fifteen minutes.
 3. Anything about the `full` assertion-optimizer mode beyond the fact that it runs. It is documented
    as unsound and was not exercised beyond the two hand-written formulae.
 4. The nine remaining items of design §16.
-5. Whether the bounds refutation pays on any formula other than `Problem10_label59`. It fires zero
-   times on every `tptp` formula that reaches the loop, which is the only other measured input where
-   it could have.
+5. Whether the bound reasoning pays on any formula other than `Problem10_label59`. It fired zero
+   times on every `tptp` formula that reaches the loop when only R1-R3 were implemented, and that
+   measurement has not been repeated for R4 and R5.
+6. Whether the `unsat` the reproducer now reports is correct. The ordinary evaluator does not finish
+   on that formula, the benchmark records `:status unknown`, and no second configuration of this
+   strategy has been run to completion on it for comparison.

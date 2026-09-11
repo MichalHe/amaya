@@ -816,3 +816,143 @@ def test_T18_the_verdict_does_not_depend_on_the_bounds_refutation(quiet_solver_c
 
     solver_config.dpllt_automata = DpllTAutomataConfig(use_bounds_refutation=True)
     _compare_verdicts_tolerating_shared_evaluator_defects(T18_SOURCE)
+
+
+# --- T19: bound propagation and the relation-minimum rule ---------------------------------------
+
+def test_T19_relation_minimum_refutes_a_sum_no_bounds_clash_would_catch():
+    """
+    `x <= 5` and `y <= 10` make `x + y >= 20` unsatisfiable, though neither `x` nor `y` has clashing
+    bounds. The sum reaches here as `-x - y <= -20`, whose least value is `-15 > -20`.
+    """
+    upper_bound_on_x = _le([(1, X)], 5)
+    upper_bound_on_y = _le([(1, Y)], 10)
+    sum_at_least_twenty = _le([(-1, X), (-1, Y)], -20)
+    abstraction = _build_abstraction(dsl._and(upper_bound_on_x, upper_bound_on_y, sum_at_least_twenty))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction)
+
+    assert refutation is not None
+    assert refutation.atom_ids == frozenset((_atom_id_of(abstraction, upper_bound_on_x),
+                                             _atom_id_of(abstraction, upper_bound_on_y),
+                                             _atom_id_of(abstraction, sum_at_least_twenty)))
+    assert refutation.var is None, 'the contradiction is on a relation, not on one variable'
+    assert any(step.rule == 'relation-minimum' for step in refutation.derivation_steps)
+
+
+def test_T19_a_satisfiable_sum_is_not_refuted():
+    """ The same shape with a right-hand side the bounds permit. `x + y >= 12` is satisfiable. """
+    abstraction = _build_abstraction(dsl._and(_le([(1, X)], 5), _le([(1, Y)], 10),
+                                              _le([(-1, X), (-1, Y)], -12)))
+
+    assert find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction) is None
+
+
+def test_T19_an_equality_acts_as_a_substitution():
+    """ `x = y` plus `x <= 5` yields `y <= 5`, which clashes with `y >= 10`. """
+    alias = Relation(vars=[X, Y], coefs=[1, -1], rhs=0, predicate_symbol='=')
+    upper_bound_on_x = _le([(1, X)], 5)
+    lower_bound_on_y = _le([(-1, Y)], -10)
+    abstraction = _build_abstraction(dsl._and(alias, upper_bound_on_x, lower_bound_on_y))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction)
+
+    assert refutation is not None
+    assert refutation.atom_ids == frozenset((_atom_id_of(abstraction, alias),
+                                             _atom_id_of(abstraction, upper_bound_on_x),
+                                             _atom_id_of(abstraction, lower_bound_on_y)))
+    # The contradiction surfaces as `min(y - x) = 10 - 5 = 5 > 0` on the equality's own `y - x <= 0`
+    # view, so it is the relation-minimum rule that concludes, before any bound has to travel.
+    assert refutation.var is None
+    assert any(step.rule == 'relation-minimum' for step in refutation.derivation_steps)
+
+
+def test_T19_an_offset_equality_acts_as_a_shifted_substitution():
+    """ `x - y = 3` plus `x <= 5` yields `y <= 2`, which clashes with `y >= 4`. """
+    offset_alias = Relation(vars=[X, Y], coefs=[1, -1], rhs=3, predicate_symbol='=')
+    abstraction = _build_abstraction(dsl._and(offset_alias, _le([(1, X)], 5), _le([(-1, Y)], -4)))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction)
+
+    assert refutation is not None
+    assert len(refutation.atom_ids) == 3
+
+
+def test_T19_a_chain_of_equalities_needs_one_round_per_link():
+    """
+    `x = y`, `y = z`, `x <= 5`, `z >= 10`. The bound has to travel two links, so one round is not
+    enough and two are.
+    """
+    abstraction = _build_abstraction(dsl._and(
+        Relation(vars=[X, Y], coefs=[1, -1], rhs=0, predicate_symbol='='),
+        Relation(vars=[Y, Z], coefs=[1, -1], rhs=0, predicate_symbol='='),
+        _le([(1, X)], 5),
+        _le([(-1, Z)], -10)))
+    asserted = set(abstraction.manager.literal_by_atom_id)
+
+    assert find_bounds_refutation(asserted, abstraction, max_propagation_rounds=0) is None
+    assert find_bounds_refutation(asserted, abstraction, max_propagation_rounds=2) is not None
+
+
+def test_T19_zero_rounds_keeps_the_single_variable_behaviour():
+    """ With propagation off, a clash between two unit bounds is still found. """
+    lower_bound, upper_bound = _le([(-1, X)], -219), _le([(1, X)], 0)
+    abstraction = _build_abstraction(dsl._and(lower_bound, upper_bound))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction,
+                                        max_propagation_rounds=0)
+
+    assert refutation is not None
+    assert refutation.atom_ids == frozenset((_atom_id_of(abstraction, lower_bound),
+                                             _atom_id_of(abstraction, upper_bound)))
+
+
+def test_T19_the_core_is_unsatisfiable_and_smaller_than_the_assertion():
+    """
+    The reported core must exclude literals the derivation did not use - that is what makes the
+    blocking clause narrow enough to be worth building over.
+    """
+    upper_bound_on_x, upper_bound_on_y = _le([(1, X)], 5), _le([(1, Y)], 10)
+    sum_at_least_twenty = _le([(-1, X), (-1, Y)], -20)
+    irrelevant = _congruence([(1, Z)], 0, 7)
+    also_irrelevant = _le([(1, Z)], 100)
+    abstraction = _build_abstraction(dsl._and(upper_bound_on_x, upper_bound_on_y,
+                                              sum_at_least_twenty, irrelevant, also_irrelevant))
+    asserted = set(abstraction.manager.literal_by_atom_id)
+
+    refutation = find_bounds_refutation(asserted, abstraction)
+
+    assert refutation is not None
+    assert refutation.atom_ids < asserted
+    assert _atom_id_of(abstraction, irrelevant) not in refutation.atom_ids
+    assert _atom_id_of(abstraction, also_irrelevant) not in refutation.atom_ids
+
+
+def test_T19_congruences_alone_are_never_refuted():
+    """ A congruence constrains a residue; two contradictory ones are outside this mechanism. """
+    abstraction = _build_abstraction(dsl._and(_congruence([(1, X)], 0, 5), _congruence([(1, X)], 1, 5)))
+
+    assert find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction) is None
+
+
+T19_SOURCE = """
+(declare-fun x () Int)
+(declare-fun y () Int)
+(assert (or (and (<= x 5) (<= y 10) (>= (+ x y) 20))
+            (and (<= x 1) (= x y) (>= y 9))))
+(assert (<= 0 x))
+(check-sat)
+"""
+
+
+def test_T19_the_verdict_does_not_depend_on_the_propagation_rounds(quiet_solver_config):
+    """ Both disjuncts are refutable only by the new rules; the verdict must not move. """
+    verdicts = []
+    for propagation_rounds in (0, 4):
+        solver_config.dpllt_automata = DpllTAutomataConfig(bound_propagation_rounds=propagation_rounds)
+        verdicts.append(_is_sat_according_to_dpllt(T19_SOURCE))
+
+    solver_config.dpllt_automata = DpllTAutomataConfig(use_bounds_refutation=False)
+    verdicts.append(_is_sat_according_to_dpllt(T19_SOURCE))
+
+    assert len(set(verdicts)) == 1, f'the verdict moved between configurations: {verdicts}'

@@ -738,118 +738,345 @@ def minimize_asserted_atom_ids(abstraction: Monotone_Literal_Abstraction,
 
 
 # ---------------------------------------------------------------------------------------------
-# Refuting an assertion by its variable bounds alone
+# Refuting an assertion by reasoning over its variable bounds
 # ---------------------------------------------------------------------------------------------
+
+MAX_BOUND_PROPAGATION_ROUNDS = 4
+"""
+Default cap on the propagation rounds of `find_bounds_refutation`.
+
+Each round can only tighten bounds, so the loop reaches a fixpoint on its own, but the number of
+rounds needed is not bounded by anything cheap to compute: a chain of `n` aliases needs `n` rounds to
+carry a bound from one end to the other. The cap makes the check's cost independent of the assertion's
+shape, at the price of missing conflicts that need a longer chain. Four rounds carry a bound across
+three intermediate aliases.
+"""
+
+
+@dataclass(frozen=True)
+class Derivation_Step:
+    """
+    One inference the refutation search performed, for the log and for tests.
+
+    The steps of a returned `Bounds_Refutation` are the derivation that reached the contradiction, in
+    the order they fired. They are a record of the search, not an input to it: the core is carried in
+    `Derived_Bound.justification` and is complete without them.
+    """
+
+    rule: str
+    conclusion: str
+    premise_atom_ids: FrozenSet[int]
+
+
+@dataclass(frozen=True)
+class Derived_Bound:
+    """
+    A bound on one variable, with the asserted literals it was derived from.
+
+    `justification` is the transitive set of *source* literals - asserted atoms - that the derivation
+    used, never an intermediate fact. Propagating it forward at each inference computes the same set a
+    backward walk over the derivation graph would collect from the contradiction, which is why no graph
+    is materialized (see `docs/PIPELINE_UNSAT_CORES.md` §2 for the graph formulation this replaces for
+    this fragment).
+    """
+
+    limit: int
+    justification: FrozenSet[int]
+
 
 @dataclass
 class Bounds_Refutation:
     """
-    An unsatisfiable subset of the asserted literals, found by intersecting their unit bounds.
+    An unsatisfiable subset of the asserted literals, found by reasoning over their variable bounds.
 
-    `atom_ids` holds one or two literals - a single unit equality that has no integer solution, or a
-    lower and an upper bound on one variable that cannot both hold. It is unsatisfiable on its own,
-    independently of the general part and of every other asserted literal, which is what lets the
-    caller block it instead of the whole implicant.
+    `atom_ids` is unsatisfiable on its own, independently of the general part and of every other
+    asserted literal, which is what lets the caller block it instead of the whole implicant. Every rule
+    the search applies concludes from the *presence* of literals, so the core is upward closed: every
+    literal set containing it is unsatisfiable too. That is the property a blocking clause needs - see
+    `docs/PIPELINE_UNSAT_CORES.md` §1 and §3.
     """
 
-    var: Var
     atom_ids: FrozenSet[int]
     reason: str
-    """ Human-readable statement of the clash, for the log. """
+    var: Optional[Var] = None
+    """ The variable whose bounds clashed, when the contradiction was of that form; None otherwise. """
+
+    derivation_steps: Tuple[Derivation_Step, ...] = tuple()
 
 
 @dataclass
-class _Bound_With_Provenance:
-    """ A bound on one variable, together with the asserted literal that imposed it. """
-    limit: int
-    atom_id: int
-
-
-def _derive_unit_bounds_of_literal(literal: ASTp_Node) -> Optional[Tuple[Var, Optional[int], Optional[int], bool]]:
+class Bound_Propagation_State:
     """
-    The bounds a single literal imposes on a single variable, as `(var, lower, upper, is_unsatisfiable)`.
+    The strongest lower and upper bound derived for each variable so far, each with its justification.
 
-    Returns None for a literal that constrains no single variable by a bound - anything but a `<=` or
-    an `=` over one variable. `is_unsatisfiable` marks a unit equality with no integer solution
-    (`c*x = r` with `r` not divisible by `c`), which is a refutation on its own.
+    A bound is only ever replaced by a strictly stronger one, so the state is monotone and the
+    propagation loop of `find_bounds_refutation` terminates on its own; the round cap bounds how long
+    that takes.
+    """
 
-    A `Congruence` is deliberately not read as a bound: it constrains a residue, not a range.
+    lower_bounds: Dict[Var, Derived_Bound] = field(default_factory=dict)
+    upper_bounds: Dict[Var, Derived_Bound] = field(default_factory=dict)
+    derivation_steps: List[Derivation_Step] = field(default_factory=list)
+
+    def tighten_lower(self, var: Var, limit: int, justification: FrozenSet[int], rule: str) -> bool:
+        known = self.lower_bounds.get(var)
+        if known is not None and known.limit >= limit:
+            return False
+        self.lower_bounds[var] = Derived_Bound(limit=limit, justification=justification)
+        self.derivation_steps.append(Derivation_Step(rule=rule, conclusion=f'{var} >= {limit}',
+                                                     premise_atom_ids=justification))
+        return True
+
+    def tighten_upper(self, var: Var, limit: int, justification: FrozenSet[int], rule: str) -> bool:
+        known = self.upper_bounds.get(var)
+        if known is not None and known.limit <= limit:
+            return False
+        self.upper_bounds[var] = Derived_Bound(limit=limit, justification=justification)
+        self.derivation_steps.append(Derivation_Step(rule=rule, conclusion=f'{var} <= {limit}',
+                                                    premise_atom_ids=justification))
+        return True
+
+    def find_clashing_var(self) -> Optional[Var]:
+        for var, lower_bound in self.lower_bounds.items():
+            upper_bound = self.upper_bounds.get(var)
+            if upper_bound is not None and lower_bound.limit > upper_bound.limit:
+                return var
+        return None
+
+    def make_clash_refutation(self, var: Var) -> Bounds_Refutation:
+        lower_bound, upper_bound = self.lower_bounds[var], self.upper_bounds[var]
+        return Bounds_Refutation(
+            atom_ids=lower_bound.justification | upper_bound.justification,
+            reason=f'{var} is bounded below by {lower_bound.limit} and above by {upper_bound.limit}',
+            var=var,
+            derivation_steps=tuple(self.derivation_steps),
+        )
+
+
+@dataclass(frozen=True)
+class Linear_Inequality_View:
+    """
+    One `<=` reading of an asserted literal, as `sum(coefs[i] * vars[i]) <= rhs`.
+
+    An equality contributes two views, one per direction, so that the propagation rules need to know
+    about inequalities only. The `atom_id` is the asserted literal both views came from, so a core
+    naming either view names that literal.
+    """
+
+    atom_id: int
+    coefs: Tuple[int, ...]
+    vars: Tuple[Var, ...]
+    rhs: int
+
+
+def _make_inequality_views_of_literal(atom_id: int, literal: ASTp_Node) -> Tuple[Linear_Inequality_View, ...]:
+    """
+    The `<=` views of `literal`, or none for a literal that is not a linear relation.
+
+    A `Congruence` yields no view: it constrains a residue, not a range. A negated atom yields none
+    either - `NOT (t <= r)` is `t >= r + 1`, which `push_negations_towards_atoms` would already have
+    turned into a `Relation`, and a negated equality is a disequality, which bounds nothing.
+    """
+    if not isinstance(literal, Relation):
+        return tuple()
+
+    coefs, vars = tuple(literal.coefs), tuple(literal.vars)
+
+    if literal.predicate_symbol == '<=':
+        return (Linear_Inequality_View(atom_id=atom_id, coefs=coefs, vars=vars, rhs=literal.rhs),)
+
+    if literal.predicate_symbol == '=':
+        negated_coefs = tuple(-coef for coef in coefs)
+        return (Linear_Inequality_View(atom_id=atom_id, coefs=coefs, vars=vars, rhs=literal.rhs),
+                Linear_Inequality_View(atom_id=atom_id, coefs=negated_coefs, vars=vars, rhs=-literal.rhs))
+
+    return tuple()
+
+
+def _minimum_of_terms(view: Linear_Inequality_View,
+                      state: Bound_Propagation_State,
+                      skipped_index: Optional[int] = None) -> Optional[Tuple[int, FrozenSet[int]]]:
+    """
+    The least value `sum(coefs[i] * vars[i])` can take under the current bounds, with the justification
+    of the bounds used, or None when a needed bound is not known.
+
+    A positive coefficient is minimized at the variable's lower bound and a negative one at its upper
+    bound. `skipped_index` omits one term, which is what lets `find_bounds_refutation` turn a view into
+    a bound on that term's variable.
+    """
+    minimum = 0
+    justification: FrozenSet[int] = frozenset()
+
+    for index, (coef, var) in enumerate(zip(view.coefs, view.vars)):
+        if index == skipped_index or coef == 0:
+            continue
+        bound = state.lower_bounds.get(var) if coef > 0 else state.upper_bounds.get(var)
+        if bound is None:
+            return None
+        minimum += coef * bound.limit
+        justification |= bound.justification
+
+    return minimum, justification
+
+
+def _floor_division_by(dividend: int, divisor: int) -> int:
+    """ `floor(dividend / divisor)` in exact integer arithmetic, for a positive `divisor`. """
+    return dividend // divisor
+
+
+def _ceiling_division_by(dividend: int, divisor: int) -> int:
+    """ `ceil(dividend / divisor)` in exact integer arithmetic, for a negative `divisor`. """
+    return -(dividend // -divisor)
+
+
+def _record_unit_bounds_of_literal(atom_id: int,
+                                   literal: ASTp_Node,
+                                   state: Bound_Propagation_State) -> Optional[Bounds_Refutation]:
+    """
+    Read the bounds a literal imposes on a single variable into `state` (rules R1 and R2 of the
+    docstring of `find_bounds_refutation`), or report a literal that is unsatisfiable by itself.
     """
     if not isinstance(literal, Relation):
         return None
 
+    justification = frozenset((atom_id,))
+
     if literal.is_hard_bound():
         bound_type, var, implied_value = get_hard_bound_semantics(literal)
         if bound_type == Bound_Type.LOWER:
-            return var, implied_value, None, False
-        return var, None, implied_value, False
+            state.tighten_lower(var, implied_value, justification, rule='unit-bound')
+        else:
+            state.tighten_upper(var, implied_value, justification, rule='unit-bound')
+        return None
 
     if literal.specifies_a_single_value_for_var():
         var, coefficient = literal.vars[0], literal.coefs[0]
         if coefficient == 0:
             return None
         if literal.rhs % coefficient != 0:
-            return var, None, None, True
+            return Bounds_Refutation(
+                atom_ids=justification, var=var,
+                reason=f'{var} is constrained by a unit equality with no integer solution',
+                derivation_steps=(Derivation_Step(rule='unit-equality-not-divisible',
+                                                  conclusion='False', premise_atom_ids=justification),))
         implied_value = literal.rhs // coefficient
-        return var, implied_value, implied_value, False
+        state.tighten_lower(var, implied_value, justification, rule='unit-equality')
+        state.tighten_upper(var, implied_value, justification, rule='unit-equality')
+
+    return None
+
+
+def _find_relation_minimum_refutation(inequality_views: List[Linear_Inequality_View],
+                                      state: Bound_Propagation_State) -> Optional[Bounds_Refutation]:
+    """ Rule R4: an inequality whose least value under the current bounds exceeds its right-hand side. """
+    for view in inequality_views:
+        evaluated_minimum = _minimum_of_terms(view, state)
+        if evaluated_minimum is None:
+            continue
+        minimum, justification = evaluated_minimum
+        if minimum <= view.rhs:
+            continue
+
+        core = justification | frozenset((view.atom_id,))
+        return Bounds_Refutation(
+            atom_ids=core,
+            reason=(f'an asserted inequality has least value {minimum} under the derived bounds, '
+                    f'which exceeds its right-hand side {view.rhs}'),
+            derivation_steps=tuple(state.derivation_steps) + (
+                Derivation_Step(rule='relation-minimum', conclusion='False', premise_atom_ids=core),),
+        )
 
     return None
 
 
 def find_bounds_refutation(asserted_atom_ids: Set[int],
-                           abstraction: Monotone_Literal_Abstraction) -> Optional[Bounds_Refutation]:
+                           abstraction: Monotone_Literal_Abstraction,
+                           max_propagation_rounds: int = MAX_BOUND_PROPAGATION_ROUNDS,
+                           ) -> Optional[Bounds_Refutation]:
     """
-    Look for an unsatisfiable pair of unit bounds among the asserted literals, and report which
-    literals form it.
+    Look for a subset of the asserted literals that is unsatisfiable by bound reasoning alone, and
+    report which literals form it.
 
-    One pass over the asserted literals, tracking for each variable the strongest lower and upper
-    bound seen so far *and the literal that imposed it*; the first time a variable's lower bound
-    exceeds its upper bound, those two literals are the refutation. `Value_Interval` performs the same
-    intersection (`amaya/relations_structures.py:Value_Interval.apply_assertion`) but keeps no
-    provenance, and the provenance is the whole point here - it is what turns "this assertion is
-    unsatisfiable" into "these two literals are unsatisfiable", which blocks every literal set
-    containing them rather than only the supersets of this one implicant.
+    Five rules, applied to a fixpoint or until `max_propagation_rounds` is spent:
 
-    Costs one dictionary update per unit-bound literal and no automaton. Incomplete by construction:
-    it sees only bounds on a single variable, so an assertion it accepts may still be unsatisfiable,
-    and the caller must go on to the theory call.
+    | Rule | From | Concludes |
+    |---|---|---|
+    | R1 unit bound | `c*x <= r` | a lower or upper bound on `x` |
+    | R2 unit equality | `c*x = r` | both bounds on `x`, or `False` when `c` does not divide `r` |
+    | R3 interval clash | a lower and an upper bound on one variable that cross | `False` |
+    | R4 relation minimum | an inequality whose least value under the current bounds exceeds its right-hand side | `False` |
+    | R5 bound propagation | an inequality and bounds on all but one of its variables | a bound on the remaining variable |
+
+    R4 is what decides the case bounds on single variables cannot: from `x <= 5` and `y <= 10`,
+    `x + y >= 20` - which reaches here as `-x - y <= -20` - has least value `-15`, and `-15 > -20`, so
+    it is unsatisfiable. R5 is what makes equalities behave like substitutions: an asserted `x - y = 0`
+    contributes the view `y - x <= 0`, and with `x <= 5` that yields `y <= 5`, so a further `y >= 10`
+    clashes by R3 with the core `{x - y = 0, x <= 5, y >= 10}`. A chain of `n` such equalities needs
+    `n` rounds, which is what the round cap limits.
+
+    Every rule concludes from the *presence* of literals and never from the absence of any, so the
+    reported core is upward closed and may be blocked - see `Bounds_Refutation`. Each derived fact
+    carries the set of asserted literals it came from (`Derived_Bound.justification`), so the core is
+    read off the contradiction directly rather than by walking a graph backwards.
+
+    Congruences contribute nothing: they constrain a residue, not a range. The search is incomplete by
+    construction - an assertion it accepts may still be unsatisfiable, and the caller must go on to the
+    theory call.
     """
-    lower_bound_of_var: Dict[Var, _Bound_With_Provenance] = {}
-    upper_bound_of_var: Dict[Var, _Bound_With_Provenance] = {}
+    state = Bound_Propagation_State()
+    inequality_views: List[Linear_Inequality_View] = []
 
     for atom_id in sorted(asserted_atom_ids):
-        derived_bounds = _derive_unit_bounds_of_literal(abstraction.manager.literal_by_atom_id[atom_id])
-        if derived_bounds is None:
-            continue
-        var, lower_limit, upper_limit, is_unsatisfiable = derived_bounds
+        literal = abstraction.manager.literal_by_atom_id[atom_id]
+        refutation = _record_unit_bounds_of_literal(atom_id, literal, state)
+        if refutation is not None:
+            return refutation
+        inequality_views.extend(_make_inequality_views_of_literal(atom_id, literal))
 
-        if is_unsatisfiable:
-            return Bounds_Refutation(var=var, atom_ids=frozenset((atom_id,)),
-                                     reason=f'{var} is constrained by a unit equality with no integer solution')
+    clashing_var = state.find_clashing_var()
+    if clashing_var is not None:
+        return state.make_clash_refutation(clashing_var)
 
-        if lower_limit is not None:
-            known_lower = lower_bound_of_var.get(var)
-            if known_lower is None or lower_limit > known_lower.limit:
-                lower_bound_of_var[var] = _Bound_With_Provenance(limit=lower_limit, atom_id=atom_id)
+    # R4 needs no propagation - it reads the bounds the literals stated - so it runs once before the
+    # loop. `max_propagation_rounds` governs how far bounds travel (R5), not whether R4 is applied.
+    refutation = _find_relation_minimum_refutation(inequality_views, state)
+    if refutation is not None:
+        return refutation
 
-        if upper_limit is not None:
-            known_upper = upper_bound_of_var.get(var)
-            if known_upper is None or upper_limit < known_upper.limit:
-                upper_bound_of_var[var] = _Bound_With_Provenance(limit=upper_limit, atom_id=atom_id)
+    for _ in range(max_propagation_rounds):
+        any_bound_tightened = False
 
-        strongest_lower, strongest_upper = lower_bound_of_var.get(var), upper_bound_of_var.get(var)
-        if strongest_lower is None or strongest_upper is None:
-            continue
-        if strongest_lower.limit <= strongest_upper.limit:
-            continue
+        for view in inequality_views:
+            for index, (coef, var) in enumerate(zip(view.coefs, view.vars)):
+                if coef == 0:
+                    continue
+                evaluated_rest = _minimum_of_terms(view, state, skipped_index=index)
+                if evaluated_rest is None:
+                    continue
+                rest_minimum, rest_justification = evaluated_rest
+                justification = rest_justification | frozenset((view.atom_id,))
+                slack = view.rhs - rest_minimum
 
-        return Bounds_Refutation(
-            var=var,
-            atom_ids=frozenset((strongest_lower.atom_id, strongest_upper.atom_id)),
-            reason=f'{var} is bounded below by {strongest_lower.limit} and above by {strongest_upper.limit}',
-        )
+                if coef > 0:
+                    any_bound_tightened |= state.tighten_upper(
+                        var, _floor_division_by(slack, coef), justification, rule='bound-propagation')
+                else:
+                    any_bound_tightened |= state.tighten_lower(
+                        var, _ceiling_division_by(slack, coef), justification, rule='bound-propagation')
+
+        clashing_var = state.find_clashing_var()
+        if clashing_var is not None:
+            return state.make_clash_refutation(clashing_var)
+
+        refutation = _find_relation_minimum_refutation(inequality_views, state)
+        if refutation is not None:
+            return refutation
+
+        if not any_bound_tightened:
+            break
 
     return None
+
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1501,7 +1728,8 @@ def _enumerate_implicants(abstraction: Monotone_Literal_Abstraction,
             # accepts has no clashing pair in any of its subsets either - running it again after
             # minimization could not find anything. Checking first also skips the minimization and the
             # theory call outright on a hit.
-            bounds_refutation = (find_bounds_refutation(asserted_atom_ids, abstraction)
+            bounds_refutation = (find_bounds_refutation(asserted_atom_ids, abstraction,
+                                                       config.bound_propagation_rounds)
                                  if config.use_bounds_refutation else None)
 
             if bounds_refutation is not None:
