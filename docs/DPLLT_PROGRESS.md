@@ -105,6 +105,40 @@ evaluation while other processes were competing for the machine; re-run on an id
 strategies report `unsat`, and it is counted as an agreement above. No formula produced a verdict
 from one strategy and an error or a timeout from the other.
 
+### Soundness sweep against a plain `-O all` run
+
+A second comparison, covering everything committed after the strategy first landed - the bound
+reasoning rules R0 to R5, core blocking, the monotonicity guard on `linearize`, `linearize` in the
+assertion-optimizer allowlist, and the removal of that pass's growth guard. 20 s per invocation.
+
+| Configuration | Flags |
+|---|---|
+| baseline | `--fast -O all` |
+| DPLL(T) | `--fast -O all --use-dpllt-automata --astp-cse` |
+
+Both run on the MTBDD backend with Hopcroft minimization, the legacy optimization sequence on the
+whole formula (no `--opt-fixpoint`) and no top-level SAT. The DPLL(T) side uses the default
+`--dpllt-assertion-optimizer restricted`, so the only pipeline activity is the `linearize`-only
+registry applied to assertions.
+
+| Benchmark set | Formulae | Agree | Disagree | Timeout or error |
+|---|---|---|---|---|
+| `benchmarks/formulae/tptp` | 46 | 46 | 0 | 0 |
+| `benchmarks/formulae/UltimateAutomizer` | 153 | 153 | 0 | 0 |
+
+Every formula produced a verdict under both configurations, so all 199 comparisons are between two
+verdicts rather than vacuous.
+
+What the sweep exercises is uneven, and the engagement figures below give the split: the loop engages
+on 3 of the 46 `tptp` formulae and on 0 of the 153 `UltimateAutomizer` ones. So roughly 3 comparisons
+exercise the enumeration, the bound rules and core blocking, and roughly 196 exercise the split, the
+eligibility test and the fall-through. The growth-guard change is the exception - it applies wherever
+`-O all` is given, hence to all 199.
+
+Not covered: `benchmarks/formulae/20190429-UltimateAutomizerSvcomp2019` (219 formulae), which is where
+`Problem10_label59` and `Problem17_label54` live, where the loop engages, and where `linearize` is
+known to fire. That set would be the informative one for the rules added after the strategy landed.
+
 ### `Problem17_label54_false-unreach-call.c_7`
 
 | Configuration | Result |
