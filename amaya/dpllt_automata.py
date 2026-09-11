@@ -845,11 +845,15 @@ class Bound_Propagation_State:
 
     def make_clash_refutation(self, var: Var) -> Bounds_Refutation:
         lower_bound, upper_bound = self.lower_bounds[var], self.upper_bounds[var]
+        core = lower_bound.justification | upper_bound.justification
+        # The clash is recorded as a step of its own, so that the last step of a returned refutation is
+        # always the one that concluded `False` rather than whichever bound happened to be derived last.
+        clash_step = Derivation_Step(rule='interval-clash', conclusion='False', premise_atom_ids=core)
         return Bounds_Refutation(
-            atom_ids=lower_bound.justification | upper_bound.justification,
+            atom_ids=core,
             reason=f'{var} is bounded below by {lower_bound.limit} and above by {upper_bound.limit}',
             var=var,
-            derivation_steps=tuple(self.derivation_steps),
+            derivation_steps=tuple(self.derivation_steps) + (clash_step,),
         )
 
 
@@ -966,6 +970,54 @@ def _record_unit_bounds_of_literal(atom_id: int,
     return None
 
 
+def _complement_of_literal_key(literal_key: Hashable) -> Hashable:
+    """
+    The abstraction key of the negation of the literal `literal_key` identifies.
+
+    Computed on the key rather than by building the negated node, because
+    `compute_literal_abstraction_key` wraps a negation as `('neg', <key of the child>)` and is
+    injective, so stripping or adding that wrapper names exactly the complementary literal.
+    """
+    if isinstance(literal_key, tuple) and literal_key and literal_key[0] == 'neg':
+        return literal_key[1]
+    return ('neg', literal_key)
+
+
+def _find_complementary_pair_refutation(asserted_atom_ids: Set[int],
+                                        abstraction: Monotone_Literal_Abstraction,
+                                        ) -> Optional[Bounds_Refutation]:
+    """
+    Rule R0: the assertion contains a literal and its negation.
+
+    The abstraction gives a literal and its negation two different Boolean variables - that is what
+    keeps it monotone, see `abstract_chi_into_monotone_sat_formula` - so nothing stops the SAT solver
+    from setting both. Without this rule the pair costs a theory call to refute.
+
+    The bound rules do not cover this case. `push_negations_towards_atoms` rewrites `NOT (t <= r)` into
+    a positive `Relation`, so an inequality and its negation reach here as two bounds that clash by R3;
+    what survives as a syntactic negation is exactly the forms whose negation is not a single atom - a
+    disequality `NOT (t = r)`, a negated `Congruence`, and a negated Bool variable - and R1 to R5 read
+    none of those.
+    """
+    for atom_id in sorted(asserted_atom_ids):
+        literal = abstraction.manager.literal_by_atom_id[atom_id]
+        complement_key = _complement_of_literal_key(compute_literal_abstraction_key(literal))
+
+        complement_atom_id = abstraction.manager.atom_id_by_literal_key.get(complement_key)
+        if complement_atom_id is None or complement_atom_id not in asserted_atom_ids:
+            continue
+
+        core = frozenset((atom_id, complement_atom_id))
+        return Bounds_Refutation(
+            atom_ids=core,
+            reason=f'the assertion contains both {literal} and its negation',
+            derivation_steps=(Derivation_Step(rule='complementary-pair', conclusion='False',
+                                              premise_atom_ids=core),),
+        )
+
+    return None
+
+
 def _find_relation_minimum_refutation(inequality_views: List[Linear_Inequality_View],
                                       state: Bound_Propagation_State) -> Optional[Bounds_Refutation]:
     """ Rule R4: an inequality whose least value under the current bounds exceeds its right-hand side. """
@@ -997,17 +1049,19 @@ def find_bounds_refutation(asserted_atom_ids: Set[int],
     Look for a subset of the asserted literals that is unsatisfiable by bound reasoning alone, and
     report which literals form it.
 
-    Five rules, applied to a fixpoint or until `max_propagation_rounds` is spent:
+    Six rules, applied to a fixpoint or until `max_propagation_rounds` is spent:
 
     | Rule | From | Concludes |
     |---|---|---|
+    | R0 complementary pair | a literal and its negation, both asserted | `False` |
     | R1 unit bound | `c*x <= r` | a lower or upper bound on `x` |
     | R2 unit equality | `c*x = r` | both bounds on `x`, or `False` when `c` does not divide `r` |
     | R3 interval clash | a lower and an upper bound on one variable that cross | `False` |
     | R4 relation minimum | an inequality whose least value under the current bounds exceeds its right-hand side | `False` |
     | R5 bound propagation | an inequality and bounds on all but one of its variables | a bound on the remaining variable |
 
-    R4 is what decides the case bounds on single variables cannot: from `x <= 5` and `y <= 10`,
+    R0 runs first and is the cheapest: one dictionary lookup per asserted literal. R4 is what decides
+    the case bounds on single variables cannot: from `x <= 5` and `y <= 10`,
     `x + y >= 20` - which reaches here as `-x - y <= -20` - has least value `-15`, and `-15 > -20`, so
     it is unsatisfiable. R5 is what makes equalities behave like substitutions: an asserted `x - y = 0`
     contributes the view `y - x <= 0`, and with `x <= 5` that yields `y <= 5`, so a further `y >= 10`
@@ -1023,6 +1077,10 @@ def find_bounds_refutation(asserted_atom_ids: Set[int],
     construction - an assertion it accepts may still be unsatisfiable, and the caller must go on to the
     theory call.
     """
+    refutation = _find_complementary_pair_refutation(asserted_atom_ids, abstraction)
+    if refutation is not None:
+        return refutation
+
     state = Bound_Propagation_State()
     inequality_views: List[Linear_Inequality_View] = []
 

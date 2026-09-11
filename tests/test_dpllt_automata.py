@@ -956,3 +956,99 @@ def test_T19_the_verdict_does_not_depend_on_the_propagation_rounds(quiet_solver_
     verdicts.append(_is_sat_according_to_dpllt(T19_SOURCE))
 
     assert len(set(verdicts)) == 1, f'the verdict moved between configurations: {verdicts}'
+
+
+# --- T20: a literal and its negation ------------------------------------------------------------
+
+def test_T20_an_equality_and_its_negation_are_a_two_literal_core():
+    equality = Relation(vars=[X], coefs=[1], rhs=0, predicate_symbol='=')
+    negated_equality = dsl._neg(equality)
+    abstraction = _build_abstraction(dsl._and(equality, negated_equality, _le([(1, Y)], 4)))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction)
+
+    assert refutation is not None
+    assert refutation.atom_ids == frozenset((_atom_id_of(abstraction, equality),
+                                             _atom_id_of(abstraction, negated_equality)))
+    assert [step.rule for step in refutation.derivation_steps] == ['complementary-pair']
+
+
+def test_T20_a_congruence_and_its_negation_are_a_two_literal_core():
+    """ The bound rules read no congruence at all, so this pair is only reachable through R0. """
+    congruence = _congruence([(1, X)], 0, 5)
+    negated_congruence = dsl._neg(congruence)
+    abstraction = _build_abstraction(dsl._and(congruence, negated_congruence))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction)
+
+    assert refutation is not None
+    assert len(refutation.atom_ids) == 2
+
+
+def test_T20_a_bool_variable_and_its_negation_are_a_two_literal_core():
+    abstraction = _build_abstraction(dsl._and(X, dsl._neg(X), _le([(1, Y)], 4)))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction)
+
+    assert refutation is not None
+    assert len(refutation.atom_ids) == 2
+
+
+def test_T20_one_half_of_a_pair_is_not_a_refutation():
+    equality = Relation(vars=[X], coefs=[1], rhs=0, predicate_symbol='=')
+    negated_equality = dsl._neg(equality)
+    abstraction = _build_abstraction(dsl._and(equality, negated_equality))
+
+    only_the_positive = {_atom_id_of(abstraction, equality)}
+    assert find_bounds_refutation(only_the_positive, abstraction) is None
+
+    only_the_negation = {_atom_id_of(abstraction, negated_equality)}
+    assert find_bounds_refutation(only_the_negation, abstraction) is None
+
+
+def test_T20_two_different_equalities_on_one_variable_go_through_the_bound_rules():
+    """ `x = 0` and `x = 1` are not syntactic complements; R2 gives each both bounds and R3 clashes. """
+    abstraction = _build_abstraction(dsl._and(
+        Relation(vars=[X], coefs=[1], rhs=0, predicate_symbol='='),
+        Relation(vars=[X], coefs=[1], rhs=1, predicate_symbol='=')))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction)
+
+    assert refutation is not None
+    assert refutation.var == X
+    assert all(step.rule != 'complementary-pair' for step in refutation.derivation_steps)
+
+
+def test_T20_the_core_excludes_literals_the_pair_did_not_need():
+    equality = Relation(vars=[X], coefs=[1], rhs=0, predicate_symbol='=')
+    negated_equality = dsl._neg(equality)
+    irrelevant = _le([(1, Y), (1, Z)], 40)
+    abstraction = _build_abstraction(dsl._and(equality, negated_equality, irrelevant))
+
+    refutation = find_bounds_refutation(set(abstraction.manager.literal_by_atom_id), abstraction)
+
+    assert refutation is not None
+    assert _atom_id_of(abstraction, irrelevant) not in refutation.atom_ids
+
+
+T20_SOURCE = """
+(declare-fun x () Int)
+(declare-fun y () Int)
+(assert (or (and (= x 0) (not (= x 0)))
+            (and (<= x 1) (= x y) (>= y 9))))
+(assert (<= 0 x))
+(check-sat)
+"""
+
+
+def test_T20_the_verdict_does_not_depend_on_the_complementary_pair_rule(quiet_solver_config):
+    solver_config.dpllt_automata = DpllTAutomataConfig(use_bounds_refutation=True)
+    verdict_with_check = _is_sat_according_to_dpllt(T20_SOURCE)
+
+    solver_config.dpllt_automata = DpllTAutomataConfig(use_bounds_refutation=False)
+    verdict_without_check = _is_sat_according_to_dpllt(T20_SOURCE)
+
+    assert verdict_with_check == verdict_without_check
+
+    solver_config.dpllt_automata = DpllTAutomataConfig(use_bounds_refutation=True)
+    _compare_verdicts_tolerating_shared_evaluator_defects(T20_SOURCE)

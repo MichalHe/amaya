@@ -396,13 +396,15 @@ state, and reports the subset of those literals a contradiction was derived from
 
 | Rule | From | Concludes |
 |---|---|---|
+| R0 complementary pair | a literal and its negation, both asserted | `False` |
 | R1 unit bound | `c*x <= r` (`Relation.is_hard_bound`) | a lower or upper bound on `x` |
 | R2 unit equality | `c*x = r` (`Relation.specifies_a_single_value_for_var`) | both bounds on `x`; or `False` when `c` does not divide `r`, as a single-literal core |
 | R3 interval clash | a lower and an upper bound on one variable that cross | `False` |
 | R4 relation minimum | an inequality whose least value under the current bounds exceeds its right-hand side | `False` |
 | R5 bound propagation | an inequality and bounds on all but one of its variables | a bound on the remaining variable |
 
-R1-R4 need no propagation and always run. R5 runs for `bound_propagation_rounds` rounds (default 4);
+R0 runs first and costs one dictionary lookup per asserted literal. R0-R4 need no propagation and
+always run. R5 runs for `bound_propagation_rounds` rounds (default 4);
 each round can only tighten a bound, so the loop reaches a fixpoint on its own and the cap bounds how
 long that takes.
 
@@ -413,8 +415,17 @@ equality behave like a substitution: an asserted `x - y = k` contributes the ine
 a bound from one end to the other, which is what the cap limits.
 
 An equality contributes **two** inequality views, one per direction, so R4 and R5 need to know about
-inequalities only (`_make_inequality_views_of_literal`). `Congruence` contributes nothing: it
-constrains a residue, not a range.
+inequalities only (`_make_inequality_views_of_literal`). `Congruence` contributes nothing to the bound
+rules: it constrains a residue, not a range.
+
+R0 covers what the bound rules structurally cannot. The abstraction gives a literal and its negation
+two different Boolean variables - that is what keeps it monotone (§5.3) - so the SAT solver may assert
+both. `push_negations_towards_atoms` rewrites `NOT (t <= r)` into a positive `Relation`, so an
+inequality and its negation arrive as two bounds and clash by R3; what survives as a *syntactic*
+negation is exactly the forms whose negation is not a single atom - a disequality `NOT (t = r)`, a
+negated `Congruence`, and a negated Bool variable - and R1 to R5 read none of those. R0 recognises
+them by complementing the abstraction key (`_complement_of_literal_key`), which is injective, so no
+node is constructed.
 
 **Provenance.** Each derived bound carries `Derived_Bound.justification`, the transitive set of
 *asserted* literals it came from. Propagating that set forward at each inference computes exactly what

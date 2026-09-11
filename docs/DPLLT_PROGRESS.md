@@ -25,6 +25,7 @@ selected by `--use-dpllt-automata`.
 | §10 | `--dpllt-show-existential-part`, added after the design was written; covered by T16 | Done |
 | §6.5b, §6.6 | `find_bounds_refutation` plus core blocking, added after the design was written; covered by T18 | Done |
 | §6.5b rules R4, R5 | Relation-minimum and bound propagation, with justification propagation in place of a derivation graph; covered by T19 | Done |
+| §6.5b rule R0 | A literal and its negation, both asserted; covered by T20 | Done |
 | §10, §16 item 2 | `--dpllt-count-abstraction-models` / `--dpllt-abstraction-model-limit`, added after the design was written; covered by T17. Makes the worst-case iteration count measurable per formula without constructing an automaton, but no benchmark set has been measured with it | Done |
 | §7.2 | Classification of every pipeline pass as solution-set-preserving or not | **Not done.** This is the design's own open item; the `restricted` mode therefore contains no passes and behaves as `none` |
 | §16 | The ten unmeasured quantities | **Not measured.** Items 1 and 2 are partially addressed by the engagement figures below; the rest are untouched |
@@ -76,9 +77,9 @@ Commands are given relative to the repository root; every number below was produ
 
 ### Unit and end-to-end tests
 
-- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 57 passed (T1-T19; the end-to-end
+- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 65 passed (T1-T20; the end-to-end
   ones are parameterized over the native and MTBDD backends).
-- `venv/bin/python -m pytest tests/ -q` (235 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
+- `venv/bin/python -m pytest tests/ -q` (243 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
   `master` excluded (`test_antiprenexing`, `test_div_support`, `test_let_evaluation`,
   `test_nonlinear_term_rewrites`, `test_process_relations_in_ast`, `test_relations`,
   `test_simplification_on_unbound_vars`, `test_state_compression_functions`,
@@ -156,16 +157,26 @@ spend on automata.
 | None (block the whole implicant) | > 30,000 | > 30,000 | 0 | - | 237 s, limit reached |
 | R1-R3 (unit bounds and interval clash) | 21,884 | 21,875 | 9 | 2.0 | 198 s, exhausted |
 | R1-R4 (`--dpllt-bound-propagation-rounds 0`) | 18,386 | 18,375 | 11 | 2.2 | 59 s, exhausted |
-| R1-R5, 4 rounds (default) | **982** | **923** | 59 | 5.1 | 5 s, exhausted |
+| R1-R5, 4 rounds | 982 | 923 | 59 | 5.1 | 5 s, exhausted |
+| R0-R5, 4 rounds (default) | **20** | **0** | 20 | 3.0 | < 0.1 s, exhausted |
 
-The reduction in theory calls from the first row to the last is at least 30,000 -> 923, and against
-the 93,312 branch-count product about a hundredfold. Note the mean core grows from 2.0 to 5.1 literals
-while the iteration count falls by a factor of 22: what a clause removes is governed by the number of
-disjunctions it spans, not by how few literals it names (`docs/EAGER_THEORY_LEARNING.md` §2).
+The reduction in theory calls from the first row to the last is at least 30,000 -> 0. Note the mean
+core grows from 2.0 to 5.1 literals between rows 2 and 4 while the iteration count falls by a factor of
+22: what a clause removes is governed by the number of disjunctions it spans, not by how few literals
+it names (`docs/EAGER_THEORY_LEARNING.md` §2).
+
+The rule that concluded each of the 20 refutations in the last row: `interval-clash` 9,
+`relation-minimum` 6, `complementary-pair` 5.
 
 **Wall clock, with automata.** `./reproducer.sh` - `--fast -O all --use-dpllt-automata
---dpllt-assertion-optimizer full --astp-cse` - did not terminate within 900 s before R4 and R5 were
-added. With them it reports `unsat` in **11.4 s**, after 982 iterations.
+--dpllt-assertion-optimizer full --astp-cse` - did not terminate within 900 s before R0, R4 and R5
+were added. With them it reports `unsat` in **0.43 s**.
+
+**The `unsat` is verified.** Each of the 20 cores was rebuilt as a conjunction and handed to the
+automata backend: all 20 have an empty language. The enumeration exhausted after exactly those 20
+blocking clauses, so every model of the abstraction contains one of them, and each is theory
+unsatisfiable - which is a complete refutation of the formula that does not rest on the bound rules
+being correct. The check is 20 automaton constructions and is the one to repeat if the rules change.
 
 ## What this record does not establish
 
@@ -180,6 +191,6 @@ added. With them it reports `unsat` in **11.4 s**, after 982 iterations.
 5. Whether the bound reasoning pays on any formula other than `Problem10_label59`. It fired zero
    times on every `tptp` formula that reaches the loop when only R1-R3 were implemented, and that
    measurement has not been repeated for R4 and R5.
-6. Whether the `unsat` the reproducer now reports is correct. The ordinary evaluator does not finish
-   on that formula, the benchmark records `:status unknown`, and no second configuration of this
-   strategy has been run to completion on it for comparison.
+6. Whether the bound reasoning helps on a formula whose conflicts the automata backend detects but
+   these six rules do not. On `Problem10_label59` it now refutes every assertion, so that formula
+   cannot answer the question.
