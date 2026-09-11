@@ -14,7 +14,9 @@ clause. See `docs/DPLLT_WITH_AUTOMATA.md` §6.6 for the clause it builds and
 today.
 
 Related: `OPTIMIZATION_PIPELINE.md` (the scheduler this extends), `docs/DPLLT_PROGRESS.md` (the
-measurements motivating it).
+measurements motivating it), `docs/EAGER_THEORY_LEARNING.md` (a proposal that produces clauses of the
+same strength without extracting a core from any rewriting, and which identifies what governs clause
+strength in the first place).
 
 ---
 
