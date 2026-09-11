@@ -516,17 +516,38 @@ A configuration field `dpllt_assertion_optimizer` with three values:
 | Value | Behaviour | Status |
 |---|---|---|
 | `none` | The assertion is handed to the evaluator unoptimized | Correct by construction |
-| `restricted` (default) | The pipeline runs with a registry filtered to an allowlist of passes classified as solution-set-preserving | Allowlist **not yet determined**; see below |
+| `restricted` (default) | The pipeline runs with a registry filtered to an allowlist of passes classified as solution-set-preserving | Allowlist holds `linearize`; the remaining passes are unclassified |
 | `full` | The pipeline runs with the registry `build_registry(solver_config)` returns | **Known to be unsound** for at least the pass named above; provided for measurement only and gated behind an explicit flag |
 
-The allowlist is a per-pass classification that this document does not perform. Each of the passes
-registered in `amaya/preprocessing/pipeline.py:_registry_definition` needs one of three verdicts:
-preserves the solution set over free variables; preserves it only for existentially quantified
-variables (therefore admissible only for variables in the assertion's own prefix); preserves
-satisfiability only (therefore excluded). Until that classification exists, `restricted` is
-specified to contain no passes, making it equal to `none` — an implementation that ships a
-non-empty allowlist without the classification would be shipping the `full` risk under a different
-name.
+The allowlist is a per-pass classification. Each of the passes registered in
+`amaya/preprocessing/pipeline.py:_registry_definition` needs one of three verdicts: preserves the
+solution set over free variables; preserves it only for existentially quantified variables (therefore
+admissible only for variables in the assertion's own prefix); preserves satisfiability only (therefore
+excluded).
+
+One pass has been classified and admitted: **`linearize`**
+(`amaya/preprocessing/unbound_vars.py:linearize_congruences`). It replaces a congruence over two
+variables by the disjunction of the linear equations that congruence has inside the box the variables'
+bounds describe, and leaves those bounds in place as siblings, so the conjunction it produces has the
+same solutions as the one it replaced. The bounds it reads are collected from AND nodes at or below the
+root of the formula it is handed (`_insert_all_asserting_bounds_into_current_context`), so on an
+assertion they are the assertion's own.
+
+Two properties of that admission are recorded at the point of use:
+
+1. `_attempt_congruence_linearization` has a second way of bounding a variable - when the variable
+   carries one explicit bound and occurs monotonically, the range is narrowed to a modulus-wide window
+   at that end (`is_c_best_from_below` / `is_c_best_from_above`). That preserves the solution set over
+   the free variables only when the narrowed variable is quantified inside the formula the pass was
+   handed; for a free variable shared with `phi` it preserves satisfiability alone, and monotonicity is
+   computed over the assertion, which does not see `phi`. This is the part to suspect if a verdict
+   moves between `none` and `restricted`.
+2. `linearize` carries `growth_factor_limit=1.2` and the rewrite adds four nodes, so the pipeline
+   discards the linearization of an assertion smaller than about twenty nodes. Admitting the pass
+   therefore changes nothing for small assertions.
+
+The remaining passes are unclassified, so `restricted` applies only `linearize` - and only when
+`-O linearize` has also enabled it in the registry.
 
 An alternative that avoids the classification entirely: run the pipeline on
 `phi AND Gamma(M)` — the whole per-iteration formula — instead of on the assertion. This restores
@@ -825,7 +846,7 @@ reaches the evaluator - but it is what those assertions are drawn from, hence th
 
 | # | Risk | Mitigation in this design |
 |---|---|---|
-| R1 | The assertion-level optimizer is applied with a pass that is only satisfiability-preserving, producing wrong verdicts | §7.2 defaults to an empty allowlist; `full` is a separate, labelled flag |
+| R1 | The assertion-level optimizer is applied with a pass that is only satisfiability-preserving, producing wrong verdicts | §7.2's allowlist admits only passes classified individually; `full` is a separate, labelled flag |
 | R2 | Two binders sharing a `Var` id are hoisted into one prefix, producing wrong UNSAT verdicts | §5.1 renames apart unconditionally |
 | R3 | A cached automaton is projected in place and corrupts the cache | §8.4 states the rule and the clone-on-read/write discipline; the operations that violate it are enumerated |
 | R4 | The number of minimal implicants of `S` is exponential in `|L|`, and the loop enumerates them one by one | Not mitigated. The strategy is opt-in and the fallback in §4.2 excludes the `OR`-free case where it is certainly not worthwhile. No iteration budget is specified |

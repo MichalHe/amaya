@@ -28,7 +28,9 @@ from amaya.config import (
     solver_config,
 )
 from amaya.dpllt_automata import (
+    ASSERTION_OPTIMIZER_SOLUTION_SET_PRESERVING_PASSES,
     Assertion_Automaton_Builder,
+    optimize_assertion_formula,
     Monotone_Skeleton_Node_Type,
     abstract_chi_into_monotone_sat_formula,
     count_abstraction_models,
@@ -46,6 +48,7 @@ from amaya.dpllt_automata import (
     split_formula_into_phi_and_chi,
 )
 from amaya.preprocessing.eval import VarInfo
+from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars
 from amaya.relations_structures import (
     AST_Connective,
     AST_Negation,
@@ -56,6 +59,7 @@ from amaya.relations_structures import (
     Relation,
     Var,
     VariableType,
+    format_formula,
 )
 from amaya.sat_toplevel import isolated_sat_formula_context
 from amaya.solver_core import EvaluationContext
@@ -1052,3 +1056,116 @@ def test_T20_the_verdict_does_not_depend_on_the_complementary_pair_rule(quiet_so
 
     solver_config.dpllt_automata = DpllTAutomataConfig(use_bounds_refutation=True)
     _compare_verdicts_tolerating_shared_evaluator_defects(T20_SOURCE)
+
+
+# --- T21: the assertion optimizer allowlist -----------------------------------------------------
+
+def test_T21_the_allowlist_admits_linearize_and_nothing_else_yet():
+    """
+    Guards the allowlist against growing without the classification design section 7.2 calls for. A
+    pass added here must have been shown to preserve the assertion's solution set over its free
+    variables, not merely its satisfiability.
+    """
+    assert set(ASSERTION_OPTIMIZER_SOLUTION_SET_PRESERVING_PASSES) == {'linearize'}
+
+
+BOUND_VAR_FOR_LINEARIZATION = Var(id=26)
+
+
+def _make_linearizable_assertion(padding_literal_count: int):
+    """
+    `exists v26. (bounds on x and v26 AND x + 299908*v26 = 0 (mod 299909))`, plus `padding_literal_count`
+    further bound literals on distinct variables.
+
+    `299908 = -1 (mod 299909)`, so the congruence says `x = v26 (mod 299909)`; with `x` in `[-83,-1]` and
+    `v26` in `[1,299908]` only one multiple of the modulus fits, so it linearizes to a single equation.
+    The padding exists to control the assertion's node count, which the growth guard measures against.
+    """
+    bound_var = BOUND_VAR_FOR_LINEARIZATION
+    padding_vars = [Var(id=100 + index) for index in range(padding_literal_count)]
+    conjuncts = (_le([(-1, X)], 83), _le([(1, X)], -1),
+                 _le([(-1, bound_var)], -1), _le([(1, bound_var)], 299908),
+                 Congruence(vars=[X, bound_var], coefs=[1, 299908], rhs=0, modulus=299909),
+                 ) + tuple(_le([(1, var)], 10 + index) for index, var in enumerate(padding_vars))
+
+    assertion = AST_Quantifier(referenced_vars=(), bound_vars=(bound_var,),
+                               child=AST_Connective(referenced_vars=(), type=Connective_Type.AND,
+                                                    children=conjuncts))
+    fill_referenced_vars(assertion)
+
+    var_table = _make_var_table((X, VariableType.INT, True), (bound_var, VariableType.INT, False),
+                                *((var, VariableType.INT, True) for var in padding_vars))
+    return assertion, var_table
+
+
+def test_T21_restricted_mode_linearizes_a_congruence(quiet_solver_config):
+    """
+    The congruence is replaced by an equation, and the bounds the linearization relied on remain, which
+    is what makes the rewrite preserve the assertion's solutions.
+    """
+    saved_linearize = solver_config.optimizations.linearize_congruences
+    solver_config.optimizations.linearize_congruences = True
+    try:
+        assertion, var_table = _make_linearizable_assertion(padding_literal_count=20)
+        ctx = _make_evaluation_context(var_table)
+
+        unoptimized = optimize_assertion_formula(assertion, ctx, ASSERTION_OPTIMIZER_MODE_NONE)
+        optimized = optimize_assertion_formula(assertion, ctx, ASSERTION_OPTIMIZER_MODE_RESTRICTED)
+
+        assert unoptimized is assertion, 'the "none" mode must hand the assertion through untouched'
+        assert 'Congruence' in format_formula(unoptimized)
+
+        optimized_text = format_formula(optimized)
+        assert 'Congruence' not in optimized_text
+        assert '= -299909' in optimized_text
+        assert '+1.Var(id=26) <= 299908' in optimized_text, 'the bounds it relied on must survive'
+    finally:
+        solver_config.optimizations.linearize_congruences = saved_linearize
+
+
+def test_T21_the_growth_guard_discards_the_linearization_of_a_small_assertion(quiet_solver_config):
+    """
+    `linearize` carries `growth_factor_limit=1.2` (`amaya/preprocessing/pipeline.py:_registry_definition`)
+    and the rewrite adds four nodes, so on an assertion of fewer than about twenty nodes the pipeline
+    runs the pass and then throws its result away. Enabling the pass in the allowlist therefore does
+    nothing for small assertions - recorded here so the behaviour is not mistaken for the pass failing.
+    """
+    saved_linearize = solver_config.optimizations.linearize_congruences
+    solver_config.optimizations.linearize_congruences = True
+    try:
+        assertion, var_table = _make_linearizable_assertion(padding_literal_count=0)
+        ctx = _make_evaluation_context(var_table)
+
+        optimized = optimize_assertion_formula(assertion, ctx, ASSERTION_OPTIMIZER_MODE_RESTRICTED)
+
+        assert 'Congruence' in format_formula(optimized)
+    finally:
+        solver_config.optimizations.linearize_congruences = saved_linearize
+
+
+T21_SOURCE = """
+(declare-fun x () Int)
+(declare-fun y () Int)
+(assert (or (and (<= 1 x) (<= x 20) (= (mod (+ x (* 7 y)) 8) 3))
+            (and (<= 30 x) (<= x 50) (= (mod (+ x (* 3 y)) 8) 5))))
+(assert (and (<= 0 y) (<= y 7)))
+(check-sat)
+"""
+
+
+def test_T21_the_verdict_does_not_depend_on_the_assertion_optimizer_mode(quiet_solver_config):
+    saved_linearize = solver_config.optimizations.linearize_congruences
+    solver_config.optimizations.linearize_congruences = True
+    try:
+        verdicts = []
+        for mode in (ASSERTION_OPTIMIZER_MODE_NONE, ASSERTION_OPTIMIZER_MODE_RESTRICTED):
+            solver_config.dpllt_automata = DpllTAutomataConfig(assertion_optimizer=mode)
+            verdicts.append(_is_sat_according_to_dpllt(T21_SOURCE))
+
+        assert len(set(verdicts)) == 1, f'the verdict moved between optimizer modes: {verdicts}'
+
+        solver_config.dpllt_automata = DpllTAutomataConfig(
+            assertion_optimizer=ASSERTION_OPTIMIZER_MODE_RESTRICTED)
+        _compare_verdicts_tolerating_shared_evaluator_defects(T21_SOURCE)
+    finally:
+        solver_config.optimizations.linearize_congruences = saved_linearize

@@ -16,7 +16,7 @@ selected by `--use-dpllt-automata`.
 | §6.4 | Assembling the assertion, the hoisted prefix | Done |
 | §6.5 | Model reporting; `solutions_nfa` left `None` | Done |
 | §6.6 | Blocking clauses | Done |
-| §7 | Assertion optimizer, three modes | Done; the `restricted` allowlist is empty (see below) |
+| §7 | Assertion optimizer, three modes | Done; the `restricted` allowlist holds `linearize`, the remaining passes are unclassified |
 | §8.1-§8.4 | Caches, the clone-on-read/write discipline | Done |
 | §9 | Module layout | Done |
 | §10 | Configuration and command line | Done |
@@ -27,7 +27,7 @@ selected by `--use-dpllt-automata`.
 | §6.5b rules R4, R5 | Relation-minimum and bound propagation, with justification propagation in place of a derivation graph; covered by T19 | Done |
 | §6.5b rule R0 | A literal and its negation, both asserted; covered by T20 | Done |
 | §10, §16 item 2 | `--dpllt-count-abstraction-models` / `--dpllt-abstraction-model-limit`, added after the design was written; covered by T17. Makes the worst-case iteration count measurable per formula without constructing an automaton, but no benchmark set has been measured with it | Done |
-| §7.2 | Classification of every pipeline pass as solution-set-preserving or not | **Not done.** This is the design's own open item; the `restricted` mode therefore contains no passes and behaves as `none` |
+| §7.2 | Classification of every pipeline pass as solution-set-preserving or not | **Partly done.** `linearize` is classified and admitted; the other 17 are not, so `restricted` applies that one pass only |
 | §16 | The ten unmeasured quantities | **Not measured.** Items 1 and 2 are partially addressed by the engagement figures below; the rest are untouched |
 
 ## Changes
@@ -77,9 +77,9 @@ Commands are given relative to the repository root; every number below was produ
 
 ### Unit and end-to-end tests
 
-- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 65 passed (T1-T20; the end-to-end
+- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 72 passed (T1-T21; the end-to-end
   ones are parameterized over the native and MTBDD backends).
-- `venv/bin/python -m pytest tests/ -q` (243 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
+- `venv/bin/python -m pytest tests/ -q` (250 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
   `master` excluded (`test_antiprenexing`, `test_div_support`, `test_let_evaluation`,
   `test_nonlinear_term_rewrites`, `test_process_relations_in_ast`, `test_relations`,
   `test_simplification_on_unbound_vars`, `test_state_compression_functions`,
@@ -185,12 +185,21 @@ being correct. The check is 20 automaton constructions and is the one to repeat 
 2. The number of loop iterations, the effect of implicant minimization, and the prefix-cache hit rate
    on real inputs. `--dpllt-report` logs the counters that would measure these; they were read only
    on hand-written formulae.
-3. Anything about the `full` assertion-optimizer mode beyond the fact that it runs. It is documented
-   as unsound and was not exercised beyond the two hand-written formulae.
-4. The nine remaining items of design §16.
-5. Whether the bound reasoning pays on any formula other than `Problem10_label59`. It fired zero
+3. Anything about the `full` assertion-optimizer mode beyond the fact that it runs. Its unsoundness is
+   inferred from the contract the passes satisfy and from one identified mechanism
+   (`theory_reasoning._simplify_formula_using_model_properties` inventing a value for an unseen Bool
+   variable); **no input on which `full` and `none` disagree has been exhibited.** One attempt to
+   construct one failed, because whole-formula preprocessing reduced the positive-existential part to
+   `False` before the split ran.
+4. Whether admitting `linearize` to the `restricted` allowlist changes any verdict or any iteration
+   count. It was admitted on the argument recorded in design §7.2; the `tptp` sweeps and the test suite
+   show no verdict moving, and no formula has been measured on which it fires inside the loop. Note it
+   only fires at all when `-O linearize` is also given and the assertion exceeds the pass's growth
+   guard - about twenty nodes.
+5. The nine remaining items of design §16.
+6. Whether the bound reasoning pays on any formula other than `Problem10_label59`. It fired zero
    times on every `tptp` formula that reaches the loop when only R1-R3 were implemented, and that
    measurement has not been repeated for R4 and R5.
-6. Whether the bound reasoning helps on a formula whose conflicts the automata backend detects but
+7. Whether the bound reasoning helps on a formula whose conflicts the automata backend detects but
    these six rules do not. On `Problem10_label59` it now refutes every assertion, so that formula
    cannot answer the question.

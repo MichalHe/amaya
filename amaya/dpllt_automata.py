@@ -93,7 +93,7 @@ from amaya.solver_core import EvaluationContext
 from amaya.stats import ParsingOperation
 
 
-ASSERTION_OPTIMIZER_SOLUTION_SET_PRESERVING_PASSES: FrozenSet[str] = frozenset()
+ASSERTION_OPTIMIZER_SOLUTION_SET_PRESERVING_PASSES: FrozenSet[str] = frozenset({'linearize'})
 """
 Names of the passes that may be applied to a single assertion rather than to the whole formula.
 
@@ -105,11 +105,24 @@ pass violates this: `amaya.preprocessing.theory_reasoning._simplify_formula_usin
 asserts a value for a Bool variable it has not seen and simplifies the rest under that assumption,
 which can fix a Bool parameter that `phi` constrains the other way.
 
-Populating this set requires classifying every pass in
-`amaya.preprocessing.pipeline._registry_definition` as one of: preserves the solution set over free
-variables; preserves it only for existentially quantified variables; preserves satisfiability only.
-That classification has not been performed, so the set is empty and the `restricted` mode behaves as
-`none`. See `docs/DPLLT_WITH_AUTOMATA.md` §7.2.
+`linearize` (`amaya.preprocessing.unbound_vars.linearize_congruences`) is admitted. It replaces a
+congruence over two variables by the disjunction of the linear equations the congruence has inside the
+box their bounds describe, and it leaves those bounds in place as siblings, so the conjunction it
+produces has the same solutions as the one it replaced. The bounds it reads come from AND nodes at or
+below the root of the formula it is handed, so on an assertion they are the assertion's own.
+
+Note `_attempt_congruence_linearization` has a second way of bounding a variable: when the variable
+carries only one explicit bound but occurs monotonically, it narrows the range to a modulus-wide window
+at that end (`is_c_best_from_below` / `is_c_best_from_above`). That argument preserves the solution set
+over the *free* variables only when the narrowed variable is quantified inside the formula the pass was
+handed; for a free variable shared with `phi` it preserves satisfiability alone, and monotonicity is
+computed over the assertion, which does not see `phi`'s occurrences. This is the part of the pass to
+suspect if a verdict ever moves between `none` and `restricted`.
+
+The remaining passes are unclassified. Classifying them requires deciding, for each, whether it
+preserves the solution set over free variables, preserves it only for existentially quantified
+variables, or preserves satisfiability only. See `docs/DPLLT_WITH_AUTOMATA.md` §7.2 and
+`docs/PIPELINE_UNSAT_CORES.md` §4.
 """
 
 
