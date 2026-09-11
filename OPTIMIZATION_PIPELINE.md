@@ -499,6 +499,14 @@ kept as an accepted alias.
 
 #### Tier 2 — HEAVY (rationed; `max_runs` and a growth guard)
 
+> **Note on `linearize`'s growth guard.** It was 1.2 and is now none. Node count is a proxy for the
+> cost of a formula, and it is a poor one for this pass: the automaton for a congruence has states on
+> the order of its modulus, so replacing one of modulus 299909 by an equation removes ~300k states in
+> exchange for four nodes. Under a relative guard the pass could never fire on a formula below about
+> twenty nodes — exactly where a congruence dominates the cost. Its output is bounded without the
+> guard: `unbound_vars._should_linearize` declines a congruence whose variable range spans more than
+> four strides, and `max_runs=1` bounds the applications.
+
 | Pass | Existing function | max_runs | growth limit | consumes | produces | measured hit rate |
 |---|---|---|---|---|---|---|
 | `miniscope` | `miniscope_quantifiers` | 2 | 1.5 | `quantifier-shape`, `nary-shape`, `var-eliminated` | `quantifier-shape`, `nary-shape` | 56.2% (n=217) |
@@ -506,7 +514,7 @@ kept as an accepted alias.
 | `gcd-rewrite` | `simplify_unbounded_equations` | 3 | — | `quantifier-shape`, `equality-exposed`, `atom-rewritten` | `atom-rewritten`, `var-eliminated`, `quantifier-shape` | 0.9% (n=551) — demoted from tier 1, see above |
 | `infinite-domain` | `remove_vars_with_no_consequences_on_the_model` | 3 | — | `var-eliminated`, `quantifier-shape`, `subtree-removed` | `var-eliminated`, `quantifier-shape`, `subtree-removed` | 2.0% (n=348) — demoted from tier 1, see above |
 | `minimize-congruences` | `simplify_congruences_on_unbounded_existential_vars` | 2 | 1.2 | `quantifier-shape`, `atom-rewritten` | `atom-rewritten`, `var-eliminated` | 0.0% (n=123) — not yet acted on, see note below |
-| `linearize` | `linearize_congruences` | 1 | 1.2 | `atom-rewritten`, `bounds-tightened` | `atom-rewritten`, `equality-exposed` | 2.5% (n=120) |
+| `linearize` | `linearize_congruences` | 1 | none | `atom-rewritten`, `bounds-tightened` | `atom-rewritten`, `equality-exposed` | 2.5% (n=120) |
 | `iso-conflicts` | `detect_conflics_on_isomorphic_fragments` | 1 | 1.0 | `nary-shape`, `subtree-removed` | `bool-literal`, `subtree-removed` | 0.8% (n=120) — not yet acted on, see note below |
 | `light-sat` | `convert_and_or_trees_to_dnf_if_talking_about_similar_atoms` | 1 | 2.0 | `nary-shape`, `atom-rewritten` | `nary-shape`, `bool-literal`, `subtree-removed` | 0.0% (n=120) — not yet acted on, see note below |
 

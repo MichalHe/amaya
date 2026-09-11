@@ -78,9 +78,9 @@ Commands are given relative to the repository root; every number below was produ
 
 ### Unit and end-to-end tests
 
-- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 77 passed (T1-T22; the end-to-end
+- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 78 passed (T1-T23; the end-to-end
   ones are parameterized over the native and MTBDD backends).
-- `venv/bin/python -m pytest tests/ -q` (255 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
+- `venv/bin/python -m pytest tests/ -q` (256 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
   `master` excluded (`test_antiprenexing`, `test_div_support`, `test_let_evaluation`,
   `test_nonlinear_term_rewrites`, `test_process_relations_in_ast`, `test_relations`,
   `test_simplification_on_unbound_vars`, `test_state_compression_functions`,
@@ -104,6 +104,20 @@ The two `UltimateAutomizer` timeouts (`Primes_true-unreach-call.c_1657.smt2`,
 evaluation while other processes were competing for the machine; re-run on an idle machine, both
 strategies report `unsat`, and it is counted as an agreement above. No formula produced a verdict
 from one strategy and an error or a timeout from the other.
+
+### `Problem17_label54_false-unreach-call.c_7`
+
+| Configuration | Result |
+|---|---|
+| `--use-dpllt-automata --fast -O all --astp-cse` | `sat` in 4.5 s |
+| the same without `--use-dpllt-automata` | `Lace fatal error: Task stack overflow`, after 4 min |
+
+The verdict is not cross-checked against a second configuration: the ordinary evaluation aborts inside
+the MTBDD backend on this input, which is a pre-existing limit unrelated to this strategy. `sat` is what
+the benchmark's `false-unreach-call` name indicates.
+
+This formula is what showed that `linearize`'s growth guard was blocking the rewrite it exists for; see
+`OPTIMIZATION_PIPELINE.md`, tier 2.
 
 ### How often the strategy applies
 

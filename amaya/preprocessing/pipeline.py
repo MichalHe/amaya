@@ -75,7 +75,14 @@ class Pass_Descriptor:
     """Hard cap on invocations per pipeline run. None = unlimited (bounded by the fixpoint)."""
 
     growth_factor_limit: Optional[float] = None
-    """If the pass increases the node count by more than this factor, its result is discarded."""
+    """
+    If the pass increases the node count by more than this factor, its result is discarded.
+
+    None disables the guard, which is right for a pass whose growth is the point rather than a symptom.
+    Node count is a proxy for the cost of the formula, and it is a poor one wherever a rewrite trades
+    nodes for something the node count does not see - the automaton for a congruence has states on the
+    order of its modulus, so `linearize` removing one costs nodes and saves far more than it costs.
+    """
 
     requires_referenced_vars: bool = False
     """Scheduler runs `fill_referenced_vars` first if the annotation may be stale."""
@@ -272,7 +279,13 @@ def _registry_definition() -> List[Pass_Descriptor]:
         Pass_Descriptor(
             name='linearize', config_flag='linearize_congruences',
             run=lambda ast, ctx: var_bounds_lib.linearize_congruences(ast),
-            tier=Pass_Tier.HEAVY, max_runs=1, growth_factor_limit=1.2,
+            # No growth guard: node count is not a proxy for what this pass costs or saves. The
+            # automaton for a congruence has states on the order of its modulus, so replacing one of
+            # modulus 299909 by an equation removes ~300k states in exchange for four nodes - the
+            # growth is the point of the pass, not a symptom to ration. Its output is bounded anyway:
+            # `unbound_vars._should_linearize` declines a congruence whose variable range spans more
+            # than four strides, and `max_runs=1` bounds the applications.
+            tier=Pass_Tier.HEAVY, max_runs=1, growth_factor_limit=None,
             consumes=frozenset({ATOM_REWRITTEN, BOUNDS_TIGHTENED}),
             produces=frozenset({ATOM_REWRITTEN, EQUALITY_EXPOSED}),
         ),

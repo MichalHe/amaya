@@ -545,9 +545,11 @@ Two properties of that admission are recorded at the point of use:
    variables a quantifier binds inside the formula handed over and disables it below a negation, where
    the quantifier is universal from the outside and no value may be chosen without loss of generality.
    The explicit-bounds argument is unaffected.
-2. `linearize` carries `growth_factor_limit=1.2` and the rewrite adds four nodes, so the pipeline
-   discards the linearization of an assertion smaller than about twenty nodes. Admitting the pass
-   therefore changes nothing for small assertions.
+2. `linearize` carried `growth_factor_limit=1.2` and the rewrite adds four nodes, so the pipeline
+   discarded the linearization of any assertion smaller than about twenty nodes - which is most of
+   them, and exactly where a congruence dominates the cost. The guard is now removed for that pass
+   (`amaya/preprocessing/pipeline.py:_registry_definition`): node count is not a proxy for what a
+   congruence costs, since its automaton has states on the order of its modulus.
 
 The remaining passes are unclassified, so `restricted` applies only `linearize` - and only when
 `-O linearize` has also enabled it in the registry.

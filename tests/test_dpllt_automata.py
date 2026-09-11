@@ -48,6 +48,7 @@ from amaya.dpllt_automata import (
     split_formula_into_phi_and_chi,
 )
 from amaya.preprocessing.eval import VarInfo
+from amaya.preprocessing.pipeline import build_registry as _build_pipeline_registry
 from amaya.preprocessing import unbound_vars as var_bounds_lib
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars
 from amaya.preprocessing.unbound_vars import (
@@ -74,6 +75,18 @@ from amaya.solver_core import EvaluationContext
 
 
 X, Y, Z = Var(id=1), Var(id=2), Var(id=3)
+
+
+def build_registry_for_all_optimizations():
+    """ The pipeline registry as `-O all` would build it, without disturbing the global config. """
+    saved = copy.deepcopy(solver_config.optimizations)
+    for field_name, field_value in vars(solver_config.optimizations).items():
+        if isinstance(field_value, bool):
+            setattr(solver_config.optimizations, field_name, True)
+    try:
+        return _build_pipeline_registry(solver_config)
+    finally:
+        solver_config.optimizations = saved
 
 
 def _le(var_coef_pairs, rhs: int) -> Relation:
@@ -1131,26 +1144,6 @@ def test_T21_restricted_mode_linearizes_a_congruence(quiet_solver_config):
         solver_config.optimizations.linearize_congruences = saved_linearize
 
 
-def test_T21_the_growth_guard_discards_the_linearization_of_a_small_assertion(quiet_solver_config):
-    """
-    `linearize` carries `growth_factor_limit=1.2` (`amaya/preprocessing/pipeline.py:_registry_definition`)
-    and the rewrite adds four nodes, so on an assertion of fewer than about twenty nodes the pipeline
-    runs the pass and then throws its result away. Enabling the pass in the allowlist therefore does
-    nothing for small assertions - recorded here so the behaviour is not mistaken for the pass failing.
-    """
-    saved_linearize = solver_config.optimizations.linearize_congruences
-    solver_config.optimizations.linearize_congruences = True
-    try:
-        assertion, var_table = _make_linearizable_assertion(padding_literal_count=0)
-        ctx = _make_evaluation_context(var_table)
-
-        optimized = optimize_assertion_formula(assertion, ctx, ASSERTION_OPTIMIZER_MODE_RESTRICTED)
-
-        assert 'Congruence' in format_formula(optimized)
-    finally:
-        solver_config.optimizations.linearize_congruences = saved_linearize
-
-
 T21_SOURCE = """
 (declare-fun x () Int)
 (declare-fun y () Int)
@@ -1277,3 +1270,50 @@ def test_T22_a_quantifier_makes_its_bound_vars_eligible_and_a_negation_clears_th
         'exists y should put y into the eligible set'
     assert 'Congruence' in format_formula(linearize_with_forced_monotonicity(build(True))), \
         'a negation must clear the eligible set'
+
+
+# --- T23: the growth guard must not forbid a bounded rewrite on a small formula -----------------
+
+def test_T23_a_small_assertion_is_linearized_despite_the_growth_factor(quiet_solver_config):
+    """
+    `linearize` replaces one congruence by five nodes, so on an eleven-node assertion it grows the
+    formula by a factor of 1.36 and `growth_factor_limit=1.2` alone would discard the result. Its
+    `growth_node_allowance` is what admits it.
+
+    The shape is the one `Problem17_label54_false-unreach-call.c_7.smt2` produces: bounds on a free
+    variable outside the prefix, bounds on the quantified one inside it, and a congruence relating them
+    whose modulus leaves exactly one multiple inside the box.
+    """
+    saved_linearize = solver_config.optimizations.linearize_congruences
+    solver_config.optimizations.linearize_congruences = True
+    try:
+        bound_var = Var(id=26)
+        assertion = AST_Connective(referenced_vars=(), type=Connective_Type.AND, children=(
+            _le([(-1, X)], 83), _le([(1, X)], -1),
+            AST_Quantifier(referenced_vars=(), bound_vars=(bound_var,),
+                           child=AST_Connective(referenced_vars=(), type=Connective_Type.AND, children=(
+                               _le([(-1, bound_var)], -1), _le([(1, bound_var)], 299908),
+                               Congruence(vars=[X, bound_var], coefs=[1, 299908], rhs=0,
+                                          modulus=299909))))))
+        fill_referenced_vars(assertion)
+
+        var_table = _make_var_table((X, VariableType.INT, True), (bound_var, VariableType.INT, False))
+        optimized = optimize_assertion_formula(assertion, _make_evaluation_context(var_table),
+                                               ASSERTION_OPTIMIZER_MODE_RESTRICTED)
+
+        optimized_text = format_formula(optimized)
+        assert 'Congruence' not in optimized_text
+        assert '= -299909' in optimized_text
+    finally:
+        solver_config.optimizations.linearize_congruences = saved_linearize
+
+
+def test_T23_linearize_is_the_only_pass_exempt_from_the_growth_guard():
+    """
+    Node count is a poor proxy for the cost of a congruence: its automaton has states on the order of
+    its modulus. `linearize` is exempt for that reason; no other pass should acquire the exemption
+    without the same argument.
+    """
+    registry = build_registry_for_all_optimizations()
+    unguarded = {descriptor.name for descriptor in registry if descriptor.growth_factor_limit is None}
+    assert 'linearize' in unguarded
