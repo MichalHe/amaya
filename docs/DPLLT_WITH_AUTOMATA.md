@@ -540,8 +540,11 @@ Two properties of that admission are recorded at the point of use:
    at that end (`is_c_best_from_below` / `is_c_best_from_above`). That preserves the solution set over
    the free variables only when the narrowed variable is quantified inside the formula the pass was
    handed; for a free variable shared with `phi` it preserves satisfiability alone, and monotonicity is
-   computed over the assertion, which does not see `phi`. This is the part to suspect if a verdict
-   moves between `none` and `restricted`.
+   computed over the assertion, which does not see `phi`. `_restrict_descriptor_to_an_assertion`
+   therefore passes `restrict_monotonicity_to_bound_vars=True`, which confines that argument to the
+   variables a quantifier binds inside the formula handed over and disables it below a negation, where
+   the quantifier is universal from the outside and no value may be chosen without loss of generality.
+   The explicit-bounds argument is unaffected.
 2. `linearize` carries `growth_factor_limit=1.2` and the rewrite adds four nodes, so the pipeline
    discards the linearization of an assertion smaller than about twenty nodes. Admitting the pass
    therefore changes nothing for small assertions.

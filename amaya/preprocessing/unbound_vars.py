@@ -12,6 +12,7 @@ from math import gcd
 from typing import (
     Any,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Optional,
@@ -2585,7 +2586,24 @@ def _should_linearize(x_var_spec: Linearized_Var_Spec, y_var_spec: Linearized_Va
     return True
 
 
-def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_Context_Var_Values, monotonicity: Monotonicity_Info) -> AST_Connective | None:
+def _attempt_congruence_linearization(congruence: Congruence,
+                                      contexter: Parent_Context_Var_Values,
+                                      monotonicity: Monotonicity_Info,
+                                      monotonicity_eligible_vars: Optional[FrozenSet[Var]] = None) -> AST_Connective | None:
+    """
+    Replace `congruence` by the linear equations it has inside the box its variables' bounds describe,
+    or return None when that is not possible.
+
+    A variable is bounded either explicitly, by bounds asserted in an enclosing conjunction, or
+    implicitly, by occurring monotonically so that a window of one modulus at the relevant bound
+    contains a representative of every congruence class. The second argument is sound for the formula's
+    *satisfiability* but narrows the variable's range, so it does not preserve the solution set over a
+    variable the surrounding context also constrains.
+
+    `monotonicity_eligible_vars` restricts the implicit argument to the variables listed in it; None
+    places no restriction, which is the behaviour every caller had before the parameter existed. See
+    `linearize_congruences`.
+    """
     if len(congruence.vars) != 2:
         return None
 
@@ -2603,6 +2621,13 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
 
             var_ranges.append((var_bounds.lower_limit, var_bounds.upper_limit))
             continue
+
+        if monotonicity_eligible_vars is not None and var not in monotonicity_eligible_vars:
+            # The caller restricted the monotonicity argument and `var` is not covered: it is not bound
+            # by a quantifier inside the formula this pass was handed, or the congruence sits under a
+            # negation. Narrowing its range would then drop solutions the caller relies on.
+            can_linearize = False
+            break
 
         # Check if the variable domain is implicitly finite because of monotonicity
         var_monotonicity = monotonicity.seen_vars.get(var, Var_Monotonicity())
@@ -2695,12 +2720,16 @@ def _attempt_congruence_linearization(congruence: Congruence, contexter: Parent_
     return or_node
 
 
-def _linearize_congruences(root: ASTp_Node, contexter: Parent_Context_Var_Values, monotonicity: Monotonicity_Info) -> ASTp_Node:
+def _linearize_congruences(root: ASTp_Node,
+                           contexter: Parent_Context_Var_Values,
+                           monotonicity: Monotonicity_Info,
+                           monotonicity_eligible_vars: Optional[FrozenSet[Var]] = None) -> ASTp_Node:
     match root:
         case BoolLiteral() | Var() | Relation():
             return root
         case Congruence():
-            linearized_congruence = _attempt_congruence_linearization(root, contexter, monotonicity)
+            linearized_congruence = _attempt_congruence_linearization(root, contexter, monotonicity,
+                                                                     monotonicity_eligible_vars)
             if linearized_congruence:
                 return linearized_congruence
             return root
@@ -2708,7 +2737,8 @@ def _linearize_congruences(root: ASTp_Node, contexter: Parent_Context_Var_Values
         case AST_Connective():
             def _linearize_isolated_subtree(subtree: ASTp_Node) -> ASTp_Node:
                 contexter.enter_context()
-                new_subtree = _linearize_congruences(subtree, contexter, monotonicity)
+                new_subtree = _linearize_congruences(subtree, contexter, monotonicity,
+                                                     monotonicity_eligible_vars)
                 contexter.exit_context()
                 return new_subtree
 
@@ -2717,7 +2747,9 @@ def _linearize_congruences(root: ASTp_Node, contexter: Parent_Context_Var_Values
                 contexter.enter_context()
 
                 _insert_all_asserting_bounds_into_current_context(root, contexter)
-                _optimized_subtrees = tuple(_linearize_congruences(subtree, contexter, monotonicity) for subtree in root.children)
+                _optimized_subtrees = tuple(_linearize_congruences(subtree, contexter, monotonicity,
+                                                                   monotonicity_eligible_vars)
+                                            for subtree in root.children)
 
                 contexter.exit_context()
             else:
@@ -2726,24 +2758,43 @@ def _linearize_congruences(root: ASTp_Node, contexter: Parent_Context_Var_Values
             return root.replace_children(_optimized_subtrees)
 
         case AST_Negation():
+            # Under a negation the monotonicity argument does not hold: the quantifier it reasons about
+            # is universal from the outside, so no value of the variable may be picked "without loss of
+            # generality". Every variable becomes ineligible for the rest of this subtree.
+            eligible_vars_below = frozenset() if monotonicity_eligible_vars is not None else None
             contexter.enter_context()
-            subtree = _linearize_congruences(root.child, contexter, monotonicity)
+            subtree = _linearize_congruences(root.child, contexter, monotonicity, eligible_vars_below)
             contexter.exit_context()
             return AST_Negation(referenced_vars=root.referenced_vars, child=subtree)
 
         case AST_Quantifier():
-            subtree = _linearize_congruences(root.child, contexter, monotonicity)
+            eligible_vars_below = (monotonicity_eligible_vars | frozenset(root.bound_vars)
+                                   if monotonicity_eligible_vars is not None else None)
+            subtree = _linearize_congruences(root.child, contexter, monotonicity, eligible_vars_below)
             return AST_Quantifier(referenced_vars=root.referenced_vars, bound_vars=root.bound_vars, child=subtree)
 
         case _:
             raise NotImplementedError(f'Node {type(root)} not handled when doing congruence linearization.')
 
 
-def linearize_congruences(root: ASTp_Node) -> ASTp_Node:
+def linearize_congruences(root: ASTp_Node, restrict_monotonicity_to_bound_vars: bool = False) -> ASTp_Node:
+    """
+    Replace congruences by the linear equations they have inside the box their variables' bounds
+    describe, wherever `_attempt_congruence_linearization` can do so.
+
+    With `restrict_monotonicity_to_bound_vars`, a variable bounded only by the monotonicity argument is
+    linearized only when it is bound by a quantifier inside `root` and the congruence does not sit under
+    a negation. That argument narrows the variable's range, which preserves satisfiability but not the
+    solution set, so it is admissible for a variable `root` quantifies away and not for one the caller's
+    wider context also constrains. Callers that hand over a whole formula want the default, False;
+    callers that hand over a fragment whose free variables are constrained elsewhere - such as
+    `amaya.dpllt_automata.optimize_assertion_formula` - want True.
+    """
     contexter = Parent_Context_Var_Values()
 
     monotonicity = Monotonicity_Info()
     _determine_monotonicity_of_variables(root, monotonicity, is_positive=True)
 
-    opt = _linearize_congruences(root, contexter, monotonicity)
+    eligible_vars = frozenset() if restrict_monotonicity_to_bound_vars else None
+    opt = _linearize_congruences(root, contexter, monotonicity, eligible_vars)
     return opt

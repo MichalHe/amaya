@@ -44,6 +44,7 @@ two independent binders and report UNSAT for satisfiable formulae.
 from __future__ import annotations
 
 from collections import OrderedDict
+import dataclasses
 from dataclasses import dataclass, field
 from enum import IntEnum
 import sys
@@ -69,9 +70,9 @@ from amaya.parse import Evaluation_Result, convert_binary_model_into_decadic
 from amaya.preprocessing import flatten_bool_nary_connectives
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars
 from amaya.preprocessing.eval import VarInfo
-from amaya.preprocessing.pipeline import Optimization_Pipeline, build_registry
+from amaya.preprocessing.pipeline import Optimization_Pipeline, Pass_Descriptor, build_registry
 from amaya.preprocessing.structural_id import Structural_Id_Table, compute_structural_id
-from amaya.preprocessing.unbound_vars import push_negations_towards_atoms
+from amaya.preprocessing.unbound_vars import linearize_congruences, push_negations_towards_atoms
 from amaya.relations_structures import (
     AST_Connective,
     AST_Negation,
@@ -1327,6 +1328,30 @@ def _referenced_vars_of_node(node: ASTp_Node) -> FrozenSet[Var]:
 # Optimizing the assertion
 # ---------------------------------------------------------------------------------------------
 
+def _restrict_descriptor_to_an_assertion(descriptor: Pass_Descriptor) -> Pass_Descriptor:
+    """
+    A pass descriptor whose behaviour is narrowed to what is admissible on a single assertion.
+
+    `linearize` bounds a variable either from bounds asserted around it or from the variable occurring
+    monotonically, and the second argument narrows the variable's range - which preserves
+    satisfiability but not the solution set. On an assertion that is admissible only for a variable the
+    assertion itself quantifies away, since a free variable is constrained by `phi` as well, and
+    monotonicity is computed over the assertion, which does not see `phi`. Passing
+    `restrict_monotonicity_to_bound_vars` confines that argument to the assertion's own bound variables
+    and disables it under a negation
+    (`amaya.preprocessing.unbound_vars.linearize_congruences`).
+
+    Descriptors with nothing to narrow are returned unchanged.
+    """
+    if descriptor.name != 'linearize':
+        return descriptor
+
+    return dataclasses.replace(
+        descriptor,
+        run=lambda ast, ctx: linearize_congruences(ast, restrict_monotonicity_to_bound_vars=True),
+    )
+
+
 def optimize_assertion_formula(assertion: ASTp_Node,
                                ctx: EvaluationContext,
                                assertion_optimizer_mode: str) -> ASTp_Node:
@@ -1351,7 +1376,7 @@ def optimize_assertion_formula(assertion: ASTp_Node,
 
     registry = build_registry(solver_config)
     if assertion_optimizer_mode == ASSERTION_OPTIMIZER_MODE_RESTRICTED:
-        registry = [descriptor for descriptor in registry
+        registry = [_restrict_descriptor_to_an_assertion(descriptor) for descriptor in registry
                     if descriptor.name in ASSERTION_OPTIMIZER_SOLUTION_SET_PRESERVING_PASSES]
 
     if not registry:

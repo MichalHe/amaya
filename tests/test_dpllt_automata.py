@@ -48,7 +48,14 @@ from amaya.dpllt_automata import (
     split_formula_into_phi_and_chi,
 )
 from amaya.preprocessing.eval import VarInfo
+from amaya.preprocessing import unbound_vars as var_bounds_lib
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars
+from amaya.preprocessing.unbound_vars import (
+    Monotonicity_Info,
+    Parent_Context_Var_Values,
+    Var_Monotonicity,
+    _attempt_congruence_linearization,
+)
 from amaya.relations_structures import (
     AST_Connective,
     AST_Negation,
@@ -57,6 +64,7 @@ from amaya.relations_structures import (
     Congruence,
     Connective_Type,
     Relation,
+    Value_Interval,
     Var,
     VariableType,
     format_formula,
@@ -1169,3 +1177,103 @@ def test_T21_the_verdict_does_not_depend_on_the_assertion_optimizer_mode(quiet_s
         _compare_verdicts_tolerating_shared_evaluator_defects(T21_SOURCE)
     finally:
         solver_config.optimizations.linearize_congruences = saved_linearize
+
+
+# --- T22: the monotonicity branch of the linearization is confined to bound variables -----------
+
+def _attempt_linearization_with_monotonicity(congruence, explicitly_bounded, monotone_var,
+                                            monotonicity_eligible_vars):
+    """
+    Drive `_attempt_congruence_linearization` with a hand-built analysis, so that the monotonicity
+    branch is definitely the one under test rather than whatever `_determine_monotonicity_of_variables`
+    happens to infer.
+
+    `explicitly_bounded` maps a variable to a two-sided interval; `monotone_var` gets an upper bound
+    only, plus an increasing occurrence, which is what `is_c_best_from_below` reads.
+    """
+    contexter = Parent_Context_Var_Values()
+    contexter.enter_context()
+    for var, (lower, upper) in explicitly_bounded.items():
+        contexter.assert_new_var_value(var, Value_Interval(lower_limit=lower, upper_limit=upper))
+    contexter.assert_new_var_value(monotone_var, Value_Interval(lower_limit=None, upper_limit=40))
+
+    monotonicity = Monotonicity_Info()
+    monotonicity.seen_vars[monotone_var] = Var_Monotonicity(increasing=True, decreasing=False)
+
+    return _attempt_congruence_linearization(congruence, contexter, monotonicity,
+                                             monotonicity_eligible_vars)
+
+
+def test_T22_the_monotonicity_branch_fires_when_unrestricted():
+    """ Establishes the baseline: with no restriction the branch linearizes a one-sidedly bounded var. """
+    congruence = Congruence(vars=[X, Y], coefs=[-1, 1], rhs=0, modulus=7)
+
+    outcome = _attempt_linearization_with_monotonicity(
+        congruence, explicitly_bounded={X: (0, 10)}, monotone_var=Y, monotonicity_eligible_vars=None)
+
+    assert outcome is not None, 'the monotonicity branch must fire without a restriction, or T22 is vacuous'
+
+
+def test_T22_the_monotonicity_branch_is_declined_for_a_variable_not_in_the_eligible_set():
+    """ A free variable of the assertion is constrained by phi too, so narrowing its range is refused. """
+    congruence = Congruence(vars=[X, Y], coefs=[-1, 1], rhs=0, modulus=7)
+
+    outcome = _attempt_linearization_with_monotonicity(
+        congruence, explicitly_bounded={X: (0, 10)}, monotone_var=Y,
+        monotonicity_eligible_vars=frozenset())
+
+    assert outcome is None
+
+
+def test_T22_the_monotonicity_branch_is_allowed_for_a_variable_in_the_eligible_set():
+    """ A variable the formula quantifies away may be narrowed; the restriction is not a blanket ban. """
+    congruence = Congruence(vars=[X, Y], coefs=[-1, 1], rhs=0, modulus=7)
+
+    outcome = _attempt_linearization_with_monotonicity(
+        congruence, explicitly_bounded={X: (0, 10)}, monotone_var=Y,
+        monotonicity_eligible_vars=frozenset((Y,)))
+
+    assert outcome is not None
+
+
+def test_T22_the_explicit_bounds_branch_is_unaffected_by_the_restriction():
+    """ Both variables two-sidedly bounded: the restriction must not touch that path. """
+    congruence = Congruence(vars=[X, Y], coefs=[1, 299908], rhs=0, modulus=299909)
+    contexter = Parent_Context_Var_Values()
+    contexter.enter_context()
+    contexter.assert_new_var_value(X, Value_Interval(lower_limit=-83, upper_limit=-1))
+    contexter.assert_new_var_value(Y, Value_Interval(lower_limit=1, upper_limit=299908))
+
+    for eligible in (None, frozenset()):
+        outcome = _attempt_congruence_linearization(congruence, contexter, Monotonicity_Info(), eligible)
+        assert outcome is not None, f'declined with monotonicity_eligible_vars={eligible}'
+
+
+def test_T22_a_quantifier_makes_its_bound_vars_eligible_and_a_negation_clears_them():
+    """
+    The eligibility set is threaded through the recursion: `exists y` adds `y` to it, and descending
+    into a negation empties it.
+
+    Driven through `_linearize_congruences` with a hand-built analysis rather than through
+    `linearize_congruences`, so that the test measures the threading and not what
+    `_determine_monotonicity_of_variables` happens to infer about `y`.
+    """
+    def build(under_negation: bool):
+        congruence = Congruence(vars=[X, Y], coefs=[-1, 1], rhs=0, modulus=7)
+        body = AST_Connective(referenced_vars=(), type=Connective_Type.AND, children=(
+            _le([(-1, X)], 0), _le([(1, X)], 10), _le([(1, Y)], 40),
+            dsl._neg(congruence) if under_negation else congruence))
+        formula = AST_Quantifier(referenced_vars=(), bound_vars=(Y,), child=body)
+        fill_referenced_vars(formula)
+        return formula
+
+    def linearize_with_forced_monotonicity(formula):
+        monotonicity = Monotonicity_Info()
+        monotonicity.seen_vars[Y] = Var_Monotonicity(increasing=True, decreasing=False)
+        return var_bounds_lib._linearize_congruences(formula, Parent_Context_Var_Values(), monotonicity,
+                                                    frozenset())
+
+    assert 'Congruence' not in format_formula(linearize_with_forced_monotonicity(build(False))), \
+        'exists y should put y into the eligible set'
+    assert 'Congruence' in format_formula(linearize_with_forced_monotonicity(build(True))), \
+        'a negation must clear the eligible set'

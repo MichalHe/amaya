@@ -26,6 +26,7 @@ selected by `--use-dpllt-automata`.
 | §6.5b, §6.6 | `find_bounds_refutation` plus core blocking, added after the design was written; covered by T18 | Done |
 | §6.5b rules R4, R5 | Relation-minimum and bound propagation, with justification propagation in place of a derivation graph; covered by T19 | Done |
 | §6.5b rule R0 | A literal and its negation, both asserted; covered by T20 | Done |
+| §7.2 | `linearize` admitted to the allowlist, with its monotonicity argument confined to the variables the assertion quantifies; covered by T21, T22 | Done |
 | §10, §16 item 2 | `--dpllt-count-abstraction-models` / `--dpllt-abstraction-model-limit`, added after the design was written; covered by T17. Makes the worst-case iteration count measurable per formula without constructing an automaton, but no benchmark set has been measured with it | Done |
 | §7.2 | Classification of every pipeline pass as solution-set-preserving or not | **Partly done.** `linearize` is classified and admitted; the other 17 are not, so `restricted` applies that one pass only |
 | §16 | The ten unmeasured quantities | **Not measured.** Items 1 and 2 are partially addressed by the engagement figures below; the rest are untouched |
@@ -77,9 +78,9 @@ Commands are given relative to the repository root; every number below was produ
 
 ### Unit and end-to-end tests
 
-- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 72 passed (T1-T21; the end-to-end
+- `venv/bin/python -m pytest tests/test_dpllt_automata.py -q`: 77 passed (T1-T22; the end-to-end
   ones are parameterized over the native and MTBDD backends).
-- `venv/bin/python -m pytest tests/ -q` (250 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
+- `venv/bin/python -m pytest tests/ -q` (255 passed, 8 skipped, 1 xfailed) with the nine test modules that fail to *collect* on
   `master` excluded (`test_antiprenexing`, `test_div_support`, `test_let_evaluation`,
   `test_nonlinear_term_rewrites`, `test_process_relations_in_ast`, `test_relations`,
   `test_simplification_on_unbound_vars`, `test_state_compression_functions`,
