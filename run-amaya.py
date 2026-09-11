@@ -39,6 +39,7 @@ from amaya import logger, shard_logger
 from amaya import solver_core as core
 from amaya import parse
 from amaya.config import (
+    ASSERTION_OPTIMIZER_MODES,
     BackendType,
     MinimizationAlgorithms,
     solver_config,
@@ -156,6 +157,106 @@ argparser.add_argument('--toplevel-sat-exact-blocking',
                              'Boolean assignment exactly, instead of blocking every assignment that agrees with it\n'
                              'on the variables the refuted residual actually depended on. Strictly weaker pruning;\n'
                              'exists to measure what the generalized blocking clauses buy. See SAT_TOP_LEVEL.md.'))
+
+argparser.add_argument('--use-dpllt-automata',
+                       action='store_true',
+                       dest='use_dpllt_automata',
+                       default=False,
+                       help=('(EXPERIMENTAL) Split the formula into a general part and a part whose quantifiers are\n'
+                             'all positive-existential, abstract the literals of the latter into a monotone Boolean\n'
+                             'formula, and enumerate its minimal implicants with a SAT solver: each implicant is\n'
+                             'asserted as a conjunction of literals, evaluated with automata, and intersected with\n'
+                             'the automaton for the general part, which is built once. Formulae with no such part,\n'
+                             'or whose such part contains no disjunction, fall through to the ordinary evaluation.\n'
+                             'Implies --astp-cse; --backend MTBDD is required for either automaton cache to be\n'
+                             'in play.\n'
+                             'Cannot be combined with --shard or --use-toplevel-sat. Requires python-sat.\n'
+                             'See docs/DPLLT_WITH_AUTOMATA.md.'))
+
+argparser.add_argument('--dpllt-assertion-optimizer',
+                       choices=ASSERTION_OPTIMIZER_MODES,
+                       dest='dpllt_assertion_optimizer',
+                       default=None,
+                       help=('(EXPERIMENTAL) Which passes the per-iteration assertion is optimized with.\n'
+                             '"none" hands it to the evaluator unoptimized; "restricted" (the default) filters the\n'
+                             'registry to the passes classified as preserving the assertion\'s solution set over its\n'
+                             'free variables - that classification has not been performed, so the set is empty and\n'
+                             'the mode behaves as "none"; "full" runs the whole enabled registry and is KNOWN TO BE\n'
+                             'UNSOUND here, since the pipeline contains passes that only preserve satisfiability of\n'
+                             'the whole formula. See docs/DPLLT_WITH_AUTOMATA.md, section 7.2.'))
+
+argparser.add_argument('--dpllt-no-implicant-minimization',
+                       action='store_true',
+                       dest='dpllt_no_implicant_minimization',
+                       default=False,
+                       help=('(EXPERIMENTAL) Assert every literal the SAT solver sets to true, instead of reducing\n'
+                             'the set to a minimal implicant of the abstraction first. Exists to measure what the\n'
+                             'minimization buys.'))
+
+argparser.add_argument('--dpllt-no-bounds-refutation',
+                       action='store_true',
+                       dest='dpllt_no_bounds_refutation',
+                       default=False,
+                       help=('(EXPERIMENTAL) Hand every asserted literal set to the automata engine, instead of\n'
+                             'first intersecting the unit bounds of its literals and refuting the assertion when\n'
+                             'they clash. With the check on (the default), the clashing pair is blocked instead of\n'
+                             'the whole implicant, which removes every literal set containing that pair. Exists to\n'
+                             'measure what the check buys.'))
+
+argparser.add_argument('--dpllt-no-bound-var-projection',
+                       action='store_true',
+                       dest='dpllt_no_bound_var_projection',
+                       default=False,
+                       help=('(EXPERIMENTAL) Assert the bare conjunction of literals instead of putting the binders\n'
+                             'they mention into an existential prefix over it, and read the verdict off the\n'
+                             'unprojected intersection. Both decide the formula; the prefix is what makes the\n'
+                             'assertion match the shapes the lazy and bounded-congruence constructions require.'))
+
+argparser.add_argument('--dpllt-prefix-cache-entries',
+                       type=int,
+                       dest='dpllt_prefix_cache_entries',
+                       default=None,
+                       metavar='N',
+                       help=('(EXPERIMENTAL) Bound the cache holding the automata of the prefixes of the asserted\n'
+                             'conjunction (default: 4096). 0 disables the cache.'))
+
+argparser.add_argument('--dpllt-show-existential-part',
+                       action='store_true',
+                       dest='dpllt_show_existential_part',
+                       default=False,
+                       help=('(EXPERIMENTAL) Print the positive-existential part (chi) that the split found and\n'
+                             'exit without evaluating anything. Implies --use-dpllt-automata. The formula printed\n'
+                             'is the split\'s own output, before its binders are renamed apart, so its variable ids\n'
+                             'are those of the input formula rather than those the per-iteration logs show. A\n'
+                             'formula the strategy would decline prints an empty part instead of being evaluated.'))
+
+argparser.add_argument('--dpllt-count-abstraction-models',
+                       action='store_true',
+                       dest='dpllt_count_abstraction_models',
+                       default=False,
+                       help=('(EXPERIMENTAL) Print how many models and how many minimal implicants the Boolean\n'
+                             'abstraction of the positive-existential part (chi) has, and exit without evaluating\n'
+                             'anything. Implies --use-dpllt-automata. The minimal implicant count is the number of\n'
+                             'theory calls the loop makes when every assertion it builds is refuted, i.e. its\n'
+                             'worst case on this formula. No automaton is constructed, so this reports on formulae\n'
+                             'the loop itself could not finish. See --dpllt-abstraction-model-limit.'))
+
+argparser.add_argument('--dpllt-abstraction-model-limit',
+                       type=int,
+                       dest='dpllt_abstraction_model_enumeration_limit',
+                       default=None,
+                       metavar='N',
+                       help=('(EXPERIMENTAL) Stop either enumeration of --dpllt-count-abstraction-models after N\n'
+                             'models and report a lower bound instead (default 1000000). A formula with n\n'
+                             'abstracted literals admits up to 2**n models.'))
+
+argparser.add_argument('--dpllt-report',
+                       action='store_true',
+                       dest='dpllt_report',
+                       default=False,
+                       help=('(EXPERIMENTAL) Log the DPLL(T) per-run counters (iterations, asserted literals before\n'
+                             'and after minimization, cache hits, automaton sizes) after the loop finishes.\n'
+                             'Requires --verbose to be visible.'))
 
 # --opt-fixpoint / --opt-budget / --opt-report are NOT -O options and must stay out of
 # `opt_to_config_field`: `-O all` iterates that table and would otherwise flip the pipeline on for
@@ -577,14 +678,52 @@ if args.use_toplevel_sat and args.sharding_enabled:
           'top-level conjunction and cannot be combined.', file=sys.stderr)
     sys.exit(1)
 
+# `--use-dpllt-automata` is a third top-level driver replacing the same `evaluate_prepared_formula`
+# callback, so it excludes both of the above for the same reason they exclude each other. See
+# `docs/DPLLT_WITH_AUTOMATA.md`.
+if args.use_dpllt_automata and args.sharding_enabled:
+    print('Error: --use-dpllt-automata and --shard are two different strategies for decomposing the same '
+          'top-level conjunction and cannot be combined.', file=sys.stderr)
+    sys.exit(1)
+
+if args.use_dpllt_automata and args.use_toplevel_sat:
+    print('Error: --use-dpllt-automata and --use-toplevel-sat are two different top-level drivers and '
+          'cannot be combined.', file=sys.stderr)
+    sys.exit(1)
+
+# `--dpllt-show-existential-part` and `--dpllt-count-abstraction-models` are debug views of the split
+# and of its abstraction, which only this strategy performs, so they select the strategy rather than
+# being silently ignored without --use-dpllt-automata.
+solver_config.dpllt_automata.enabled = (args.use_dpllt_automata or args.dpllt_show_existential_part
+                                        or args.dpllt_count_abstraction_models)
+solver_config.dpllt_automata.use_bounds_refutation = not args.dpllt_no_bounds_refutation
+solver_config.dpllt_automata.show_positive_existential_part = args.dpllt_show_existential_part
+solver_config.dpllt_automata.count_abstraction_models = args.dpllt_count_abstraction_models
+if args.dpllt_abstraction_model_enumeration_limit is not None:
+    solver_config.dpllt_automata.abstraction_model_enumeration_limit = args.dpllt_abstraction_model_enumeration_limit
+if args.dpllt_assertion_optimizer is not None:
+    solver_config.dpllt_automata.assertion_optimizer = args.dpllt_assertion_optimizer
+if args.dpllt_no_implicant_minimization:
+    solver_config.dpllt_automata.minimize_implicants = False
+if args.dpllt_no_bound_var_projection:
+    solver_config.dpllt_automata.project_bound_vars = False
+if args.dpllt_prefix_cache_entries is not None:
+    solver_config.dpllt_automata.prefix_cache_max_entries = args.dpllt_prefix_cache_entries
+if args.dpllt_report:
+    solver_config.dpllt_automata.report = True
+
 
 def get_evaluation_strategy():
     """
     The `evaluate_prepared_formula` callback handed to `parse.perform_whole_evaluation_on_source_text`.
 
-    `amaya.sat_toplevel` is imported lazily (like `amaya.cse_cache` below) so that the python-sat
-    dependency is only ever touched when the feature is explicitly requested.
+    `amaya.sat_toplevel` and `amaya.dpllt_automata` are imported lazily (like `amaya.cse_cache` below)
+    so that the python-sat dependency is only ever touched when the feature is explicitly requested.
     """
+    if solver_config.dpllt_automata.enabled:
+        from amaya.dpllt_automata import evaluate_prepared_formula_with_dpllt_automata
+        return evaluate_prepared_formula_with_dpllt_automata
+
     if not args.use_toplevel_sat:
         return parse.evaluate_prepared_formula_with_automata
 

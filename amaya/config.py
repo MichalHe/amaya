@@ -209,6 +209,92 @@ class OptimizationPipelineConfig:
     """
 
 
+ASSERTION_OPTIMIZER_MODE_NONE = 'none'
+ASSERTION_OPTIMIZER_MODE_RESTRICTED = 'restricted'
+ASSERTION_OPTIMIZER_MODE_FULL = 'full'
+
+ASSERTION_OPTIMIZER_MODES = (ASSERTION_OPTIMIZER_MODE_NONE,
+                             ASSERTION_OPTIMIZER_MODE_RESTRICTED,
+                             ASSERTION_OPTIMIZER_MODE_FULL)
+
+
+@dataclass
+class DpllTAutomataConfig:
+    """
+    (EXPERIMENTAL) Configuration of the DPLL(T)-style top-level strategy implemented in
+    `amaya/dpllt_automata.py`. See `docs/DPLLT_WITH_AUTOMATA.md`.
+    """
+
+    enabled: bool = False
+    """ Select `amaya.dpllt_automata.evaluate_prepared_formula_with_dpllt_automata` as the top-level driver. """
+
+    assertion_optimizer: str = ASSERTION_OPTIMIZER_MODE_RESTRICTED
+    """
+    Which passes the per-iteration assertion is optimized with; one of `ASSERTION_OPTIMIZER_MODES`.
+
+    `none` hands the assertion to the evaluator unoptimized. `restricted` runs the fixpoint pipeline
+    with the registry filtered to the passes classified as solution-set-preserving over free
+    variables (`amaya.dpllt_automata.ASSERTION_OPTIMIZER_SOLUTION_SET_PRESERVING_PASSES`, currently
+    empty, so `restricted` behaves as `none`). `full` runs the whole enabled registry and is known to
+    be unsound - see `docs/DPLLT_WITH_AUTOMATA.md` §7.2 - it exists to measure what the pipeline
+    would buy if the classification turned out favourable.
+    """
+
+    minimize_implicants: bool = True
+    """ Reduce the literal set the SAT solver reports to a minimal implicant of the abstraction. """
+
+    use_bounds_refutation: bool = True
+    """
+    Before the theory call, intersect the unit bounds of the asserted literals and, if they clash,
+    refute the assertion without constructing an automaton.
+
+    The clashing pair is an unsatisfiable subset of the assertion on its own, so the blocking clause
+    is built over those one or two literals instead of the whole implicant, which removes every
+    literal set containing them rather than only the supersets of this implicant. See
+    `amaya.dpllt_automata.find_bounds_refutation`.
+    """
+
+    project_bound_vars: bool = True
+    """
+    Retain the hoisted existential prefix on the assertion, so the bound variables are projected away
+    before the intersection with the automaton for the general part. With this off, the assertion is
+    the bare conjunction and the verdict is read off the unprojected intersection.
+    """
+
+    prefix_cache_max_entries: int = 4096
+    """ Bound on the conjunction-prefix automaton cache; 0 disables the cache. """
+
+    max_optimizer_invocations: Optional[int] = None
+    """ Cap on the total number of assertion-optimizer runs per solved formula; None = no cap. """
+
+    report: bool = False
+    """ Log the per-run counters after the loop finishes. """
+
+    show_positive_existential_part: bool = False
+    """
+    Print the positive-existential part the split found and exit without evaluating anything.
+
+    The formula printed is the split's own output, before its binders are renamed apart, so its
+    variable ids are those of the input formula. The display happens before either fall-through, so an
+    input the strategy would decline reports an empty part rather than being evaluated.
+    """
+
+    count_abstraction_models: bool = False
+    """
+    Print how many models and how many minimal implicants the Boolean abstraction of the
+    positive-existential part has, and exit without evaluating anything.
+
+    The minimal implicant count is the number of theory calls the loop makes when every assertion is
+    refuted. Constructs no automaton, so it reports on formulae the loop itself could not finish.
+    """
+
+    abstraction_model_enumeration_limit: int = 1000000
+    """
+    Cap on either enumeration performed by `count_abstraction_models`; a count that reaches it is
+    reported as a lower bound. A formula with `n` abstracted literals admits up to `2**n` models.
+    """
+
+
 @dataclass
 class PreprocessingConfig:
     perform_antiprenexing: bool = False
@@ -243,6 +329,9 @@ class SolverConfig(object):
 
     optimization_pipeline: OptimizationPipelineConfig = field(default_factory=OptimizationPipelineConfig)
     """Fixpoint scheduler configuration - see `OptimizationPipelineConfig`."""
+
+    dpllt_automata: DpllTAutomataConfig = field(default_factory=DpllTAutomataConfig)
+    """(Experimental) DPLL(T)-style top-level strategy configuration - see `DpllTAutomataConfig`."""
 
     backend: BackendConfig = field(default_factory=BackendConfig)
 
