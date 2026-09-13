@@ -190,17 +190,6 @@ def _registry_definition() -> List[Pass_Descriptor]:
 
         # --- Tier 1: CORE ------------------------------------------------------------------------
         Pass_Descriptor(
-            # Runs once, in the pipeline's first round: it consumes the congruence system it is handed
-            # and there is nothing for a second invocation to do. `self_triggering=False` keeps it from
-            # re-enqueueing itself, `max_runs=1` caps it should another pass re-enqueue it, and the
-            # NORMALIZE tier places it before the analyses that read bounds off the conjunction.
-            name='modular-bounds', config_flag='propagate_modular_bounds', run=_pass_modular_bounds,
-            tier=Pass_Tier.NORMALIZE, max_runs=1, self_triggering=False,
-            consumes=frozenset({NARY_SHAPE}),
-            produces=frozenset({ATOM_REWRITTEN, VAR_ELIMINATED, QUANTIFIER_SHAPE, NARY_SHAPE}),
-            requires_referenced_vars=True,
-        ),
-        Pass_Descriptor(
             name='var-bounds', config_flag='simplify_variable_bounds', run=_pass_var_bounds,
             tier=Pass_Tier.CORE,
             consumes=frozenset({ATOM_REWRITTEN, BOUNDS_TIGHTENED, NARY_SHAPE}),
@@ -291,6 +280,19 @@ def _registry_definition() -> List[Pass_Descriptor]:
             tier=Pass_Tier.HEAVY, max_runs=2, growth_factor_limit=1.2,
             consumes=frozenset({QUANTIFIER_SHAPE, ATOM_REWRITTEN}),
             produces=frozenset({ATOM_REWRITTEN, VAR_ELIMINATED}),
+        ),
+        Pass_Descriptor(
+            # Runs once, and in the HEAVY tier rather than earlier: the existential blocks it consumes -
+            # a conjunction of bounds with two or more congruences of one modulus - are *produced* by
+            # the NORMALIZE and CORE passes, so a pass scheduled before them is handed a formula in
+            # which the shape does not yet exist and declines every block. `max_runs=1` and
+            # `self_triggering=False` keep it to the single invocation it needs: it consumes the
+            # congruence system it is given and a second pass over its own output has nothing to do.
+            name='modular-bounds', config_flag='propagate_modular_bounds', run=_pass_modular_bounds,
+            tier=Pass_Tier.HEAVY, max_runs=1, self_triggering=False,
+            consumes=frozenset({NARY_SHAPE, QUANTIFIER_SHAPE, BOUNDS_TIGHTENED}),
+            produces=frozenset({ATOM_REWRITTEN, VAR_ELIMINATED, QUANTIFIER_SHAPE, NARY_SHAPE}),
+            requires_referenced_vars=True,
         ),
         Pass_Descriptor(
             name='linearize', config_flag='linearize_congruences',
