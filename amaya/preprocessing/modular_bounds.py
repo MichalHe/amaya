@@ -41,6 +41,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
+from amaya import logger
 from amaya.relations_structures import (
     AST_Connective,
     AST_Quantifier,
@@ -496,6 +497,27 @@ class Modular_Bound_Rewrite_Stats:
     vars_eliminated: int = 0
     witnesses_introduced: int = 0
 
+    declined_unhandled_shape: int = 0
+    """ Body not a conjunction, or congruences of more than one modulus. """
+
+    declined_nothing_determined: int = 0
+    """ No quantified variable is bounded, local to one congruence, and invertibly coefficiented there. """
+
+    declined_no_congruence_saved: int = 0
+    """
+    As many facts came out as congruences went in. Each fact costs a congruence of the same modulus
+    plus a witness variable, so the rewrite would be a rename. This is what a block holding a single
+    congruence always reduces to, and it is the common case.
+    """
+
+    def describe(self) -> str:
+        return (f'examined {self.blocks_examined} blocks, rewrote {self.blocks_rewritten} '
+                f'(eliminated {self.congruences_eliminated} congruences and {self.vars_eliminated} '
+                f'variables, emitted {self.facts_emitted} facts over {self.witnesses_introduced} '
+                f'witnesses); declined {self.declined_unhandled_shape} on shape, '
+                f'{self.declined_nothing_determined} with nothing determined, '
+                f'{self.declined_no_congruence_saved} that would have saved no congruence')
+
 
 def rewrite_quantifier_with_modular_bounds(quantifier: AST_Quantifier,
                                            var_table: Dict[Var, 'VarInfo'],
@@ -515,7 +537,13 @@ def rewrite_quantifier_with_modular_bounds(quantifier: AST_Quantifier,
     # unsound as a rewrite, since a weaker formula can be satisfiable where the original is not. The
     # residualisation itself is exact, so with folding off the rewrite preserves the solution set.
     derivation = derive_modular_bound_facts(quantifier, fold_shared_variables=False)
-    if derivation is None or not derivation.eliminated_vars:
+    if derivation is None:
+        stats.declined_unhandled_shape += 1
+        return quantifier
+    if not derivation.eliminated_vars:
+        stats.declined_nothing_determined += 1
+        logger.debug('Modular bounds: no variable of the block is determined by a congruence it is '
+                     'local to; leaving it alone.')
         return quantifier
 
     system = collect_congruence_system(quantifier)
@@ -527,6 +555,10 @@ def rewrite_quantifier_with_modular_bounds(quantifier: AST_Quantifier,
     # outright. Trading two congruences for two is a rename, not a simplification.
     emitted, eliminated = len(derivation.facts), derivation.eliminated_congruences
     if emitted >= eliminated:
+        stats.declined_no_congruence_saved += 1
+        logger.debug('Modular bounds: eliminating %d variable(s) would trade %d congruence(s) for %d '
+                     'fact(s), which saves none; leaving the block alone.',
+                     len(derivation.eliminated_vars), eliminated, emitted)
         return quantifier
 
     eliminated_vars = set(derivation.eliminated_vars)
@@ -549,6 +581,8 @@ def rewrite_quantifier_with_modular_bounds(quantifier: AST_Quantifier,
         conjuncts.append(congruence)
         conjuncts.extend(bounds)
 
+    logger.info('Modular bounds: eliminated %s and %d congruence(s) from a block, emitting %d fact(s).',
+                ', '.join(str(var) for var in derivation.eliminated_vars), eliminated, emitted)
     stats.blocks_rewritten += 1
     stats.congruences_eliminated += eliminated
     stats.facts_emitted += emitted
@@ -576,6 +610,9 @@ def propagate_modular_bounds(ast: ASTp_Node, var_table: Dict[Var, 'VarInfo'],
     rewritten = _rewrite_recursively(ast, var_table, stats)
     if stats.blocks_rewritten:
         fill_referenced_vars(rewritten)
+        logger.info('Modular bounds: %s', stats.describe())
+    else:
+        logger.debug('Modular bounds: %s', stats.describe())
     return rewritten
 
 
