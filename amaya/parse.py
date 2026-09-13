@@ -230,6 +230,10 @@ def _optimize_formula_structure_legacy(astp: ASTp_Node, var_table: Dict[Var, Var
         astp = var_bounds_lib.optimize_bottom_quantifiers(astp)
         logger.debug('Bottom quantifiers optimized. Result:  %s', astp)
 
+    if solver_config.optimizations.propagate_modular_bounds:
+        from amaya.preprocessing.modular_bounds import propagate_modular_bounds
+        astp = propagate_modular_bounds(astp, var_table)
+
     if solver_config.optimizations.linearize_congruences:
         astp = var_bounds_lib.linearize_congruences(astp)
 

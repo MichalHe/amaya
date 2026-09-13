@@ -155,6 +155,19 @@ class OptimizationsConfig:
         (exists ((y Int)) (and (<= (* 10 y) (* 9 x)) (<= (* 9 x) (+ (* 10 y) 9))))   --->   True
     """
 
+    propagate_modular_bounds: bool = False
+    """
+    (EXPERIMENTAL) Eliminate quantified variables that a congruence determines, carrying their bounds
+    forward as modular interval constraints.
+
+    Targets an existential block whose body conjoins hard bounds with congruences of one modulus - the
+    shape a machine-arithmetic encoding produces, where the modulus is `2**32`. A congruence of modulus
+    `m` costs an automaton on the order of `m`, so removing one is worth far more than the nodes it
+    costs. Applied only when it does not increase the congruence count and does decrease the number of
+    quantified variables. Runs once, in the pipeline's first round. See
+    `amaya/preprocessing/modular_bounds.py`.
+    """
+
     use_bounded_congruence_construction: bool = False
     """
     Build the automaton for an existentially quantified variable that is bounded from both sides and

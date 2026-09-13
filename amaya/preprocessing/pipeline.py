@@ -125,6 +125,11 @@ def _pass_unconstrained_vars(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
     return remove_atoms_satisfied_by_unconstrained_vars(ast, var_uses, desired_polarity=True)
 
 
+def _pass_modular_bounds(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
+    from amaya.preprocessing.modular_bounds import propagate_modular_bounds
+    return propagate_modular_bounds(ast, ctx.var_table)
+
+
 def _pass_dedup_connective_children(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
     return remove_duplicit_connective_children(ast)
 
@@ -184,6 +189,17 @@ def _registry_definition() -> List[Pass_Descriptor]:
         ),
 
         # --- Tier 1: CORE ------------------------------------------------------------------------
+        Pass_Descriptor(
+            # Runs once, in the pipeline's first round: it consumes the congruence system it is handed
+            # and there is nothing for a second invocation to do. `self_triggering=False` keeps it from
+            # re-enqueueing itself, `max_runs=1` caps it should another pass re-enqueue it, and the
+            # NORMALIZE tier places it before the analyses that read bounds off the conjunction.
+            name='modular-bounds', config_flag='propagate_modular_bounds', run=_pass_modular_bounds,
+            tier=Pass_Tier.NORMALIZE, max_runs=1, self_triggering=False,
+            consumes=frozenset({NARY_SHAPE}),
+            produces=frozenset({ATOM_REWRITTEN, VAR_ELIMINATED, QUANTIFIER_SHAPE, NARY_SHAPE}),
+            requires_referenced_vars=True,
+        ),
         Pass_Descriptor(
             name='var-bounds', config_flag='simplify_variable_bounds', run=_pass_var_bounds,
             tier=Pass_Tier.CORE,

@@ -372,6 +372,7 @@ opt_to_config_field = {
     'iso-conflicts': 'detect_isomorphic_conflicts',
     'linearize-similar-mod-terms': 'linearize_similar_mod_terms',
     'linearize': 'linearize_congruences',
+    'modular-bounds': 'propagate_modular_bounds',
     'purge-twice': 'do_interval_reasonining_twice',
     'opt-bottom-exists': 'optimize_bottom_quantifiers',
     'flatten-connectives': 'flatten_connectives',
