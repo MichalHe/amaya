@@ -13,9 +13,13 @@ equalities" hidden in disjunctions, e.g.:
 
 is rewritten (for n >= 2) into the quantifier-free formula:
 
-    (or alpha_1 alpha_2 ... alpha_n) (or (t_1 = t_2) (t_1 = t_3) ... (t_{n-1} = t_n))
+    (or (and (or alpha_j (t_1 = t_j)) for j != 1)
+        ...
+        (and (or alpha_j (t_n = t_j)) for j != n))
 
-See OPTIMISATIONS.md for the full derivation. The n == 1 case is intentionally not
+which for n == 2 is `(or alpha_1 alpha_2 (t_1 = t_2))`. See `_resolve_without_inequalities`
+for the equivalence argument; the flat disjunction `(or alpha_1 ... alpha_n (t_i = t_j) ...)`
+is not equivalent for n >= 3. The n == 1 case is intentionally not
 handled here: with a single clause `x` is unconstrained by anything else, so
 `exists x. (alpha_1 or x = t_1)` is unconditionally true - a different (already
 existing) optimization is responsible for dropping such trivially-true quantifiers.
@@ -333,17 +337,7 @@ def _try_eliminate_var(var: Var, node: ASTp_Node) -> Optional[ASTp_Node]:
         return None
 
     if not inequalities:
-        # No extra inequalities on `var` - fall back to the simpler (and cheaper) formula:
-        # (or alpha_1 ... alpha_n (t_1=t_2) (t_1=t_3) ...). This is a special case of the
-        # general formula below (it's what it reduces to when every `D(t_i)` is vacuously
-        # True), kept separately because it produces much flatter, more readable output.
-        escapes = [match.escape for match in matches]
-        pairwise_equalities = [
-            _subtract_equations(matches[i].equality, matches[j].equality)
-            for i in range(len(matches))
-            for j in range(i + 1, len(matches))
-        ]
-        resolved_disjunction = _make_or(escapes + pairwise_equalities)
+        resolved_disjunction = _resolve_without_inequalities(matches)
     else:
         resolved_disjunction = _resolve_with_inequalities(var, matches, inequalities)
 
@@ -359,6 +353,51 @@ def _try_eliminate_var(var: Var, node: ASTp_Node) -> Optional[ASTp_Node]:
         type=Connective_Type.AND,
         children=tuple(remaining_and_children),
     )
+
+
+def _make_pairwise_equality(pivot_equality: Relation, other_equality: Relation) -> ASTp_Node:
+    """ `t_pivot = t_other`, folded to a BoolLiteral when no variables remain (e.g. `t_pivot = 5`, `t_other = 5`). """
+    difference = _subtract_equations(pivot_equality, other_equality)
+    constant_truth_value = difference.is_true_or_false()
+    if constant_truth_value is not None:
+        return BoolLiteral(constant_truth_value)
+    return difference
+
+
+def _resolve_without_inequalities(matches: List[_Clause_Match]) -> ASTp_Node:
+    """
+    Eliminate `var` from `(and (or alpha_1 (var = t_1)) ... (or alpha_n (var = t_n)))`, producing
+
+        (or (and (or alpha_j (t_1 = t_j)) for j != 1)
+            ...
+            (and (or alpha_j (t_n = t_j)) for j != n))
+
+    Disjunct `i` states that `var := t_i` is a witness. Equivalence:
+      - if some alpha_i is false, every witness equals t_i, so disjunct i holds iff a witness exists;
+      - if every alpha_i is true, every disjunct holds, and any value is a witness.
+
+    For n == 2 this is `(or alpha_1 alpha_2 (t_1 = t_2))`. For n >= 3 the flat form
+    `(or alpha_1 ... alpha_n (t_1 = t_2) ...)` is NOT equivalent: with alpha_1 true, alpha_2 and
+    alpha_3 false and t_2 != t_3 it is true while the original formula is false.
+    """
+    if len(matches) == 2:
+        first_match, second_match = matches
+        return _make_or([
+            first_match.escape,
+            second_match.escape,
+            _make_pairwise_equality(first_match.equality, second_match.equality),
+        ])
+
+    pivot_branches: List[ASTp_Node] = []
+    for pivot_index, pivot_match in enumerate(matches):
+        agreement_terms = [
+            _make_or([other_match.escape, _make_pairwise_equality(pivot_match.equality, other_match.equality)])
+            for other_index, other_match in enumerate(matches)
+            if other_index != pivot_index
+        ]
+        pivot_branches.append(_make_and(agreement_terms))
+
+    return _make_or(pivot_branches)
 
 
 def _resolve_with_inequalities(var: Var, matches: List[_Clause_Match], inequalities: List[Relation]) -> ASTp_Node:

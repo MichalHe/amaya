@@ -136,13 +136,47 @@ def test_three_clause_resolution_produces_all_pairwise_equalities():
 
     result = resolve_conditional_equalities(formula)
 
-    assert isinstance(result, AST_Connective) and result.type == Connective_Type.OR
-    assert A in result.children
-    assert C in result.children
-    assert dsl._neg(A) in result.children
-    assert Relation(vars=[B, D], coefs=[-1, 1], rhs=0, predicate_symbol='=') in result.children
-    assert Relation(vars=[B], coefs=[-1], rhs=-5, predicate_symbol='=') in result.children
-    assert Relation(vars=[D], coefs=[-1], rhs=-5, predicate_symbol='=') in result.children
+    assert not _has_quantifier(result)
+    assert_semantically_equivalent(formula, result, bool_vars=[A, C], int_vars=[B, D], int_range=range(3, 8))
+
+
+def test_three_clause_resolution_with_independent_escapes_is_sound():
+    # Regression: the flat rewrite (or A C Y (B = D) (B = 5) (D = 5)) is true for
+    # A = C = Y = False, B = D = -3, while the original formula requires x = -3 and x = 5.
+    formula = dsl._exists(
+        (X,),
+        dsl._and(
+            dsl._or(A, _eq_x_to(B)),
+            dsl._or(C, _eq_x_to(D)),
+            dsl._or(Y, _eq_x_to(None, rhs=5)),
+        ),
+    )
+    fill_referenced_vars(formula)
+
+    result = resolve_conditional_equalities(formula)
+
+    assert not _has_quantifier(result)
+    assert_semantically_equivalent(formula, result, bool_vars=[A, C, Y], int_vars=[B, D], int_range=range(3, 8))
+    assert_semantically_equivalent(formula, result, bool_vars=[A, C, Y], int_vars=[B, D], int_range=range(-3, 2))
+
+
+def test_four_clause_resolution_is_sound():
+    E, F = Var(11), Var(12)
+    formula = dsl._exists(
+        (X,),
+        dsl._and(
+            dsl._or(A, _eq_x_to(B)),
+            dsl._or(C, _eq_x_to(D)),
+            dsl._or(E, _eq_x_to(None, rhs=1)),
+            dsl._or(F, _eq_x_to(B, rhs=1)),
+        ),
+    )
+    fill_referenced_vars(formula)
+
+    result = resolve_conditional_equalities(formula)
+
+    assert not _has_quantifier(result)
+    assert_semantically_equivalent(formula, result, bool_vars=[A, C, E, F], int_vars=[B, D], int_range=range(-1, 3))
 
 
 def test_unrelated_conjunct_preserved():
