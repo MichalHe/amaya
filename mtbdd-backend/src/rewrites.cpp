@@ -238,6 +238,46 @@ Dep_Graph* ensure_writable_graph(Dep_Graph** graph) {
 }
 
 
+s64 normalize_reminder(s64 reminder, s64 modulus);
+
+/**
+ * Whether `linearize_congruence` may replace the congruence by a linear function.
+ *
+ * The linearization picks the values of the leading variable `y` from a window next to one of its
+ * bounds (`shift_interval`). That preserves satisfiability only when `y` is existentially quantified,
+ * bounded from one side only, and constrained by nothing but this congruence and its bounds; for a
+ * free variable it drops the values outside the window. The linear function is moreover derived for the modulo-term encoding
+ * `y - m ~ K (mod M)` only: `linearize_congruence` uses -K for the constant, which is inv(-u)*K only
+ * when u = -1, and `get_point_for_mod_congruence_to_obtain_value` uses K where inv(n)*K is required,
+ * which coincides only for n = 1.
+ */
+bool is_linearization_applicable(const Dep_Graph& graph, u64 congruence_idx, const Captured_Modulus& captured_mod) {
+    const Congruence_Node& congruence = graph.congruences[congruence_idx];
+    u64 leading_var = captured_mod.leading_var;
+
+    bool is_leading_var_quantified = std::find(graph.quantified_vars.begin(), graph.quantified_vars.end(), leading_var) != graph.quantified_vars.end();
+    if (!is_leading_var_quantified) return false;
+
+    // The window chosen by `shift_interval` need not start at the bound, so it contains some residue
+    // class only through a representative that is not the one closest to the bound. That is
+    // admissible only if no atom bounds `y` from the other side.
+    const Var_Node& leading_var_node = graph.var_nodes[leading_var];
+    if (!leading_var_node.lower_bounds.empty() && !leading_var_node.upper_bounds.empty()) return false;
+
+    for (const auto& equation: graph.equations) {
+        if (!equation.is_satisfied && equation.coefs[leading_var] != 0) return false;
+    }
+    for (u64 other_idx = 0; other_idx < graph.congruences.size(); other_idx++) {
+        const auto& other = graph.congruences[other_idx];
+        if (other_idx != congruence_idx && !other.is_satisfied && other.coefs[leading_var] != 0) return false;
+    }
+
+    s64 modulus = combine_moduli(congruence.modulus_2pow, congruence.modulus_odd);
+    s64 leading_coef     = normalize_reminder(congruence.coefs[leading_var], modulus);
+    s64 subordinate_coef = normalize_reminder(congruence.coefs[captured_mod.subordinate_var], modulus);
+    return leading_coef == 1 && subordinate_coef == modulus - 1;
+}
+
 bool linearize_moduli(Dep_Graph** graph_ptr, Ritch_Conjunction_State* state) {
     s64 linearizations_performed = 0;
 
@@ -249,6 +289,8 @@ bool linearize_moduli(Dep_Graph** graph_ptr, Ritch_Conjunction_State* state) {
 
         auto captured_mod = does_congruence_capture_modulus(*graph, *state, congruence);
         if (!captured_mod.is_mod_captured()) continue;
+
+        if (!is_linearization_applicable(*graph, congruence_idx, captured_mod)) continue;
 
         // Is the leading variable C-increasing/decreasing
         auto var_preference = determine_var_preference(*graph, state, captured_mod.leading_var);

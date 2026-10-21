@@ -151,3 +151,64 @@ def test_inequation_divided_by_the_gcd_of_its_coefficients(atom):
         atoms = [_upper_bound(Y, y_bounds[1]), _lower_bound(Y, y_bounds[0]),
                  _upper_bound(Z, z_bounds[1]), _lower_bound(Z, z_bounds[0]), atom]
         assert _lazy_is_sat(atoms, quantified_vars=[]) == _is_sat(atoms), (y_bounds, z_bounds)
+
+
+def _accepted_pairs(atoms) -> set:
+    alphabet = LSBF_Alphabet.from_vars([Y, Z])
+    accepted = set()
+    for y_value, z_value in itertools.product(range(-3, 7), repeat=2):
+        conjunction_nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, [], alphabet)
+        point_nfa = MTBDDTransitionFn.construct_nfa_for_eq(Relation(vars=[Y], coefs=[1], rhs=y_value, predicate_symbol='='), alphabet)
+        point_nfa = point_nfa.intersection(
+            MTBDDTransitionFn.construct_nfa_for_eq(Relation(vars=[Z], coefs=[1], rhs=z_value, predicate_symbol='='), alphabet))
+        if conjunction_nfa.intersection(point_nfa).find_model() is not None:
+            accepted.add((y_value, z_value))
+    return accepted
+
+
+def _accepted_values_of_y_with_z_quantified(atoms) -> set:
+    alphabet = LSBF_Alphabet.from_vars([Y, Z])
+    accepted = set()
+    for y_value in range(-3, 7):
+        conjunction_nfa = MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, [Z], alphabet)
+        point_nfa = MTBDDTransitionFn.construct_nfa_for_eq(Relation(vars=[Y], coefs=[1], rhs=y_value, predicate_symbol='='), alphabet)
+        if conjunction_nfa.intersection(point_nfa).find_model() is not None:
+            accepted.add(y_value)
+    return accepted
+
+
+@pytest.mark.parametrize('y_bounds, z_bounds, coefs, rhs, modulus', [
+    ((0, 2), (0, 2), [1, 1], 1, 4),    # both variables free; was accepted for y = z
+    ((0, 2), (2, 3), [1, 1], 1, 4),    # both variables free; was empty
+    ((0, 2), (0, 1), [-1, -1], 0, 3),
+])
+def test_two_variable_congruence_over_free_variables(y_bounds, z_bounds, coefs, rhs, modulus):
+    """
+    `linearize_moduli` replaced the congruence by a linear function although the leading variable is
+    free: the linearization restricts that variable to a window next to its bound, which preserves
+    satisfiability only for a quantified variable.
+    """
+    atoms = [_upper_bound(Y, y_bounds[1]), _lower_bound(Y, y_bounds[0]), _upper_bound(Z, z_bounds[1]), _lower_bound(Z, z_bounds[0]),
+             Congruence(vars=[Y, Z], coefs=coefs, rhs=rhs, modulus=modulus)]
+    expected = {(y_value, z_value) for y_value, z_value in itertools.product(range(-3, 7), repeat=2)
+                if all(_holds(atom, {Y: y_value, Z: z_value}) for atom in atoms)}
+    assert _accepted_pairs(atoms) == expected
+
+
+@pytest.mark.parametrize('z_bounds, coefs, rhs', [
+    ((2, 3), [-1, 1], 0),   # z = y (mod 3); the window z in [3, 5] lost y = 2 (from z = 2)
+    ((2, 3), [2, 1], 0),    # leading coefficient on z is 1, subordinate coefficient on y is 2, not -1
+    ((0, 1), [2, 1], 2),
+])
+def test_two_variable_congruence_with_a_two_sided_quantified_variable(z_bounds, coefs, rhs):
+    """
+    The linearization picks values of the quantified `z` from a window that need not start at its bound,
+    which is admissible only when `z` is bounded from one side, and its linear function is derived for
+    `z - m = K (mod M)` only.
+    """
+    atoms = [_upper_bound(Y, 2 if z_bounds == (2, 3) else 3), _lower_bound(Y, 0 if z_bounds == (2, 3) else 1),
+             _upper_bound(Z, z_bounds[1]), _lower_bound(Z, z_bounds[0]),
+             Congruence(vars=[Y, Z], coefs=coefs, rhs=rhs, modulus=3)]
+    expected = {y_value for y_value in range(-3, 7)
+                if any(all(_holds(atom, {Y: y_value, Z: z_value}) for atom in atoms) for z_value in range(-20, 21))}
+    assert _accepted_values_of_y_with_z_quantified(atoms) == expected
