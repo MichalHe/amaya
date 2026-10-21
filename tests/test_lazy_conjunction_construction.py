@@ -8,6 +8,7 @@ variable to a single value, `mtbdd-backend/src/rewrites.cpp:substitute_var_for_v
 value into every atom. Each test compares the language of the constructed automaton, restricted to a
 small range of values, with the truth value of the conjunction evaluated directly.
 """
+import itertools
 import logging
 
 import pytest
@@ -86,3 +87,33 @@ def test_bounds_fixing_a_free_variable(lower, upper):
     """
     atoms = [_upper_bound(Y, upper), _lower_bound(Y, lower)]
     assert _accepted_values_of_y(atoms) == _satisfying_values_of_y(atoms)
+
+
+
+Z = Var(id=2)
+
+
+def _lazy_is_sat(atoms, quantified_vars) -> bool:
+    alphabet = LSBF_Alphabet.from_vars([Y, Z])
+    return MTBDDTransitionFn.construct_dfa_for_atom_conjunction(atoms, list(quantified_vars), alphabet).find_model() is not None
+
+
+def _is_sat(atoms) -> bool:
+    return any(all(_holds(atom, {Y: y_value, Z: z_value}) for atom in atoms)
+               for y_value, z_value in itertools.product(range(-10, 11), repeat=2))
+
+
+@pytest.mark.parametrize('atom', [
+    Relation(vars=[Y, Z], coefs=[1, 1], rhs=-3, predicate_symbol='='),   # 1 + 1 = -3 is false
+    Relation(vars=[Y, Z], coefs=[1, 1], rhs=2, predicate_symbol='='),    # true
+    Relation(vars=[Y, Z], coefs=[1, 2], rhs=0, predicate_symbol='<='),   # 1 + 2 <= 0 is false
+    Relation(vars=[Y, Z], coefs=[1, 2], rhs=3, predicate_symbol='<='),   # true
+], ids=['false-equation', 'true-equation', 'false-inequation', 'true-inequation'])
+def test_atom_left_without_variables_after_substitution(atom):
+    """
+    `y` is free and `z` quantified, both fixed to 1 by their bounds. Substituting `y` leaves `atom` over
+    `z` alone; substituting the quantified `z` then leaves it without variables, and it must be
+    evaluated rather than marked satisfied.
+    """
+    atoms = [_upper_bound(Y, 1), _lower_bound(Y, 1), _upper_bound(Z, 1), _lower_bound(Z, 1), atom]
+    assert _lazy_is_sat(atoms, quantified_vars=[Z]) == _is_sat(atoms)

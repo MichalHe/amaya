@@ -350,8 +350,9 @@ void set_var_value_in_eq(
     vector_remove(eq.vars, var);
 
     if (eq.vars.empty()) {
-        eq.is_satisfied = true;
-        // @ Todo: Do sanity check here
+        // An equation without variables states 0 = rhs, which can be false.
+        if (state->get_eq_val(eq_idx) != 0) graph->is_false = true;
+        else                                eq.is_satisfied = true;
     } else if (eq.vars.size() == 1) { // The atom has became a new bound for the remaining variable
         u64 last_var      = eq.vars[0];
         u64 last_var_coef = eq.coefs[last_var];
@@ -387,8 +388,9 @@ void set_var_value_in_ineq(
     vector_remove(ineq.vars, var);
 
     if (ineq.vars.empty()) {
-        ineq.is_satisfied = true;
-
+        // An inequation without variables states 0 <= rhs, which can be false.
+        if (state->get_ineq_val(ineq_idx) < 0) graph->is_false = true;
+        else                                   ineq.is_satisfied = true;
     } else if (ineq.vars.size() == 1) { // The atom has became a new bound for the remaining variable
         u64 last_var      = ineq.vars[0];
         s64 last_var_coef = ineq.coefs[last_var];
