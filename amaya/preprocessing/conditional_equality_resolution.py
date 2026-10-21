@@ -205,6 +205,10 @@ def _negate(node: ASTp_Node) -> ASTp_Node:
             flipped_type = Connective_Type.OR if node.type == Connective_Type.AND else Connective_Type.AND
             negated_children = tuple(_negate(child) for child in node.children)
             return AST_Connective(referenced_vars=node.referenced_vars, type=flipped_type, children=negated_children)
+        case AST_Quantifier():
+            # Pushing the negation inside would turn the existential quantifier into a universal one,
+            # which the AST does not represent - keep it wrapped.
+            return AST_Negation(referenced_vars=node.referenced_vars, child=node)
         case _:
             raise ValueError(f'Unhandled node while negating: {node}')
 

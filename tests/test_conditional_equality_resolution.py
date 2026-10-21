@@ -554,3 +554,20 @@ def test_inequality_resolution_folds_relations_left_without_variables(first_rhs,
     original = dsl._exists((X,), dsl._and(*clauses, *inequalities))
     fill_referenced_vars(original)
     assert_semantically_equivalent(original, result, bool_vars=[A, C], int_vars=[])
+
+
+def test_inequality_resolution_negates_an_escape_containing_a_quantifier():
+    """
+    The pivot disjuncts contain the negated escape of their clause. `_negate` had no case for a
+    quantifier and raised ValueError for an escape such as `exists w. w <= b`.
+    """
+    W = Var(id=11)
+    quantified_escape = dsl._exists((W,), Relation(vars=[W, B], coefs=[1, -1], rhs=0, predicate_symbol='<='))
+    clauses = [dsl._or(quantified_escape, _eq_x_to(None, rhs=1)), dsl._or(C, _eq_x_to(None, rhs=2))]
+    inequalities = [Relation(vars=[X], coefs=[1], rhs=5, predicate_symbol='<=')]
+
+    result = _resolve_with_inequalities_directly(clauses, inequalities)
+
+    original = dsl._exists((X,), dsl._and(*clauses, *inequalities))
+    fill_referenced_vars(original)
+    assert_semantically_equivalent(original, result, bool_vars=[C], int_vars=[B])
