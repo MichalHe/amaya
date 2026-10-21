@@ -1674,15 +1674,16 @@ def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[V
     if relation.is_hard_bound():
         var, coef = relation.vars[0], relation.coefs[0]
 
-        if var not in var_info:
-            return True  # The relation is a hard bound (True), but the variable is not considered as interestring
+        if var not in var_info or coef == 0:
+            return True  # The relation is a hard bound (True), but it carries no information about an interesting variable
 
+        # Exact integer division: float division rounds incorrectly once |rhs| exceeds 2**53.
         bounds = var_info[var]
         if coef < 0:
-            bound_val = math.ceil(relation.rhs / coef)  # -3x <= 1 ---> x >= (-1/3) ---> x is in [0, ...]
+            bound_val = -(-relation.rhs // coef)  # ceil(rhs/coef): -3x <= 1 ---> x >= (-1/3) ---> x is in [0, ...]
             bounds.limits.try_strengthen_lower(bound_val)
         else:
-            bound_val = math.floor(relation.rhs / coef)  # 3x <= 1 ---> x <= (1/3) ---> x is in [..., 0]
+            bound_val = relation.rhs // coef      # floor(rhs/coef): 3x <= 1 ---> x <= (1/3) ---> x is in [..., 0]
             bounds.limits.try_strengthen_upper(bound_val)
         return True
 
@@ -1695,13 +1696,14 @@ def _set_limit_on_interestring_var_if_bound(relation: Relation, var_info: Dict[V
             return True
 
         var, coef = relation.vars[0], relation.coefs[0]
-        if var not in var_info:
+        if var not in var_info or coef == 0:
             return True
 
-        bound_val = relation.rhs // coef
+        # c*x = k holds for x in [ceil(k/c), floor(k/c)]: a single value when c divides k, and an empty
+        # interval otherwise (e.g. 7x = 1), which `_do_bounds_imply_conflict` reports as a conflict.
         bounds = var_info[var]
-        bounds.limits.try_strengthen_lower(bound_val)
-        bounds.limits.try_strengthen_upper(bound_val)
+        bounds.limits.try_strengthen_lower(-(-relation.rhs // coef))
+        bounds.limits.try_strengthen_upper(relation.rhs // coef)
         return True
     return False
 
