@@ -157,7 +157,7 @@ def build_nfa_from_linear_inequality(nfa_type: Type[NFA], alphabet: LSBF_Alphabe
     nfa.add_initial_state(initial_state.value)
 
     nfa = build_presburger_linear_nfa_from_initial_state(initial_state, is_transition_final, ineq.vars, nfa)
-    nfa.state_semantics.special_state = next(iter(nfa.final_states))
+    nfa.state_semantics.special_state = next(iter(nfa.final_states), None)  # None when the atom has no solutions
     return nfa
 
 
@@ -179,7 +179,7 @@ def build_nfa_from_linear_equality(nfa_type: Type[NFA], alphabet: LSBF_Alphabet,
         return False
 
     nfa = build_presburger_linear_nfa_from_initial_state(initial_state, is_transition_final, list(eq.vars), nfa)
-    nfa.state_semantics.special_state = next(iter(nfa.final_states))
+    nfa.state_semantics.special_state = next(iter(nfa.final_states), None)  # None when the atom has no solutions
     return nfa
 
 
@@ -263,5 +263,5 @@ def build_presburger_congruence_nfa(nfa_type: Type[NFA],
     nfa.used_variables = list(congruence.vars)
     # nfa.state_labels = StateLabelUnaryNode(labels=dict((state, label) for label, state in alias_store.data.items()), child=None)
     nfa.extra_info['aliases'] = alias_store
-    nfa.state_semantics.special_state = next(iter(nfa.final_states))
+    nfa.state_semantics.special_state = next(iter(nfa.final_states), None)  # None when the atom has no solutions
     return nfa
