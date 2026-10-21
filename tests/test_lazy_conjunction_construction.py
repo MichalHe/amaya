@@ -133,3 +133,21 @@ def test_quantified_variable_with_a_non_invertible_congruence_coefficient(z_coef
     atoms = [_upper_bound(Y, 1), _lower_bound(Y, 1), _upper_bound(Z, z_upper), _lower_bound(Z, z_lower),
              Congruence(vars=[Y, Z], coefs=[1, z_coef], rhs=rhs, modulus=4)]
     assert _lazy_is_sat(atoms, quantified_vars=[Z]) == _is_sat(atoms)
+
+
+@pytest.mark.parametrize('atom', [
+    Relation(vars=[Y, Z], coefs=[1, 2], rhs=-1, predicate_symbol='<='),
+    Relation(vars=[Y, Z], coefs=[2, 2], rhs=-1, predicate_symbol='<='),
+    Relation(vars=[Y, Z], coefs=[2, 2], rhs=1, predicate_symbol='<='),
+    Relation(vars=[Y, Z], coefs=[-1, 2], rhs=-2, predicate_symbol='<='),
+], ids=['y+2z<=-1', '2y+2z<=-1', '2y+2z<=1', '-y+2z<=-2'])
+def test_inequation_divided_by_the_gcd_of_its_coefficients(atom):
+    """
+    After a substitution, `normalize_coefficients` divides an inequation by the gcd of its
+    coefficients, using `div_bound_by_coef` for the right-hand side. For a negative right-hand side
+    that function rounded up instead of down, so `2z <= -1` became `z <= 0` instead of `z <= -1`.
+    """
+    for y_bounds, z_bounds in itertools.product([(0, 2), (1, 1), (2, 3)], repeat=2):
+        atoms = [_upper_bound(Y, y_bounds[1]), _lower_bound(Y, y_bounds[0]),
+                 _upper_bound(Z, z_bounds[1]), _lower_bound(Z, z_bounds[0]), atom]
+        assert _lazy_is_sat(atoms, quantified_vars=[]) == _is_sat(atoms), (y_bounds, z_bounds)

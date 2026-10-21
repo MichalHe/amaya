@@ -290,14 +290,19 @@ std::size_t hash_vector(const std::vector<T>& arr, std::size_t seed) {
 
 const char* bool_into_yes_no(bool it);
 
+/**
+ * The bound on x implied by `coef*x <= bound`: floor(bound/coef) for coef > 0 (an upper bound) and
+ * ceil(bound/coef) for coef < 0 (a lower bound).
+ */
 inline
 s64 div_bound_by_coef(s64 bound, s64 coef) {
-    s64 d = bound / coef;
-    s64 m = bound % coef; // Needed to tell -3x <= -3 apart from -3x <= -2 so we can make corrections
-    // Negative modulo means:
-    // 1) lower_bound)  (coef < 0 && bound < 0): e.g. -2x <= -3  ->  x >= 3/2   == x >= 1, therefore we must make a correction or
-    // 2) upper_bound)  (coef > 0 && bound < 0): e.g.  2x <= -3  ->  x <= -3/2  == x <= -1, therefore we must make a correction
-    d += (m < 0);
+    s64 d = bound / coef;  // Truncates towards zero
+    s64 m = bound % coef;  // Has the sign of `bound`; nonzero when the division is inexact
+    // For bound >= 0 truncation already rounds in the required direction (down for coef > 0, up for
+    // coef < 0). An inexact division with bound < 0 needs a correction:
+    // 1) lower bound (coef < 0): -2x <= -3  ->  x >= 3/2,   truncation gives 1,  ceil is 2  -> add 1
+    // 2) upper bound (coef > 0):  2x <= -3  ->  x <= -3/2,  truncation gives -1, floor is -2 -> subtract 1
+    if (m < 0) d += (coef < 0) ? 1 : -1;
     return d;
 }
 
