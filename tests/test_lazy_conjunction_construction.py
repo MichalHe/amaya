@@ -117,3 +117,19 @@ def test_atom_left_without_variables_after_substitution(atom):
     """
     atoms = [_upper_bound(Y, 1), _lower_bound(Y, 1), _upper_bound(Z, 1), _lower_bound(Z, 1), atom]
     assert _lazy_is_sat(atoms, quantified_vars=[Z]) == _is_sat(atoms)
+
+
+@pytest.mark.parametrize('z_coef, rhs, z_lower, z_upper', [
+    (2, 3, 0, 2),   # y = 1: 2z = 2 (mod 4), satisfied by z = 1
+    (2, 1, 2, 3),   # y = 1: 2z = 0 (mod 4), satisfied by z = 2
+    (2, 2, 0, 3),   # y = 1: 2z = 1 (mod 4), unsatisfiable
+])
+def test_quantified_variable_with_a_non_invertible_congruence_coefficient(z_coef, rhs, z_lower, z_upper):
+    """
+    After `y` is substituted, the quantified `z` occurs in a single-variable congruence with a
+    coefficient that is not invertible modulo 4. The quantifier must not be instantiated from that
+    congruence: the value chosen through a non-existent inverse need not satisfy it.
+    """
+    atoms = [_upper_bound(Y, 1), _lower_bound(Y, 1), _upper_bound(Z, z_upper), _lower_bound(Z, z_lower),
+             Congruence(vars=[Y, Z], coefs=[1, z_coef], rhs=rhs, modulus=4)]
+    assert _lazy_is_sat(atoms, quantified_vars=[Z]) == _is_sat(atoms)

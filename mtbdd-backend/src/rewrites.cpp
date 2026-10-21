@@ -674,6 +674,11 @@ bool get_value_close_to_bounds(Dep_Graph* graph, Ritch_Conjunction_State* state,
     s64 rhs  = normalize_reminder(state->get_congruence_val(active_congruence_idx), modulus);
     s64 coef = normalize_reminder(congruence.coefs[var], modulus);
 
+    // The solution below needs coef to be invertible modulo the modulus. Otherwise the congruence has
+    // either no solution or several per period, and compute_multiplicative_inverse does not return an
+    // inverse, so the value picked need not satisfy the congruence.
+    if (std::gcd(coef, modulus) != 1) return false;
+
     s64 mult_inv = compute_multiplicative_inverse(modulus, coef);
     rhs = (rhs * mult_inv) % modulus; // e.g., y ~ 200 (mod 303), rhs is now a solution
 
