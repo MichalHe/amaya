@@ -569,10 +569,10 @@ class Bound_Type(IntEnum):
 def get_hard_bound_semantics(rel: Relation) -> Tuple[Bound_Type, Var, int]:
     var, coef = rel.vars[0], rel.coefs[0]
     if coef < 0:
-        implied_val = math.ceil(rel.rhs / coef)
+        implied_val = -(-rel.rhs // coef)  # ceil(rhs / coef), exact for integers of any size
         bound_type = Bound_Type.LOWER
     else:
-        implied_val = math.floor(rel.rhs / coef)
+        implied_val = rel.rhs // coef  # floor(rhs / coef)
         bound_type = Bound_Type.UPPER
 
     return (bound_type, var, implied_val)
@@ -580,8 +580,8 @@ def get_hard_bound_semantics(rel: Relation) -> Tuple[Bound_Type, Var, int]:
 
 def compute_implied_bound(var: Var, coef: int, bound_rhs: int) -> int:
     if coef < 0:
-        return math.ceil(bound_rhs  / coef)
-    return math.floor(bound_rhs / coef)
+        return -(-bound_rhs // coef)  # ceil(bound_rhs / coef), exact for integers of any size
+    return bound_rhs // coef  # floor(bound_rhs / coef)
 
 
 def unzip_lin_terms(terms: Iterable[Tuple[int, Var]]) -> Tuple[List[int], List[Var]]:

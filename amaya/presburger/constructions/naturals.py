@@ -1,5 +1,4 @@
 from __future__ import annotations
-import math
 from typing import (
     Dict,
     List,
@@ -79,7 +78,7 @@ def build_dfa_from_linear_inequality(nfa_type: Type[NFA],
             cylindrified_symbol = alphabet.cylindrify_symbol_of_projected_alphabet(var_ids, symbol)
 
             dot = vector_dot(symbol, ineq.variable_coefficients)
-            next_state = math.floor(0.5 * (currently_processed_state - dot))
+            next_state = (currently_processed_state - dot) // 2  # floor((state - dot) / 2), exact for integers of any size
 
             # Add newly discovered transition
             dfa.update_transition_fn(currently_processed_state, cylindrified_symbol, next_state)

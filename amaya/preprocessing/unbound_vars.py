@@ -1394,12 +1394,12 @@ def _insert_all_asserting_bounds_into_current_context(and_connective: AST_Connec
             continue
 
         if coef < 0:  # Lower limit
-            implied_val = math.ceil(rhs / coef)
+            implied_val = -(-rhs // coef)  # ceil(rhs / coef), exact for integers of any size
             old_lower = val_interval.lower_limit if val_interval.lower_limit is not None else implied_val - 1
             new_lower = max(implied_val, old_lower)
             contexter.assert_new_var_value(var, Value_Interval(new_lower, val_interval.upper_limit))
         else:  # Upper limit
-            implied_val = math.floor(rhs / coef)
+            implied_val = rhs // coef  # floor(rhs / coef)
             old_upper = val_interval.upper_limit if val_interval.upper_limit is not None else implied_val + 1
             new_upper = min(implied_val, old_upper)
             contexter.assert_new_var_value(var, Value_Interval(val_interval.lower_limit, new_upper))
@@ -1557,7 +1557,7 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
             ctx_vals = contexter.lookup_asserted_values(var)
 
             if coef < 0:
-                implied_val = math.ceil(rhs / coef)
+                implied_val = -(-rhs // coef)  # ceil(rhs / coef), exact for integers of any size
                 # Look whether the current bound requires var value to be higher then possible due to parent's constraints
                 parents_upper_limit = ctx_vals.upper_limit if ctx_vals.upper_limit is not None else implied_val + 1
                 if implied_val > parents_upper_limit:  # Parent asserts that x must be <= than 5, child says x must be >= 6
@@ -1572,7 +1572,7 @@ def _prune_conjunctions_false_due_to_parent_context(node: ASTp_Node, contexter: 
                     rhs = -ctx_lower_val   # Because coef is negative -x <= k  <-> x >= -k
                     return Relation(vars=relation.vars, coefs=[-1], rhs=rhs, predicate_symbol='<=')
             else:  # coef > 0
-                implied_val = math.floor(rhs / coef)
+                implied_val = rhs // coef  # floor(rhs / coef)
                 parents_lower_limit = ctx_vals.lower_limit if ctx_vals.lower_limit is not None else implied_val - 1
                 if implied_val < parents_lower_limit:  # Parent asserts that x must be >= 0, child says x must be <= -1
                     return BoolLiteral(False)
@@ -1821,7 +1821,7 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
                 # Unsat, e.g., 3x = 4 does not have a solution in integers
                 return BoolLiteral(False)
 
-            new_rhs = math.floor(new_rhs / coefs_gcd)
+            new_rhs = new_rhs // coefs_gcd  # floor(new_rhs / coefs_gcd), exact for integers of any size
             new_coefs = [coef // coefs_gcd for coef in new_coefs]
             relation = Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=root.predicate_symbol)
 
@@ -2358,8 +2358,8 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
                 # Bounds give restriction on x values: x_bound = [a, b]  <->  x >= a AND x <= b
                 # Substitute x in the lower bound:                        ::  M*l + K >= a  <->  l >= (a - K) / M  <->  l >= math.ceil((a - K) / M)
                 # Substitute x in the upper bound:                        ::  M*l + K <= b  <->  l <= (b - K) / M  <->  l <= math.floor((b - K) / M)
-                smallest_solution = math.ceil((lower_bound-congruence.rhs) / congruence.modulus)
-                largest_solution  = math.floor((upper_bound-congruence.rhs) / congruence.modulus)
+                smallest_solution = -(-(lower_bound - congruence.rhs) // congruence.modulus)  # ceil, exact for integers of any size
+                largest_solution  = (upper_bound - congruence.rhs) // congruence.modulus      # floor
 
                 # smallest_solution and largest_solution talk in terms of multiplies of M, turn it back into x
                 smallest_solution = smallest_solution*congruence.modulus + congruence.rhs
@@ -2562,7 +2562,7 @@ def _strenghten_value_intervals(congruence: Congruence, value_intervals: List[Tu
             rhs += congruence.modulus
 
         # RHS is curently in [0, ... Modulus], shift it into the required interval
-        shift_times = math.floor(value_interval[0]/congruence.modulus)
+        shift_times = value_interval[0] // congruence.modulus  # floor, exact for integers of any size
         shifted_val = rhs + shift_times*congruence.modulus
         if shifted_val < value_interval[0]:
             shifted_val += congruence.modulus

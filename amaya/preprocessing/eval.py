@@ -355,7 +355,7 @@ def divide_relation_by_gcd(relation: Relation) -> Union[Relation, BoolLiteral]:
     new_coefs: List[int] = [coef // gcd for coef in relation.coefs]
     unsat = False
     if relation.predicate_symbol == '<=':
-        new_rhs = math.floor(relation.rhs/gcd)
+        new_rhs = relation.rhs // gcd  # floor(rhs / gcd), exact for integers of any size
     else:  # Equation
         if relation.rhs % gcd:
             unsat = True

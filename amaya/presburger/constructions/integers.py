@@ -1,6 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass
-import math
 from typing import (
     Callable,
     Dict,
@@ -47,7 +46,7 @@ class IneqLinearStateComponent(LinearStateComponent):
 
     def generate_next(self, alphabet_symbol: Tuple[int, ...]) -> Optional[LinearStateComponent]:
         dot = vector_dot(alphabet_symbol, self.variable_coefficients)
-        destination_state = math.floor(0.5 * (self.value - dot))
+        destination_state = (self.value - dot) // 2  # floor((value - dot) / 2), exact for integers of any size
         return IneqLinearStateComponent(value=destination_state,
                                         variable_coefficients=self.variable_coefficients)
 
