@@ -456,9 +456,14 @@ void substitute_var_for_value(Dep_Graph* graph, Ritch_Conjunction_State* state, 
         new_val = normalize_reminder(new_val, modulus);
         state->set_congruence_val(congruence_idx, new_val);
 
+        bool was_var_present = congruence.coefs[var] != 0;
         congruence.coefs[var] = 0;
         vector_remove(congruence.vars, var);
-        if (congruence.vars.empty()) congruence.is_satisfied = true;
+        if (was_var_present && congruence.vars.empty()) {
+            // A congruence without variables states 0 ~ new_val (mod modulus), which can be false.
+            if (new_val != 0) graph->is_false = true;
+            else              congruence.is_satisfied = true;
+        }
     }
 
     graph->var_nodes[var].upper_bounds.clear();

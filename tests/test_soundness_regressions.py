@@ -92,6 +92,18 @@ UNSAT_CASES = [
         (),
         id='interval-analysis-equation-contradicting-a-bound',
     ),
+    pytest.param(
+        # The rewrites reduce the formula to exists y. 1 <= y <= 3 and y = 0 (mod 5), which the lazy
+        # conjunction construction accepted: once the bits read fixed y, substituting y left a
+        # congruence without variables, which was marked satisfied without evaluating it.
+        """
+        (declare-fun x () Int)
+        (assert (exists ((y Int)) (and (<= 1 y) (<= y 3) (= (mod (+ (* 5 x) y) 5) 0))))
+        (check-sat)
+        """,
+        ('do_miniscoping', 'optimize_bottom_quantifiers', 'reason_about_models', 'do_lazy_evaluation'),
+        id='lazy-construction-variable-free-congruence',
+    ),
 ]
 
 
