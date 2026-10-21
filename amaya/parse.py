@@ -242,10 +242,11 @@ def _optimize_formula_structure_legacy(astp: ASTp_Node, var_table: Dict[Var, Var
         astp = var_bounds_lib.prune_conjunctions_false_due_to_parent_context(astp)
 
     if solver_config.optimizations.reason_about_models:
-        model_properties = Asserted_Model_Properties()
-
-        astp = simplify_formula_using_model_properties(astp, model_properties)
-        astp = simplify_formula_using_model_properties(astp, model_properties)
+        # Each call needs its own `Asserted_Model_Properties`: an equation recorded at the outermost
+        # frame during one call survives it, and a second call sharing the object would find the
+        # equation's own copy, treat it as already implied, and replace it by True.
+        astp = simplify_formula_using_model_properties(astp, Asserted_Model_Properties())
+        astp = simplify_formula_using_model_properties(astp, Asserted_Model_Properties())
 
         var_uses = Variable_Use_Info()
         scan_variable_use(astp, var_uses)
@@ -267,10 +268,8 @@ def _optimize_formula_structure_legacy(astp: ASTp_Node, var_table: Dict[Var, Var
         logger.debug('Vars used only in disequalities removed. Result:  %s', astp)
 
     if solver_config.optimizations.reason_about_models:
-        model_properties = Asserted_Model_Properties()
-
-        astp = simplify_formula_using_model_properties(astp, model_properties)
-        astp = simplify_formula_using_model_properties(astp, model_properties)
+        astp = simplify_formula_using_model_properties(astp, Asserted_Model_Properties())
+        astp = simplify_formula_using_model_properties(astp, Asserted_Model_Properties())
 
     if solver_config.optimizations.resolve_conditional_equalities:
         logger.debug('Resolving conditional equalities:  %s', astp)

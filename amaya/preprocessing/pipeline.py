@@ -108,11 +108,10 @@ def _pass_infinite_domain(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
 
 
 def _pass_model_properties(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
-    # `Asserted_Model_Properties` is a stateful accumulator. `parse.py`'s legacy body threads one
-    # instance through two consecutive calls; here it is fresh per invocation, which is the safer
-    # default (see OPTIMIZATION_PIPELINE.md §5.2 / §3 of the plan). This is a known, deliberate
-    # deviation validated by the differential run (plan step 7). If that run shows a regression,
-    # thread one accumulator via `ctx.scratch` instead.
+    # `Asserted_Model_Properties` is a stateful accumulator and must be fresh per invocation. Sharing
+    # one instance across calls is unsound: an equation recorded at the outermost frame survives the
+    # call, and the next call finds the equation's own copy and replaces the equation by True. The
+    # legacy body in `parse.py` shared one instance until it was fixed for that reason.
     return simplify_formula_using_model_properties(ast, Asserted_Model_Properties())
 
 
