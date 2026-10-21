@@ -104,6 +104,36 @@ UNSAT_CASES = [
         ('do_miniscoping', 'optimize_bottom_quantifiers', 'reason_about_models', 'do_lazy_evaluation'),
         id='lazy-construction-variable-free-congruence',
     ),
+    pytest.param(
+        # Variable bounds analysis recorded 7y = 1 as y = ceil(1/7) = 1 and replaced the atoms by y = 1.
+        """
+        (declare-fun x () Int)
+        (assert (exists ((y Int)) (and (<= 0 y) (<= y 1) (= (* 7 y) 1))))
+        (check-sat)
+        """,
+        ('simplify_variable_bounds',),
+        id='variable-bounds-equation-without-integer-solution',
+    ),
+    pytest.param(
+        # Variable bounds analysis rounded 2y <= 1 up to y <= 1 instead of down to y <= 0.
+        """
+        (declare-fun x () Int)
+        (assert (exists ((y Int)) (and (<= (* 2 y) 1) (<= 1 y))))
+        (check-sat)
+        """,
+        ('simplify_variable_bounds',),
+        id='variable-bounds-upper-bound-rounding',
+    ),
+    pytest.param(
+        # As above for a negative coefficient: -2y <= -1 means y >= 1, which was rounded to y >= 0.
+        """
+        (declare-fun x () Int)
+        (assert (exists ((y Int)) (and (<= (* (- 2) y) (- 1)) (<= y 0))))
+        (check-sat)
+        """,
+        ('simplify_variable_bounds',),
+        id='variable-bounds-lower-bound-rounding',
+    ),
 ]
 
 

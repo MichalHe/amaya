@@ -232,20 +232,23 @@ def perform_variable_bounds_analysis_on_ast(ast: ASTp_Node) -> AST_Node_With_Bou
         relation: Relation = ast
         bounds_info = AST_Leaf_Node_With_Bounds_Info(contents=relation)
 
-        if len(relation.vars) == 1:
+        if len(relation.vars) == 1 and relation.coefs[0] != 0:
             var, coef = relation.vars[0], relation.coefs[0]
-            bound = relation.rhs / coef
-
-            bound = math.floor(bound) if coef <= 0 else math.ceil(bound)
 
             if relation.predicate_symbol == '=':
-                bounds_info.var_values[var] = [Value_Interval(bound, bound)]
+                if relation.rhs % coef != 0:
+                    # e.g. 7x = 1: no integer value. An empty list of intervals keeps the relation from
+                    # being replaced by bounds (see `_simplify_bounded_atoms`), so it is evaluated as is.
+                    bounds_info.var_values[var] = []
+                else:
+                    value = relation.rhs // coef
+                    bounds_info.var_values[var] = [Value_Interval(value, value)]
             elif relation.predicate_symbol == '<=':
                 value_interval = Value_Interval()
                 if coef > 0:
-                    value_interval.upper_limit = bound
+                    value_interval.upper_limit = relation.rhs // coef        # c*x <= k  <->  x <= floor(k/c)
                 else:
-                    value_interval.lower_limit = bound
+                    value_interval.lower_limit = -(relation.rhs // -coef)    # c*x <= k, c < 0  <->  x >= ceil(k/c)
                 bounds_info.var_values[var] = [value_interval]
         else:
             for var in relation.vars:
