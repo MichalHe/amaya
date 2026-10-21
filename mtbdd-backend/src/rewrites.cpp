@@ -371,15 +371,17 @@ void set_var_value_in_ineq(
 {
     auto& ineq = graph->inequations[ineq_idx];
 
-    s64 current_val = state->get_ineq_val(ineq_idx);
-    state->set_ineq_val(ineq_idx, current_val - ineq.coefs[var] * val);
-
     bool is_var_present = ineq.coefs[var] != 0;
     if (!is_var_present) return;
 
+    // A protected (free) variable keeps its own bound, which is what fixes its value in the output
+    // automaton; the bound must therefore stay as it is, including its right-hand side.
     if (ineq.vars.size() == 1 && graph->is_var_protected(var)) {
         return;
     }
+
+    s64 current_val = state->get_ineq_val(ineq_idx);
+    state->set_ineq_val(ineq_idx, current_val - ineq.coefs[var] * val);
 
     ineq.coefs[var] = 0;
     vector_remove(ineq.vars, var);

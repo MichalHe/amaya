@@ -75,3 +75,14 @@ def test_two_sided_bounds_and_a_congruence(lower, upper, modulus, rhs):
     """
     atoms = [_upper_bound(Y, upper), _lower_bound(Y, lower), Congruence(vars=[Y], coefs=[1], rhs=rhs, modulus=modulus)]
     assert _accepted_values_of_y(atoms) == _satisfying_values_of_y(atoms)
+
+
+@pytest.mark.parametrize('lower, upper', [(1, 1), (3, 3), (-2, -2), (0, 0)])
+def test_bounds_fixing_a_free_variable(lower, upper):
+    """
+    The bounds fix the free variable, so it is substituted and marked protected; its own bounds stay in
+    the formula to fix its value in the automaton. Their right-hand sides were shifted by the
+    substituted value, so `1 <= y <= 1` accepted `y = 0`.
+    """
+    atoms = [_upper_bound(Y, upper), _lower_bound(Y, lower)]
+    assert _accepted_values_of_y(atoms) == _satisfying_values_of_y(atoms)
