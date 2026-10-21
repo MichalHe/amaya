@@ -13,6 +13,8 @@ import pytest
 from amaya import logger as amaya_logger
 from amaya import parse
 from amaya.config import BackendType, SolutionDomain, solver_config
+from amaya.preprocessing.unbound_vars import prune_conjunctions_false_due_to_parent_context
+from amaya.relations_structures import AST_Connective, BoolLiteral, Connective_Type, Relation, Var
 
 
 @pytest.fixture
@@ -69,9 +71,39 @@ UNSAT_CASES = [
         ('reason_about_models',),
         id='model-reasoning-unsat-equation-after-substitution',
     ),
+    pytest.param(
+        # Interval analysis (on by default) could not absorb 7y = 1 into its context, ignored the
+        # resulting False, and dropped the equation together with the absorbed bounds on y.
+        """
+        (declare-fun x () Int)
+        (assert (exists ((y Int)) (and (<= 0 y) (<= y 1) (= (* 7 y) 1))))
+        (check-sat)
+        """,
+        (),
+        id='interval-analysis-equation-without-integer-solution',
+    ),
+    pytest.param(
+        # As above, for an equation contradicting a bound asserted earlier in the same conjunction.
+        """
+        (declare-fun x () Int)
+        (assert (exists ((y Int)) (and (<= 3 y) (= y 0) (<= x y))))
+        (check-sat)
+        """,
+        (),
+        id='interval-analysis-equation-contradicting-a-bound',
+    ),
 ]
 
 
 @pytest.mark.parametrize('source_text, enabled_optimizations', UNSAT_CASES)
 def test_unsatisfiable_formula_is_reported_unsat(default_solver_config, source_text, enabled_optimizations):
     assert not _is_sat(source_text, enabled_optimizations)
+
+
+def test_interval_analysis_reports_a_conjunction_with_a_contradicting_equation_as_false():
+    y = Var(id=1)
+    conjunction = AST_Connective(referenced_vars=(y,), type=Connective_Type.AND, children=(
+        Relation(vars=[y], coefs=[-1], rhs=-3, predicate_symbol='<='),
+        Relation(vars=[y], coefs=[1], rhs=0, predicate_symbol='='),
+    ))
+    assert prune_conjunctions_false_due_to_parent_context(conjunction) == BoolLiteral(False)

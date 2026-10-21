@@ -1409,7 +1409,12 @@ def _prune_in_connective(connective: AST_Connective, contexter: Parent_Context_V
             contexter.enter_context()
 
             children = connective.children
-            _insert_all_asserting_bounds_into_current_context(connective, contexter)
+            # The single-variable relations below are dropped and re-emitted from the context, so a
+            # relation the context could not absorb - one contradicting it, e.g. `7x = 1` or `x = 0`
+            # under `x >= 3` - must make the whole conjunction False rather than silently vanish.
+            if _insert_all_asserting_bounds_into_current_context(connective, contexter) == BoolLiteral(False):
+                contexter.exit_context()
+                return BoolLiteral(False)
 
             new_bounds = []
             for var, var_values in contexter.asserted_var_values[-1].items():
