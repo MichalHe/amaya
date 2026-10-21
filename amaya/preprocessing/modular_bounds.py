@@ -140,7 +140,16 @@ class Modular_Bound_Fact:
         return 0
 
     def is_vacuous(self) -> bool:
-        return self.interval.is_vacuous(self.modulus) or not self.term
+        """
+        Whether the fact holds for every assignment, so dropping it preserves the solution set.
+
+        A fact with an empty term is a ground test, `constant in interval (mod modulus)`, which can be
+        false; it is vacuous only when that test succeeds. A false ground fact is kept, and its encoding
+        (`encode_fact`) is unsatisfiable.
+        """
+        if self.interval.is_vacuous(self.modulus):
+            return True
+        return not self.term and self.interval.contains(self.constant, self.modulus)
 
     def holds_for(self, assignment: Dict[Var, int]) -> bool:
         value = self.constant + sum(coefficient * assignment[var] for var, coefficient in self.term)
@@ -202,6 +211,14 @@ class Modular_Bound_Fact:
         return f'{rendered}{constant} in {self.interval} (mod {self.modulus})'
 
 
+def _coefficient_of_var_in_congruence(congruence: Congruence) -> Dict[Var, int]:
+    """ The coefficient of every variable of `congruence`, summed over repeated occurrences of the variable. """
+    coefficient_of_var: Dict[Var, int] = {}
+    for var, coefficient in zip(congruence.vars, congruence.coefs):
+        coefficient_of_var[var] = coefficient_of_var.get(var, 0) + coefficient
+    return coefficient_of_var
+
+
 @dataclass(frozen=True)
 class Determined_Variable:
     """ A variable a congruence pins down: `var == term + constant` modulo the congruence's modulus. """
@@ -221,7 +238,7 @@ def solve_congruence_for_variable(congruence: Congruence, var: Var) -> Optional[
     which this pass does not represent.
     """
     modulus = congruence.modulus
-    coefficient_of_var = dict(zip(congruence.vars, congruence.coefs))
+    coefficient_of_var = _coefficient_of_var_in_congruence(congruence)
     if var not in coefficient_of_var:
         return None
 
@@ -246,12 +263,18 @@ class Congruence_System:
 
     `bound_vars` are the block's quantified variables; a variable outside that set is free and may not
     be eliminated, since the surrounding formula constrains it too.
+
+    `bounds` holds only the two-sided bounds of quantified variables, which is what the derivation
+    reads. `hard_bound_relations` holds every hard bound of every quantified variable as written, which
+    is what the rewrite re-emits for the variables it does not eliminate. Hard bounds on free variables
+    are kept in `other_conjuncts`.
     """
 
     bound_vars: FrozenSet[Var]
     bounds: Dict[Var, Tuple[int, int]]
     congruences: List[Congruence] = field(default_factory=list)
     other_conjuncts: List[ASTp_Node] = field(default_factory=list)
+    hard_bound_relations: Dict[Var, List[Relation]] = field(default_factory=dict)
 
     def variable_is_local_to(self, var: Var, congruence: Congruence) -> bool:
         """
@@ -269,11 +292,24 @@ class Congruence_System:
 
 
 def _referenced_vars_of(node: ASTp_Node) -> FrozenSet[Var]:
+    """
+    Every variable occurring in `node`, including variables bound inside it.
+
+    Computed from the structure rather than read from the cached `referenced_vars` field: blocks this
+    pass has already rewritten are nested inside the blocks it rewrites later, and their cached field is
+    repaired only once the whole traversal ends (`propagate_modular_bounds`).
+    """
+    from amaya.relations_structures import AST_Negation
+
     if isinstance(node, (Relation, Congruence)):
         return frozenset(node.vars)
     if isinstance(node, Var):
         return frozenset((node,))
-    return frozenset(getattr(node, 'referenced_vars', ()))
+    if isinstance(node, AST_Connective):
+        return frozenset().union(*(_referenced_vars_of(child) for child in node.children))
+    if isinstance(node, (AST_Negation, AST_Quantifier)):
+        return _referenced_vars_of(node.child)
+    return frozenset()
 
 
 def collect_congruence_system(quantifier: AST_Quantifier) -> Optional[Congruence_System]:
@@ -285,7 +321,9 @@ def collect_congruence_system(quantifier: AST_Quantifier) -> Optional[Congruence
     if not (isinstance(body, AST_Connective) and body.type == Connective_Type.AND):
         return None
 
+    bound_vars = frozenset(quantifier.bound_vars)
     bounds: Dict[Var, Tuple[Optional[int], Optional[int]]] = {}
+    hard_bound_relations: Dict[Var, List[Relation]] = {}
     congruences: List[Congruence] = []
     other_conjuncts: List[ASTp_Node] = []
 
@@ -293,7 +331,8 @@ def collect_congruence_system(quantifier: AST_Quantifier) -> Optional[Congruence
         if isinstance(conjunct, Congruence):
             congruences.append(conjunct)
             continue
-        if isinstance(conjunct, Relation) and conjunct.is_hard_bound():
+        if isinstance(conjunct, Relation) and conjunct.is_hard_bound() and conjunct.vars[0] in bound_vars:
+            hard_bound_relations.setdefault(conjunct.vars[0], []).append(conjunct)
             bound_type, var, limit = get_hard_bound_semantics(conjunct)
             lower, upper = bounds.get(var, (None, None))
             if bound_type == Bound_Type.LOWER:
@@ -309,8 +348,9 @@ def collect_congruence_system(quantifier: AST_Quantifier) -> Optional[Congruence
 
     two_sided = {var: (lower, upper) for var, (lower, upper) in bounds.items()
                  if lower is not None and upper is not None}
-    return Congruence_System(bound_vars=frozenset(quantifier.bound_vars), bounds=two_sided,
-                             congruences=congruences, other_conjuncts=other_conjuncts)
+    return Congruence_System(bound_vars=bound_vars, bounds=two_sided,
+                             congruences=congruences, other_conjuncts=other_conjuncts,
+                             hard_bound_relations=hard_bound_relations)
 
 
 @dataclass
@@ -432,7 +472,7 @@ def _find_eliminable_variable(system: Congruence_System,
 def _substitute_into_congruence(congruence: Congruence, var: Var, replacement: Determined_Variable,
                                 modulus: int) -> Congruence:
     """ `congruence` with `var` replaced by the term another congruence determines it to equal. """
-    coefficient_of_var = dict(zip(congruence.vars, congruence.coefs))
+    coefficient_of_var = _coefficient_of_var_in_congruence(congruence)
     multiplier = coefficient_of_var.pop(var, 0)
     if multiplier == 0:
         return congruence
@@ -567,8 +607,7 @@ def rewrite_quantifier_with_modular_bounds(quantifier: AST_Quantifier,
     conjuncts: List[ASTp_Node] = list(system.other_conjuncts)
     conjuncts.extend(derivation.surviving_congruences)
     for var in surviving_vars:
-        lower, upper = system.bounds.get(var, (None, None))
-        conjuncts.extend(_make_hard_bound(var, lower, upper))
+        conjuncts.extend(system.hard_bound_relations.get(var, []))
 
     next_var_id = max((var.id for var in var_table), default=0) + 1
     witnesses: List[Var] = []

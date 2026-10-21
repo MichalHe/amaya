@@ -252,3 +252,104 @@ def test_the_rewrite_declines_a_rename():
 def test_the_rewrite_is_off_by_default():
     from amaya.config import solver_config
     assert solver_config.optimizations.propagate_modular_bounds is False
+
+
+# --- regressions: rewrites that did not preserve the solution set ------------------------------
+#
+# Each case below is false for some value of the free variable while the rewrite produced by the
+# pass before the fix was true. See docs/MODULAR_BOUNDS_KNOWN_BUGS.md for the derivations.
+
+REGRESSION_MODULUS = 8
+FREE_VAR, Y, Z, W = Var(id=FREE_VAR_ID), Var(id=2), Var(id=3), Var(id=4)
+
+
+def _lower_bound(var, lower):
+    return Relation(vars=[var], coefs=[-1], rhs=-lower, predicate_symbol='<=')
+
+
+def _upper_bound(var, upper):
+    return Relation(vars=[var], coefs=[1], rhs=upper, predicate_symbol='<=')
+
+
+def _exists(bound_vars, *conjuncts):
+    quantifier = AST_Quantifier(referenced_vars=(), bound_vars=tuple(bound_vars),
+                                child=AST_Connective(referenced_vars=(), type=Connective_Type.AND,
+                                                     children=tuple(conjuncts)))
+    fill_referenced_vars(quantifier)
+    return quantifier
+
+
+def _evaluate(node, assignment, quantifier_search_range):
+    """ Truth value of `node` under `assignment`; quantified variables range over `quantifier_search_range`. """
+    if isinstance(node, (Relation, Congruence)):
+        return _conjunct_holds(node, assignment)
+    if isinstance(node, AST_Connective):
+        assert node.type == Connective_Type.AND
+        return all(_evaluate(child, assignment, quantifier_search_range) for child in node.children)
+    assert isinstance(node, AST_Quantifier)
+    return any(_evaluate(node.child, {**assignment, **dict(zip(node.bound_vars, values))}, quantifier_search_range)
+               for values in itertools.product(quantifier_search_range, repeat=len(node.bound_vars)))
+
+
+def _assert_rewrite_preserves_truth_for_every_free_value(formula):
+    original_truth = {value: _evaluate(formula, {FREE_VAR: value}, range(-3 * REGRESSION_MODULUS, 3 * REGRESSION_MODULUS))
+                      for value in range(-REGRESSION_MODULUS, REGRESSION_MODULUS)}
+    var_table = _make_var_table([FREE_VAR_ID, 2, 3, 4])
+    rewritten = propagate_modular_bounds(formula, var_table, Modular_Bound_Rewrite_Stats())
+
+    def free_vars_of(node):
+        if isinstance(node, (Relation, Congruence)):
+            return set(node.vars)
+        if isinstance(node, AST_Connective):
+            return set().union(*(free_vars_of(child) for child in node.children))
+        return free_vars_of(node.child) - set(node.bound_vars)
+
+    assert free_vars_of(rewritten) <= {FREE_VAR}, 'a quantified variable escaped its quantifier'
+    rewritten_truth = {value: _evaluate(rewritten, {FREE_VAR: value}, range(-3 * REGRESSION_MODULUS, 3 * REGRESSION_MODULUS))
+                       for value in original_truth}
+    assert rewritten_truth == original_truth
+
+
+def _congruence(pairs, rhs, modulus=REGRESSION_MODULUS):
+    return Congruence(vars=[var for _, var in pairs], coefs=[coefficient for coefficient, _ in pairs],
+                      rhs=rhs, modulus=modulus)
+
+
+def test_hard_bounds_on_free_variables_inside_the_block_are_kept():
+    """ Bug A: `exists y. 0 <= y <= 7 and x + y = 0 (mod 8) and 0 <= x <= 2`. """
+    formula = _exists([Y], _lower_bound(Y, 0), _upper_bound(Y, 7), _congruence([(1, FREE_VAR), (1, Y)], 0),
+                      _lower_bound(FREE_VAR, 0), _upper_bound(FREE_VAR, 2))
+    _assert_rewrite_preserves_truth_for_every_free_value(formula)
+
+
+def test_one_sided_bounds_on_surviving_variables_are_kept():
+    """ Bug B: `exists y, z. 0 <= y <= 7 and x + y = 0 (mod 8) and z >= 3 and z - x <= 0`. """
+    formula = _exists([Y, Z], _lower_bound(Y, 0), _upper_bound(Y, 7), _congruence([(1, FREE_VAR), (1, Y)], 0),
+                      _lower_bound(Z, 3), Relation(vars=[Z, FREE_VAR], coefs=[1, -1], rhs=0, predicate_symbol='<='))
+    _assert_rewrite_preserves_truth_for_every_free_value(formula)
+
+
+def test_a_variable_used_by_a_rewritten_nested_block_is_not_eliminated():
+    """ Bug C: the inner block is rewritten first; the outer block must still see that it uses `y`. """
+    inner = _exists([W], _lower_bound(W, 0), _upper_bound(W, 7), _congruence([(1, W), (1, Y)], 1),
+                    Relation(vars=[FREE_VAR, Y], coefs=[1, 1], rhs=2, predicate_symbol='<='))
+    formula = _exists([Y], _lower_bound(Y, 0), _upper_bound(Y, 7), _congruence([(1, FREE_VAR), (1, Y)], 0), inner)
+    _assert_rewrite_preserves_truth_for_every_free_value(formula)
+
+
+@pytest.mark.parametrize('lower, upper, congruence', [
+    (0, 0, _congruence([(1, Y)], 1, modulus=2)),
+    (0, 0, _congruence([(8, FREE_VAR), (1, Y)], 1)),
+])
+def test_a_false_variable_free_fact_is_not_dropped(lower, upper, congruence):
+    """ Bug E: a fact with an empty term is a ground test, which can be false. """
+    formula = _exists([Y], _lower_bound(Y, lower), _upper_bound(Y, upper), congruence)
+    _assert_rewrite_preserves_truth_for_every_free_value(formula)
+
+
+def test_repeated_variables_in_a_congruence_have_their_coefficients_summed():
+    """ Bug G: `y + y + x = 0 (mod 8)` has coefficient 2 on `y`, which is not invertible modulo 8. """
+    congruence = Congruence(vars=[Y, Y, FREE_VAR], coefs=[1, 1, 1], rhs=0, modulus=REGRESSION_MODULUS)
+    assert solve_congruence_for_variable(congruence, Y) is None
+    formula = _exists([Y], _lower_bound(Y, 0), _upper_bound(Y, 7), congruence)
+    _assert_rewrite_preserves_truth_for_every_free_value(formula)
