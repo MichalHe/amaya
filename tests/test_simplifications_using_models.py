@@ -559,3 +559,26 @@ def test_simplify_formula_using_model_properties_detects_unsat_congruence_after_
     simplified_formula = simplify_formula_using_model_properties(formula, assertions)
 
     assert simplified_formula == BoolLiteral(False)
+
+
+def test_simplify_formula_using_model_properties_detects_unsat_equation_after_substitution():
+    """
+    The equation counterpart of the congruence case above: substituting the alias `x = 3` into
+    `2x + 3z = 7` leaves `3z = 1`, which no integer `z` satisfies. Before the check, the equation was
+    kept and reached `build_nfa_from_linear_equality`, which raised StopIteration on the automaton's
+    empty set of final states.
+    """
+    x, z = Var(1), Var(2)
+    formula = AST_Connective(
+        referenced_vars=(x, z),
+        type=Connective_Type.AND,
+        children=(
+            Relation(vars=[x], coefs=[1], rhs=3, predicate_symbol='='),
+            Relation(vars=[x, z], coefs=[2, 3], rhs=7, predicate_symbol='='),
+        ),
+    )
+
+    assertions = Asserted_Model_Properties()
+    simplified_formula = simplify_formula_using_model_properties(formula, assertions)
+
+    assert simplified_formula == BoolLiteral(False)

@@ -585,6 +585,12 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
             if is_constant is not None:
                 return BoolLiteral(is_constant)
 
+            # Same reasoning as for congruences above: substituting an alias can leave an equation whose
+            # coefficients' gcd does not divide its rhs (`2x + 3z = 7` with `x = 3` becomes `3z = 1`),
+            # which no integer assignment satisfies.
+            if substituted.is_unsat_eq():
+                return BoolLiteral(False)
+
             if substituted.predicate_symbol != '=':
                 if substituted.is_hard_bound():
                     bound_var = substituted.vars[0]

@@ -58,6 +58,17 @@ UNSAT_CASES = [
         ('reason_about_models',),
         id='model-reasoning-state-shared-between-calls',
     ),
+    pytest.param(
+        # Model reasoning substitutes x = 3 and obtains 3z = 1, which has no integer solution.
+        """
+        (declare-fun x () Int)
+        (declare-fun z () Int)
+        (assert (and (= (+ (* 2 x) (* 3 z)) 7) (<= 3 x) (<= x 3)))
+        (check-sat)
+        """,
+        ('reason_about_models',),
+        id='model-reasoning-unsat-equation-after-substitution',
+    ),
 ]
 
 
