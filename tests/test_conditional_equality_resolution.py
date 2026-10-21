@@ -512,3 +512,45 @@ def test_f_smt2_resolves_once_inequality_substitution_is_reenabled():
     assert_semantically_equivalent(formula, result,
                                    bool_vars=[V_1, V_3, V_16, V_117, V_122], int_vars=[V_84, V_91, V_114],
                                    int_range=range(-2, 3))
+
+
+def _resolve_with_inequalities_directly(clauses, inequalities):
+    """
+    Call `_resolve_with_inequalities`, which `_try_eliminate_var` does not reach while the inequality
+    branch is disabled there, on clauses of the shape `(or escape (x = t))`.
+    """
+    from amaya.preprocessing.conditional_equality_resolution import _Clause_Match, _match_clause_against_var, _resolve_with_inequalities
+    matches = []
+    for index, clause in enumerate(clauses):
+        fill_referenced_vars(clause)
+        escape, equality = _match_clause_against_var(clause, X)
+        matches.append(_Clause_Match(and_child_index=index, escape=escape, equality=equality))
+    return _resolve_with_inequalities(X, matches, inequalities)
+
+
+def _variable_free_relations(node) -> list:
+    if isinstance(node, Relation):
+        return [node] if not node.vars else []
+    if isinstance(node, (AST_Negation, AST_Quantifier)):
+        return _variable_free_relations(node.child)
+    if isinstance(node, AST_Connective):
+        return [relation for child in node.children for relation in _variable_free_relations(child)]
+    return []
+
+
+@pytest.mark.parametrize('first_rhs, second_rhs, bound', [(1, 2, 5), (1, 1, 5), (1, 2, 1), (3, 4, 2)])
+def test_inequality_resolution_folds_relations_left_without_variables(first_rhs, second_rhs, bound):
+    """
+    Substituting a constant `t_i` into the bound `x <= bound`, and subtracting two constant equalities,
+    leaves relations without variables (`0 <= 4`, `0 = -1`). The automaton construction fails on such
+    a relation, so the rewrite must replace it by its truth value.
+    """
+    clauses = [dsl._or(A, _eq_x_to(None, rhs=first_rhs)), dsl._or(C, _eq_x_to(None, rhs=second_rhs))]
+    inequalities = [Relation(vars=[X], coefs=[1], rhs=bound, predicate_symbol='<=')]
+
+    result = _resolve_with_inequalities_directly(clauses, inequalities)
+
+    assert _variable_free_relations(result) == []
+    original = dsl._exists((X,), dsl._and(*clauses, *inequalities))
+    fill_referenced_vars(original)
+    assert_semantically_equivalent(original, result, bool_vars=[A, C], int_vars=[])

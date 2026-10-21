@@ -355,13 +355,21 @@ def _try_eliminate_var(var: Var, node: ASTp_Node) -> Optional[ASTp_Node]:
     )
 
 
-def _make_pairwise_equality(pivot_equality: Relation, other_equality: Relation) -> ASTp_Node:
-    """ `t_pivot = t_other`, folded to a BoolLiteral when no variables remain (e.g. `t_pivot = 5`, `t_other = 5`). """
-    difference = _subtract_equations(pivot_equality, other_equality)
-    constant_truth_value = difference.is_true_or_false()
+def _fold_constant_relation(relation: Relation) -> ASTp_Node:
+    """
+    `relation`, or its BoolLiteral truth value when no variables remain (e.g. `0 <= 4`).
+
+    A relation without variables cannot be handed to the automaton construction, which fails on it.
+    """
+    constant_truth_value = relation.is_true_or_false()
     if constant_truth_value is not None:
         return BoolLiteral(constant_truth_value)
-    return difference
+    return relation
+
+
+def _make_pairwise_equality(pivot_equality: Relation, other_equality: Relation) -> ASTp_Node:
+    """ `t_pivot = t_other`, folded to a BoolLiteral when no variables remain (e.g. `t_pivot = 5`, `t_other = 5`). """
+    return _fold_constant_relation(_subtract_equations(pivot_equality, other_equality))
 
 
 def _resolve_without_inequalities(matches: List[_Clause_Match]) -> ASTp_Node:
@@ -446,9 +454,10 @@ def _resolve_with_inequalities(var: Var, matches: List[_Clause_Match], inequalit
 
     pivot_terms: List[ASTp_Node] = []
     for i, pivot in enumerate(matches):
-        substituted_inequalities = [_substitute_var_in_relation(ineq, var, pivot.equality) for ineq in inequalities]
+        substituted_inequalities = [_fold_constant_relation(_substitute_var_in_relation(ineq, var, pivot.equality))
+                                    for ineq in inequalities]
         agreement_terms = [
-            _make_or([matches[j].escape, _subtract_equations(pivot.equality, matches[j].equality)])
+            _make_or([matches[j].escape, _make_pairwise_equality(pivot.equality, matches[j].equality)])
             for j in range(len(matches))
             if j != i
         ]
