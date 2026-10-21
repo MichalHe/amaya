@@ -504,8 +504,8 @@ kept as an accepted alias.
 > the order of its modulus, so replacing one of modulus 299909 by an equation removes ~300k states in
 > exchange for four nodes. Under a relative guard the pass could never fire on a formula below about
 > twenty nodes — exactly where a congruence dominates the cost. Its output is bounded without the
-> guard: `unbound_vars._should_linearize` declines a congruence whose variable range spans more than
-> four strides, and `max_runs=1` bounds the applications.
+> guard: `unbound_vars._linearize_two_variable_congruence` declines a congruence that would need more
+> than `MAX_LINEARIZATION_BRANCHES` (5) disjuncts, and `max_runs=1` bounds the applications.
 
 | Pass | Existing function | max_runs | growth limit | consumes | produces | measured hit rate |
 |---|---|---|---|---|---|---|

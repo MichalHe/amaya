@@ -300,8 +300,8 @@ def _registry_definition() -> List[Pass_Descriptor]:
             # automaton for a congruence has states on the order of its modulus, so replacing one of
             # modulus 299909 by an equation removes ~300k states in exchange for four nodes - the
             # growth is the point of the pass, not a symptom to ration. Its output is bounded anyway:
-            # `unbound_vars._should_linearize` declines a congruence whose variable range spans more
-            # than four strides, and `max_runs=1` bounds the applications.
+            # `unbound_vars._linearize_two_variable_congruence` declines a congruence that would need
+            # more than `MAX_LINEARIZATION_BRANCHES` disjuncts, and `max_runs=1` bounds the applications.
             tier=Pass_Tier.HEAVY, max_runs=1, growth_factor_limit=None,
             consumes=frozenset({ATOM_REWRITTEN, BOUNDS_TIGHTENED}),
             produces=frozenset({ATOM_REWRITTEN, EQUALITY_EXPOSED}),

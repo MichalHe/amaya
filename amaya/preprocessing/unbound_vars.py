@@ -1,6 +1,5 @@
 from __future__ import annotations
 from collections import defaultdict
-import fractions
 from dataclasses import (
     dataclass,
     field
@@ -2572,32 +2571,14 @@ def _strenghten_value_intervals(congruence: Congruence, value_intervals: List[Tu
     return []
 
 
-
-@dataclass
-class Linearized_Var_Spec:
-    var: Var
-    idx: int
-    coef: int
-    interval: Tuple[int, int]
-
-
-def _should_linearize(x_var_spec: Linearized_Var_Spec, y_var_spec: Linearized_Var_Spec, congruence: Congruence, x_stride: fractions.Fraction) -> bool:
-    if abs(y_var_spec.coef) != 1:
-        return False  # Both variables have a |coefficient| > 1 which requires a complex tiling of the 2D space
-
-    if abs(x_var_spec.interval[1] - x_var_spec.interval[0]) / x_stride > 4:
-        return False  # Linearization would create a very large disjunction
-
-    if _interval_length(y_var_spec.interval) > congruence.modulus:
-        return False  # We can linearize, but we give up (likely too many disjuncts would be created)
-
-    return True
+MAX_LINEARIZATION_BRANCHES = 5
+""" Upper bound on the number of disjuncts `_linearize_two_variable_congruence` produces for one congruence. """
 
 
 def _attempt_congruence_linearization(congruence: Congruence,
                                       contexter: Parent_Context_Var_Values,
                                       monotonicity: Monotonicity_Info,
-                                      monotonicity_eligible_vars: Optional[FrozenSet[Var]] = None) -> AST_Connective | None:
+                                      monotonicity_eligible_vars: Optional[FrozenSet[Var]] = None) -> AST_Connective | BoolLiteral | None:
     """
     Replace `congruence` by the linear equations it has inside the box its variables' bounds describe,
     or return None when that is not possible.
@@ -2646,14 +2627,14 @@ def _attempt_congruence_linearization(congruence: Congruence,
 
         is_c_best_from_below = var_bounds.upper_limit is not None and var_monotonicity.increasing
         if is_c_best_from_below:
-            assert var_bounds.upper_limit
+            assert var_bounds.upper_limit is not None
             value_interval = (var_bounds.upper_limit-congruence.modulus+1, var_bounds.upper_limit)
             var_ranges.append(value_interval)
             continue
 
         is_c_best_from_above = var_bounds.lower_limit is not None and var_monotonicity.decreasing
         if is_c_best_from_above:
-            assert var_bounds.lower_limit
+            assert var_bounds.lower_limit is not None
             value_interval = (var_bounds.lower_limit, var_bounds.lower_limit+congruence.modulus-1)
             var_ranges.append(value_interval)
             continue
@@ -2664,68 +2645,72 @@ def _attempt_congruence_linearization(congruence: Congruence,
     if not can_linearize:
         return None
 
-    # y_coef*y + x_coef*x = K --> move X to the other side, and multiply by inverse(y_coef) to get  y =  x_coef' * x + K'
-    x_var_spec = Linearized_Var_Spec(var=congruence.vars[0], idx=0, coef=-congruence.coefs[0], interval=var_ranges[0])
-    y_var_spec = Linearized_Var_Spec(var=congruence.vars[1], idx=1, coef=congruence.coefs[1], interval=var_ranges[1])
+    return _linearize_two_variable_congruence(congruence, var_ranges)
 
-    y_coef_inverse = pow(y_var_spec.coef, -1, congruence.modulus)
 
-    if y_coef_inverse == 0:
+def _linearize_two_variable_congruence(congruence: Congruence, var_ranges: List[Tuple[int, int]]) -> AST_Connective | BoolLiteral | None:
+    """
+    Replace `a*x + b*y = r (mod M)` by a disjunction of linear equations, given finite ranges for `x`
+    and `y` (in the order of `congruence.vars`), or return None.
+
+    With `b` invertible modulo `M`, the congruence is equivalent to `y = c*x + d - k*M` for some
+    integer `k`, where `c = -a * inv(b)` and `d = r * inv(b)` (mod M). The result has one disjunct per
+    `k` for which `y` can fall into its range:
+
+        (and (y_low <= c*x + d - k*M) (c*x + d - k*M <= y_high) (c*x - y = k*M - d))
+
+    Every disjunct implies the congruence, and within the ranges the disjunction is equivalent to it.
+    The range constraints are stated on `c*x` so that the disjunct also confines `y` to its range when
+    that range comes from the monotonicity argument rather than from bounds present in the formula.
+
+    The roles of the two variables are swapped if only the first coefficient is invertible.
+    """
+    modulus = congruence.modulus
+    for x_idx, y_idx in ((0, 1), (1, 0)):
+        y_coef = congruence.coefs[y_idx] % modulus
+        if math.gcd(y_coef, modulus) == 1:
+            break
+    else:
+        return None  # Neither coefficient is invertible, `y` is not a function of `x`
+
+    x_var, y_var = congruence.vars[x_idx], congruence.vars[y_idx]
+    x_low, x_high = var_ranges[x_idx]
+    y_low, y_high = var_ranges[y_idx]
+
+    if _interval_length((y_low, y_high)) > modulus:
+        return None  # Several values of `y` per value of `x`; likely too many disjuncts
+
+    y_coef_inverse = pow(y_coef, -1, modulus)
+    x_coef = (-congruence.coefs[x_idx] * y_coef_inverse) % modulus
+    if x_coef > modulus // 2:
+        x_coef -= modulus  # The representative closest to 0 gives the fewest disjuncts
+    offset = (congruence.rhs * y_coef_inverse) % modulus
+
+    if x_coef == 0:
+        return None  # The congruence does not relate the two variables
+
+    x_term_low, x_term_high = sorted((x_coef * x_low, x_coef * x_high))
+    first_k = -((y_high - x_term_low - offset) // modulus)   # ceil((x_term_low + offset - y_high) / M)
+    last_k = (x_term_high + offset - y_low) // modulus       # floor((x_term_high + offset - y_low) / M)
+
+    if last_k < first_k:
+        return BoolLiteral(False)  # No value of `y` within its range satisfies the congruence
+    if last_k - first_k + 1 > MAX_LINEARIZATION_BRANCHES:
         return None
-
-    y_var_spec.coef = 1
-    x_var_spec.coef = (x_var_spec.coef * y_coef_inverse) % congruence.modulus
-    rhs = (congruence.rhs*y_coef_inverse) % congruence.modulus
-
-    leftmost_x = x_var_spec.interval[0]
-    x_stride = fractions.Fraction(congruence.modulus, x_var_spec.coef)
-
-    if not _should_linearize(x_var_spec, y_var_spec, congruence, x_stride):
-        return None
-
-    try:
-        _x_inv = pow(-x_var_spec.coef, -1, congruence.modulus) % congruence.modulus
-        first_zero = fractions.Fraction((rhs * _x_inv) % congruence.modulus, 1)
-    except ValueError:
-        # -<x_coef>*x = rhs
-        if rhs % (x_var_spec.coef) == 0:
-            first_zero_val = rhs / -x_var_spec.coef
-            first_zero = fractions.Fraction(first_zero_val)
-        else:
-            return None
-
-    first_zero_distance = leftmost_x*x_var_spec.coef - first_zero
-    strides_from_first_zero = first_zero_distance / x_stride
-
-    x_below = first_zero + math.floor(strides_from_first_zero) * x_stride
-    x_below = fractions.Fraction(x_below, x_var_spec.coef)
-    x_above = x_below + x_stride
-
-    # Calculate the offset as a distance from origin which has offset -rhs'
-    first_offset = -first_zero - math.floor(strides_from_first_zero) * x_stride
-
-    def emit_branch(branches: List[AST_Connective], x_start: fractions.Fraction, x_end: fractions.Fraction, offset: fractions.Fraction):
-        lower_bound = Relation(vars=[x_var_spec.var], coefs=[-x_start.denominator], rhs=-x_start.numerator, predicate_symbol='<=')
-        upper_bound = Relation(vars=[x_var_spec.var], coefs=[x_end.denominator], rhs=x_end.numerator-1, predicate_symbol='<=')
-        fn = Relation(vars=[x_var_spec.var, y_var_spec.var], coefs=[x_var_spec.coef*offset.denominator, -1*offset.denominator], rhs=-offset.numerator, predicate_symbol='=')
-        branches.append(AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=(lower_bound, upper_bound, fn)))
 
     branches: List[AST_Connective] = []
-    emit_branch(branches, x_below, x_above, first_offset)
+    for k in range(first_k, last_k + 1):
+        shift = offset - k * modulus  # y = x_coef*x + shift
+        lower_bound = Relation(vars=[x_var], coefs=[-x_coef], rhs=shift - y_low, predicate_symbol='<=')
+        upper_bound = Relation(vars=[x_var], coefs=[x_coef], rhs=y_high - shift, predicate_symbol='<=')
+        if x_idx == 0:
+            equation = Relation(vars=[x_var, y_var], coefs=[x_coef, -1], rhs=-shift, predicate_symbol='=')
+        else:
+            equation = Relation(vars=[y_var, x_var], coefs=[-1, x_coef], rhs=-shift, predicate_symbol='=')
+        branches.append(AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND,
+                                       children=(lower_bound, upper_bound, equation)))
 
-    # At every iteration [start, end] when we reach end, we need to make it zero again ---> subtract x_alpha
-    branch_x_start = x_above
-    iter = 0
-    offset = first_offset
-
-    while branch_x_start < x_var_spec.interval[1]:
-        branch_x_end = branch_x_start + x_stride
-        offset -= x_stride
-        emit_branch(branches, branch_x_start, branch_x_end, offset)
-        branch_x_start += x_stride
-
-    or_node = AST_Connective(referenced_vars=tuple(), type=Connective_Type.OR, children=tuple(branches))
-    return or_node
+    return AST_Connective(referenced_vars=tuple(), type=Connective_Type.OR, children=tuple(branches))
 
 
 def _linearize_congruences(root: ASTp_Node,
@@ -2738,7 +2723,7 @@ def _linearize_congruences(root: ASTp_Node,
         case Congruence():
             linearized_congruence = _attempt_congruence_linearization(root, contexter, monotonicity,
                                                                      monotonicity_eligible_vars)
-            if linearized_congruence:
+            if linearized_congruence is not None:
                 return linearized_congruence
             return root
 
