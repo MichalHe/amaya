@@ -20,6 +20,9 @@ from amaya.preprocessing.modular_bounds import (
     Modular_Bound_Fact,
     Modular_Bound_Rewrite_Stats,
     Modular_Interval,
+    Modular_Interval_Union,
+    _preimage_under_multiplication,
+    _shift_union_by_multiples,
     collect_congruence_system,
     derive_modular_bound_facts,
     propagate_modular_bounds,
@@ -28,6 +31,7 @@ from amaya.preprocessing.modular_bounds import (
 from amaya.relations_structures import (
     AST_Connective,
     AST_Quantifier,
+    BoolLiteral,
     Congruence,
     Connective_Type,
     Relation,
@@ -68,19 +72,40 @@ def _conjunct_holds(conjunct, assignment):
     return total <= conjunct.rhs
 
 
-def _satisfying_free_values(quantifier, modulus, search_ranges):
-    """ The free variable's values for which the block is satisfiable, by exhaustive search. """
-    bound_vars = list(quantifier.bound_vars)
-    conjuncts = quantifier.child.children
-    satisfying = set()
-    for free_value in range(modulus):
-        assignment = {Var(id=FREE_VAR_ID): free_value}
-        for combination in itertools.product(*(search_ranges[var] for var in bound_vars)):
-            assignment.update(dict(zip(bound_vars, combination)))
-            if all(_conjunct_holds(conjunct, assignment) for conjunct in conjuncts):
-                satisfying.add(free_value)
-                break
-    return satisfying
+def _holds(node, assignment, search_range_of_var):
+    """
+    Truth value of `node` under `assignment`. A quantified variable ranges over
+    `search_range_of_var(var)`; the rewrite may emit `BoolLiteral`, OR connectives and bare conjunctions.
+    """
+    if isinstance(node, BoolLiteral):
+        return node.value
+    if isinstance(node, (Relation, Congruence)):
+        return _conjunct_holds(node, assignment)
+    if isinstance(node, AST_Connective):
+        child_truths = (_holds(child, assignment, search_range_of_var) for child in node.children)
+        return all(child_truths) if node.type == Connective_Type.AND else any(child_truths)
+    assert isinstance(node, AST_Quantifier)
+    bound_vars = list(node.bound_vars)
+    return any(_holds(node.child, {**assignment, **dict(zip(bound_vars, values))}, search_range_of_var)
+               for values in itertools.product(*(search_range_of_var(var) for var in bound_vars)))
+
+
+def _satisfying_free_values(formula, modulus, search_ranges, default_search_range=None):
+    """ The free variable's values for which `formula` is true, by exhaustive search. """
+    def search_range_of_var(var):
+        return search_ranges[var] if default_search_range is None else search_ranges.get(var, default_search_range)
+    return {free_value for free_value in range(modulus)
+            if _holds(formula, {Var(id=FREE_VAR_ID): free_value}, search_range_of_var)}
+
+
+def _count_congruences(node):
+    if isinstance(node, Congruence):
+        return 1
+    if isinstance(node, AST_Connective):
+        return sum(_count_congruences(child) for child in node.children)
+    if isinstance(node, AST_Quantifier):
+        return _count_congruences(node.child)
+    return 0
 
 
 MODULUS = 32
@@ -206,24 +231,23 @@ def _rewrite(bounds, congruences, bound_ids):
 def _assert_same_satisfying_set(original, rewritten, bounds):
     search_ranges = {Var(id=var_id): range(lower, upper + 1)
                      for var_id, (lower, upper) in bounds.items()}
-    after_ranges = dict(search_ranges)
-    for var in rewritten.bound_vars:
-        after_ranges.setdefault(var, range(-2 * MODULUS, 2 * MODULUS))
     assert (_satisfying_free_values(original, MODULUS, search_ranges)
-            == _satisfying_free_values(rewritten, MODULUS, after_ranges))
+            == _satisfying_free_values(rewritten, MODULUS, search_ranges,
+                                       default_search_range=range(-2 * MODULUS, 2 * MODULUS)))
 
 
 def test_the_rewrite_fires_when_a_window_spans_a_full_period():
     """
     A variable whose window covers every residue makes its congruence vacuous, so that congruence goes
-    without a fact taking its place - the case where the rewrite is a strict win.
+    without a fact taking its place. The remaining fact over `100*x1 + 10*x14 + x13` covers every residue
+    once `x13` and `x14` are folded, so the block is true for every `x1`.
     """
     bounds = {**MOTIVATING_BOUNDS, 15: (0, MODULUS - 1)}
     original, rewritten, stats = _rewrite(bounds, MOTIVATING_CONGRUENCES, [13, 14, 15, 16])
 
     assert stats.blocks_rewritten == 1
-    assert stats.congruences_eliminated == 2 and stats.facts_emitted == 1
-    assert len(rewritten.bound_vars) < len(original.bound_vars)
+    assert stats.congruences_eliminated == 2 and stats.facts_emitted == 0
+    assert rewritten == BoolLiteral(value=True)
     _assert_same_satisfying_set(original, rewritten, bounds)
 
 
@@ -237,16 +261,34 @@ def test_the_rewrite_preserves_the_satisfying_set_exactly():
     _assert_same_satisfying_set(original, rewritten, bounds)
 
 
-def test_the_rewrite_declines_a_rename():
+def test_the_motivating_block_is_folded_into_one_congruence():
     """
-    Two congruences in and two facts out costs one congruence and one witness variable each - no
-    simplification, so the block is left alone.
+    The derivation leaves two facts sharing `x13` and `x14`. `x13` occurs in one fact and is folded; the
+    other fact's term is then 10 times the first's, so the two merge; `x14` is then folded.
     """
     original, rewritten, stats = _rewrite(MOTIVATING_BOUNDS, MOTIVATING_CONGRUENCES, [13, 14, 15, 16])
 
+    assert stats.blocks_rewritten == 1
+    assert stats.facts_merged == 1 and stats.vars_folded == 2
+    assert _count_congruences(rewritten) == 1
+    _assert_same_satisfying_set(original, rewritten, MOTIVATING_BOUNDS)
+
+
+def test_the_rewrite_declines_facts_whose_terms_are_not_related():
+    """
+    Two facts over different free variables cannot merge; two congruences in and two facts out saves no
+    congruence, so the block is left alone.
+    """
+    other_free_var_id = 5
+    congruences = [([(1, FREE_VAR_ID), (1, 15)], 0), ([(1, other_free_var_id), (1, 16)], 1)]
+    bounds = {15: (0, 3), 16: (0, 3)}
+    quantifier = _build_block(MODULUS, bounds, congruences, [15, 16])
+    stats = Modular_Bound_Rewrite_Stats()
+    rewritten = propagate_modular_bounds(quantifier, _make_var_table([FREE_VAR_ID, other_free_var_id, 15, 16]), stats)
+
     assert stats.blocks_examined == 1
-    assert stats.blocks_rewritten == 0
-    assert rewritten == original, 'the block must come back unchanged'
+    assert stats.declined_no_congruence_saved == 1
+    assert rewritten == quantifier, 'the block must come back unchanged'
 
 
 def test_the_rewrite_is_off_by_default():
@@ -257,7 +299,7 @@ def test_the_rewrite_is_off_by_default():
 # --- regressions: rewrites that did not preserve the solution set ------------------------------
 #
 # Each case below is false for some value of the free variable while the rewrite produced by the
-# pass before the fix was true. See docs/MODULAR_BOUNDS_KNOWN_BUGS.md for the derivations.
+# pass before the fix was true. See the message of commit dffbde2 for the derivations.
 
 REGRESSION_MODULUS = 8
 FREE_VAR, Y, Z, W = Var(id=FREE_VAR_ID), Var(id=2), Var(id=3), Var(id=4)
@@ -281,14 +323,7 @@ def _exists(bound_vars, *conjuncts):
 
 def _evaluate(node, assignment, quantifier_search_range):
     """ Truth value of `node` under `assignment`; quantified variables range over `quantifier_search_range`. """
-    if isinstance(node, (Relation, Congruence)):
-        return _conjunct_holds(node, assignment)
-    if isinstance(node, AST_Connective):
-        assert node.type == Connective_Type.AND
-        return all(_evaluate(child, assignment, quantifier_search_range) for child in node.children)
-    assert isinstance(node, AST_Quantifier)
-    return any(_evaluate(node.child, {**assignment, **dict(zip(node.bound_vars, values))}, quantifier_search_range)
-               for values in itertools.product(quantifier_search_range, repeat=len(node.bound_vars)))
+    return _holds(node, assignment, lambda var: quantifier_search_range)
 
 
 def _assert_rewrite_preserves_truth_for_every_free_value(formula):
@@ -298,6 +333,8 @@ def _assert_rewrite_preserves_truth_for_every_free_value(formula):
     rewritten = propagate_modular_bounds(formula, var_table, Modular_Bound_Rewrite_Stats())
 
     def free_vars_of(node):
+        if isinstance(node, BoolLiteral):
+            return set()
         if isinstance(node, (Relation, Congruence)):
             return set(node.vars)
         if isinstance(node, AST_Connective):
@@ -353,3 +390,148 @@ def test_repeated_variables_in_a_congruence_have_their_coefficients_summed():
     assert solve_congruence_for_variable(congruence, Y) is None
     formula = _exists([Y], _lower_bound(Y, 0), _upper_bound(Y, 7), congruence)
     _assert_rewrite_preserves_truth_for_every_free_value(formula)
+
+
+# --- exact folding over unions of intervals ----------------------------------------------------
+
+def _random_union(random_generator, modulus):
+    intervals = []
+    for _ in range(random_generator.randint(1, 3)):
+        lower = random_generator.randrange(-modulus, 2 * modulus)
+        intervals.append((lower, lower + random_generator.randint(0, modulus // 2)))
+    return Modular_Interval_Union.from_unreduced_intervals(intervals, modulus)
+
+
+def _members(union):
+    return {residue for residue in range(union.modulus) if union.contains(residue)}
+
+
+@pytest.mark.parametrize('modulus', [30, 32])
+def test_shifting_a_union_by_multiples_matches_enumeration(modulus):
+    import random
+    random_generator = random.Random(modulus)
+    for _ in range(300):
+        residues = _random_union(random_generator, modulus)
+        coefficient = random_generator.choice([value for value in range(-modulus // 2, modulus // 2 + 1) if value])
+        lower = random_generator.randint(-5, 5)
+        upper = lower + random_generator.randint(0, 6)
+        shifted = _shift_union_by_multiples(residues, coefficient, lower, upper)
+        expected = {(member - coefficient * value) % modulus for member in _members(residues)
+                    for value in range(lower, upper + 1)}
+        assert shifted is not None and _members(shifted) == expected
+
+
+@pytest.mark.parametrize('modulus', [30, 32])
+def test_the_preimage_under_multiplication_matches_enumeration(modulus):
+    import random
+    random_generator = random.Random(modulus + 1)
+    for _ in range(300):
+        target, domain = _random_union(random_generator, modulus), _random_union(random_generator, modulus)
+        multiplier = random_generator.choice([value for value in range(-12, 13) if value])
+        constant = random_generator.randrange(-2 * modulus, 2 * modulus)
+        preimage = _preimage_under_multiplication(target, multiplier, constant, domain)
+        expected = {member for member in _members(domain) if target.contains(multiplier * member + constant)}
+        assert preimage is not None and _members(preimage) == expected
+
+
+def _decimal_step_block(modulus):
+    """
+    The block shape of a two-digit decimal step with signed wraparound, as reported for modulus `2**32`:
+
+        48 <= x19, x20 <= 57,  0 <= x21 <= M/2 - 1,  M/2 <= x22 <= M - 1
+        x20 + 10*x21 - x22 == 48 (mod M),   10*x1 + x19 - x21 == 48 (mod M)
+    """
+    half = modulus // 2
+    bounds = {19: (48, 57), 20: (48, 57), 21: (0, half - 1), 22: (half, modulus - 1)}
+    congruences = [([(1, 20), (10, 21), (modulus - 1, 22)], 48), ([(10, FREE_VAR_ID), (1, 19), (modulus - 1, 21)], 48)]
+    return _build_block(modulus, bounds, congruences, [19, 20, 21, 22])
+
+
+def _decimal_step_block_holds(x1, modulus):
+    """
+    Truth of `_decimal_step_block` for `x1`. C36 determines `x21` modulo M and its window is shorter than M,
+    so `x21` exists exactly when the residue of `10*x1 + x19 - 48` lies in `[0, M/2 - 1]`; C35 determines
+    `x22` the same way. Only `x19` and `x20` are enumerated.
+    """
+    half = modulus // 2
+    for x19 in range(48, 58):
+        x21 = (10 * x1 + x19 - 48) % modulus
+        if x21 >= half:
+            continue
+        if any((x20 + 10 * x21 - 48) % modulus >= half for x20 in range(48, 58)):
+            return True
+    return False
+
+
+def test_the_decimal_step_block_is_folded_exactly_at_a_reduced_modulus():
+    modulus = 2**10
+    quantifier = _decimal_step_block(modulus)
+    stats = Modular_Bound_Rewrite_Stats()
+    rewritten = propagate_modular_bounds(quantifier, _make_var_table([FREE_VAR_ID, 19, 20, 21, 22]), stats)
+
+    assert stats.blocks_rewritten == 1 and stats.facts_emitted == 1
+    assert _count_congruences(rewritten) == 1
+    assert len(rewritten.bound_vars) == 1, 'only the witness of the single fact remains quantified'
+    for x1 in range(modulus):
+        assert _holds(rewritten, {Var(id=FREE_VAR_ID): x1}, lambda var: range(modulus)) \
+            == _decimal_step_block_holds(x1, modulus), f'x1 = {x1}'
+
+
+def test_the_decimal_step_block_is_folded_into_five_intervals_at_modulus_2_to_32():
+    import random
+    modulus = 2**32
+    quantifier = _decimal_step_block(modulus)
+    stats = Modular_Bound_Rewrite_Stats()
+    rewritten = propagate_modular_bounds(quantifier, _make_var_table([FREE_VAR_ID, 19, 20, 21, 22]), stats)
+
+    assert stats.blocks_rewritten == 1 and stats.facts_emitted == 1 and stats.intervals_emitted == 5
+    congruence = next(child for child in rewritten.child.children if isinstance(child, Congruence))
+    disjunction = next(child for child in rewritten.child.children
+                       if isinstance(child, AST_Connective) and child.type == Connective_Type.OR)
+    intervals = [(-alternative.children[0].rhs, alternative.children[1].rhs) for alternative in disjunction.children]
+
+    def rewritten_holds(x1):
+        witness_residue = (sum(coefficient * x1 for coefficient, var in zip(congruence.coefs, congruence.vars)
+                               if var == Var(id=FREE_VAR_ID)) - congruence.rhs) % modulus
+        return any(lower <= witness_residue <= upper for lower, upper in intervals)
+
+    random_generator = random.Random(0)
+    inverse_of_5 = pow(5, -1, 2**31)
+    samples = [random_generator.randrange(modulus) for _ in range(2000)]
+    for lower, upper in intervals:   # x1 values whose 10*x1 - 48 lands next to an interval endpoint
+        for endpoint in (lower, upper):
+            for offset in range(-12, 13):
+                target = endpoint + 48 + offset
+                if target % 2 == 0:
+                    samples.append((target // 2 * inverse_of_5) % 2**31)
+    for x1 in samples:
+        assert rewritten_holds(x1) == _decimal_step_block_holds(x1, modulus), f'x1 = {x1}'
+
+
+def test_random_blocks_keep_their_satisfying_sets():
+    """ Random blocks over one free variable: every rewrite must preserve the satisfying set exactly. """
+    import random
+    random_generator = random.Random(7)
+    rewritten_blocks = 0
+    for _ in range(150):
+        modulus = random_generator.choice([6, 8, 9, 10])
+        bound_ids = [2, 3, 4, 5][:random_generator.randint(2, 4)]
+        bounds = {}
+        for var_id in bound_ids:
+            lower = random_generator.randint(-2, modulus - 1)
+            bounds[var_id] = (lower, lower + random_generator.randint(0, modulus // 2))
+        congruences = []
+        for _ in range(random_generator.randint(1, 3)):
+            chosen = random_generator.sample([FREE_VAR_ID] + bound_ids, random_generator.randint(2, 3))
+            congruences.append(([(random_generator.randint(-modulus + 1, modulus - 1) or 1, var_id) for var_id in chosen],
+                                random_generator.randrange(modulus)))
+        quantifier = _build_block(modulus, bounds, congruences, bound_ids)
+        stats = Modular_Bound_Rewrite_Stats()
+        rewritten = propagate_modular_bounds(quantifier, _make_var_table([FREE_VAR_ID] + bound_ids), stats)
+        rewritten_blocks += stats.blocks_rewritten + stats.blocks_refuted
+
+        search_ranges = {Var(id=var_id): range(lower, upper + 1) for var_id, (lower, upper) in bounds.items()}
+        assert (_satisfying_free_values(quantifier, modulus, search_ranges)
+                == _satisfying_free_values(rewritten, modulus, search_ranges,
+                                           default_search_range=range(0, modulus))), (bounds, congruences)
+    assert rewritten_blocks > 20, f'only {rewritten_blocks} of 150 blocks were rewritten'

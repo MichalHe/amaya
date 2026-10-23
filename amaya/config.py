@@ -163,9 +163,9 @@ class OptimizationsConfig:
     Targets an existential block whose body conjoins hard bounds with congruences of one modulus - the
     shape a machine-arithmetic encoding produces, where the modulus is `2**32`. A congruence of modulus
     `m` costs an automaton on the order of `m`, so removing one is worth far more than the nodes it
-    costs. Applied only when it does not increase the congruence count and does decrease the number of
-    quantified variables. Runs once, in the pipeline's first round. See
-    `amaya/preprocessing/modular_bounds.py`.
+    costs. Facts that share variables are combined without approximation into unions of intervals.
+    Applied only when the rewritten block has strictly fewer congruences; a block containing a fact
+    that holds for no assignment is replaced by False. See `amaya/preprocessing/modular_bounds.py`.
     """
 
     use_bounded_congruence_construction: bool = False
