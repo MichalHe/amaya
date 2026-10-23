@@ -223,7 +223,6 @@ def _example_md_formula(bound_rhs: int) -> ASTp_Node:
     return formula
 
 
-@pytest.mark.skip(reason='inequality-substitution rewrite is temporarily disabled in _try_eliminate_var')
 def test_bound_plus_equalities_eliminates_quantifier():
     formula = _example_md_formula(bound_rhs=-1)
     result = resolve_conditional_equalities(formula)
@@ -272,7 +271,6 @@ def _general_inequality_formula(bound_rhs: int) -> ASTp_Node:
     return formula
 
 
-@pytest.mark.skip(reason='inequality-substitution rewrite is temporarily disabled in _try_eliminate_var')
 def test_general_inequality_eliminates_outer_quantifier():
     formula = _general_inequality_formula(bound_rhs=0)
     result = resolve_conditional_equalities(formula)
@@ -366,7 +364,6 @@ def test_clause_with_genuinely_different_equalities_is_left_alone():
     assert result == formula
 
 
-@pytest.mark.skip(reason='inequality-substitution rewrite is temporarily disabled in _try_eliminate_var')
 def test_single_direction_general_inequality_needs_no_residual_quantifier():
     """
     Mirrors a real formula fragment: `x <= y - 1` only bounds x from one side, even though it
@@ -483,27 +480,8 @@ def test_f_smt2_multi_escape_clauses_with_mixed_equality_orientations():
                                    int_range=range(-2, 3))
 
 
-def test_f_smt2_bound_blocks_elimination():
-    """
-    The `f.smt2` formula as written: the same two clauses guarded by `var_135 - var_114 <= -1`.
-
-    The bound is an inequality on the quantified variable that also mentions the free `var_114`,
-    so eliminating `var_135` requires the inequality-substitution rewrite - which is currently
-    switched off in `_try_eliminate_var`. Until it is re-enabled, the pass must bail out and
-    return the formula untouched rather than drop the bound (which would be unsound: it is
-    exactly the bound that can contradict the value the clauses pin `var_135` to).
-    """
-    formula = _f_smt2_formula()
-
-    result = resolve_conditional_equalities(formula)
-
-    assert result == formula
-    assert _has_quantifier(result)
-
-
-@pytest.mark.skip(reason='inequality-substitution rewrite is temporarily disabled in _try_eliminate_var')
-def test_f_smt2_resolves_once_inequality_substitution_is_reenabled():
-    """ Companion to `test_f_smt2_bound_blocks_elimination` - the result the full `f.smt2` should get. """
+def test_f_smt2_with_its_bound_is_resolved():
+    """ The `f.smt2` formula as written: the two clauses guarded by `var_135 - var_114 <= -1`, which mentions the free `var_114`. """
     formula = _f_smt2_formula()
 
     result = resolve_conditional_equalities(formula)
@@ -515,10 +493,7 @@ def test_f_smt2_resolves_once_inequality_substitution_is_reenabled():
 
 
 def _resolve_with_inequalities_directly(clauses, inequalities):
-    """
-    Call `_resolve_with_inequalities`, which `_try_eliminate_var` does not reach while the inequality
-    branch is disabled there, on clauses of the shape `(or escape (x = t))`.
-    """
+    """ Call `_resolve_with_inequalities` on clauses of the shape `(or escape (x = t))`, bypassing the pattern matching of `_try_eliminate_var`. """
     from amaya.preprocessing.conditional_equality_resolution import _Clause_Match, _match_clause_against_var, _resolve_with_inequalities
     matches = []
     for index, clause in enumerate(clauses):

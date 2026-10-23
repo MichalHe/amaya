@@ -37,10 +37,9 @@ involve other free variables - conjoined alongside the conditional-equality clau
 This is a strictly harder case: unlike the escape literals, `(x <= V114 - 1)` has no
 escape of its own - it must hold no matter which branch resolves the equalities, so a
 value used to eliminate `x` (either "any value" when every alpha_i holds, or one of the
-t_i otherwise) must be checked against it. The correct rewrite (derived and verified
-against a full truth table below - see the module-level comment above `_try_eliminate_var`
-for why the naive "just substitute one t_i and OR in its escape" rule from EXAMPLE.md is
-UNSOUND) is:
+t_i otherwise) must be checked against it. The rule "substitute one t_i and OR in its
+escape" is unsound; `tests/test_conditional_equality_resolution.py:test_example_md_naive_shortcut_is_unsound`
+gives a counterexample. The rewrite `_resolve_with_inequalities` produces is:
 
     (and D_ok alpha_1 ... alpha_n)
     or (and (not alpha_1) D(t_1) (or alpha_2 (t_1 = t_2)) (or alpha_3 (t_1 = t_3)) ...)
@@ -323,9 +322,6 @@ def _try_eliminate_var(var: Var, node: ASTp_Node) -> Optional[ASTp_Node]:
             continue
 
         if isinstance(child, Relation) and child.predicate_symbol == '<=':
-            # TEMPORARILY DISABLED: the inequality-substitution rewrite (`_resolve_with_inequalities`)
-            # is switched off - bail out entirely instead of eliminating `var` in its presence.
-            return None
             inequality_indices.append(idx)
             inequalities.append(child)
             continue
