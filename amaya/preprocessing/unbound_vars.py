@@ -2017,7 +2017,7 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
                 if value_interval_width != bound_var_coef:
                     continue
 
-                if not bound_var_value.lower_limit and not bound_var_value.upper_limit:
+                if bound_var_value.lower_limit is None and bound_var_value.upper_limit is None:
                     #  E(x2) (x1 - 5x2 \in [K, K+4]) - says nothing about the value of free variable
                     rels_to_replace.append((relation_indices, []))
                     continue
