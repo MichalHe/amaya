@@ -582,3 +582,71 @@ def test_simplify_formula_using_model_properties_detects_unsat_equation_after_su
     simplified_formula = simplify_formula_using_model_properties(formula, assertions)
 
     assert simplified_formula == BoolLiteral(False)
+
+
+def _less_or_equal(var_coef_pairs: list[tuple[int, Var]], rhs: int) -> Relation:
+    var_coef_pairs = sorted(var_coef_pairs, key=lambda var_coef_pair: var_coef_pair[1])
+    coefs, vars = zip(*var_coef_pairs)
+    return Relation(vars=list(vars), coefs=list(coefs), rhs=rhs, predicate_symbol='<=')
+
+
+def test_remove_atoms_satisfied_by_unconstrained_vars_falsifies_negative_atom_with_existential_binder():
+    """
+    `(not (and (<= x s) (<= y 0) (<= (- y) 0)))` with `x`, `s`, `y` free: `x <= s` is under one
+    negation and `x` is (implicitly) existential, so the witness for `x` makes the atom False. The
+    conjunction becomes False and the formula becomes True (e.g., x = s + 1 satisfies it for any y).
+    """
+    x, s, y = Var(1), Var(2), Var(3)
+    atom_with_unconstrained_var = _less_or_equal([(1, x), (-1, s)], 0)
+    formula = dsl._neg(dsl._and(
+        atom_with_unconstrained_var,
+        _less_or_equal([(1, y)], 0),
+        _less_or_equal([(-1, y)], 0),
+    ))
+
+    var_use_info = Variable_Use_Info()
+    scan_variable_use(formula, var_use_info)
+
+    assert remove_atoms_satisfied_by_unconstrained_vars(atom_with_unconstrained_var, var_use_info,
+                                                        desired_polarity=False) == BoolLiteral(False)
+    assert remove_atoms_satisfied_by_unconstrained_vars(formula, var_use_info, desired_polarity=True) == BoolLiteral(True)
+
+
+def test_remove_atoms_satisfied_by_unconstrained_vars_falsifies_positive_atom_with_universal_binder():
+    """
+    `(not (exists ((x Int)) (not (and (<= x s) (<= y 0) (<= (- y) 0)))))` with `s`, `y` free is
+    `forall x. (x <= s and y = 0)`, which is unsatisfiable. `x` is bound by an existential quantifier
+    under one negation (binder polarity False) and `x <= s` has polarity True, so the witness for
+    `x` makes the atom False. The formula becomes False.
+    """
+    x, s, y = Var(1), Var(2), Var(3)
+    formula = dsl._neg(dsl._exists((x,), dsl._neg(dsl._and(
+        _less_or_equal([(1, x), (-1, s)], 0),
+        _less_or_equal([(1, y)], 0),
+        _less_or_equal([(-1, y)], 0),
+    ))))
+
+    var_use_info = Variable_Use_Info()
+    scan_variable_use(formula, var_use_info)
+
+    assert remove_atoms_satisfied_by_unconstrained_vars(formula, var_use_info, desired_polarity=True) == BoolLiteral(False)
+
+
+def test_remove_atoms_satisfied_by_unconstrained_vars_keeps_atom_whose_other_var_is_in_later_alternation_block():
+    """
+    `(exists ((y Int)) (not (exists ((x Int)) (and (<= (+ y x) 0) (<= x 0)))))` is
+    `exists y. forall x. not (y + x <= 0 and x <= 0)`, which is unsatisfiable (x = min(0, -y)).
+    `y` is used only once, but `x` is bound in a later alternation block (block 1) than `y`
+    (block 0), so `y` cannot be chosen after `x` and must not decide `y + x <= 0`. `x` is used twice.
+    The formula is left unchanged.
+    """
+    y, x = Var(1), Var(2)
+    formula = dsl._exists((y,), dsl._neg(dsl._exists((x,), dsl._and(
+        _less_or_equal([(1, y), (1, x)], 0),
+        _less_or_equal([(1, x)], 0),
+    ))))
+
+    var_use_info = Variable_Use_Info()
+    scan_variable_use(formula, var_use_info)
+
+    assert remove_atoms_satisfied_by_unconstrained_vars(formula, var_use_info, desired_polarity=True) == formula
