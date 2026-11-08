@@ -443,8 +443,6 @@ def _simplify_unbounded_equations(ast: ASTp_Node) -> ASTp_Node:
                     vars.append(var)
                     coefs.append(coef)
 
-                if sum(coef > 0 for coef in coefs):
-                    coefs = [-1 * coef for coef in coefs]
 
                 modulus = gcd(*bound_var_coefs)
                 rhs = rel.rhs % modulus
