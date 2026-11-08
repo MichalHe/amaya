@@ -704,6 +704,7 @@ NFA compute_nfa_intersection(NFA& left, NFA& right) {
 }
 
 extern u64 union_applied_cnt;
+extern u64 g_set_leaf_bytes;
 
 NFA determinize_nfa(NFA& nfa) {
     LACE_ME;
@@ -737,6 +738,8 @@ NFA determinize_nfa(NFA& nfa) {
     u64 total_state_size = 0;
     u64 processed_states = 0;
     union_applied_cnt = 0;
+    static const u64 leaf_gc_bytes = getenv("AMAYA_LEAF_GC_MB") ? (u64) atoll(getenv("AMAYA_LEAF_GC_MB")) * 1024ull * 1024ull : 0;
+    u64 leaf_gcs = 0;
 
     while (!work_queue.empty()) {
         AMAYA_CHECK_INTERRUPT();
@@ -775,6 +778,13 @@ NFA determinize_nfa(NFA& nfa) {
         sylvan::mtbdd_ref(transition_mtbdd);
         sylvan::mtbdd_refs_pop(1);
         result.transitions.emplace(handle, transition_mtbdd);
+
+        // PERF-PROTOTYPE: sylvan only collects garbage when its node table is full, but the custom
+        // leaves own heap memory that the table does not see. Collect when that memory gets large.
+        if (leaf_gc_bytes > 0 && g_set_leaf_bytes > leaf_gc_bytes) {
+            sylvan_gc();
+            leaf_gcs++;
+        }
 
         total_state_size += current_macrostate_entry->first.size();
         processed_states += 1;
