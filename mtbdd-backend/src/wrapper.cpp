@@ -18,6 +18,8 @@
 #include <cstring>
 #include <functional>
 #include <stdexcept>
+#include <cstdlib>
+#include <cerrno>
 
 using namespace sylvan;
 
@@ -41,6 +43,37 @@ void init_machinery()
     lace_startup(0, NULL, NULL);
 
     sylvan_set_limits(1LL << 32, 5, 5);
+
+    // Testing aid: AMAYA_SYLVAN_TABLE_LOG2 (optionally with AMAYA_SYLVAN_TABLE_MAX_LOG2,
+    // AMAYA_SYLVAN_CACHE_LOG2 and AMAYA_SYLVAN_CACHE_MAX_LOG2) shrinks sylvan's tables so that garbage
+    // collection runs often, which exposes MTBDDs that are not protected across allocating calls.
+    // Bounds: llmsset_create requires at least 2^9 table buckets, sylvan_set_sizes allows at most 2^42.
+    if (getenv("AMAYA_SYLVAN_TABLE_LOG2")) {
+        auto size_from_env = [](const char* variable_name, long minimum_log2, long maximum_log2, size_t fallback) -> size_t {
+            const char* value = getenv(variable_name);
+            if (!value) return fallback;
+
+            char* parse_end = nullptr;
+            errno = 0;
+            long parsed_log2 = strtol(value, &parse_end, 10);
+
+            bool strtol_reported_error     = (errno != 0);
+            bool parsing_reached_end       = (parse_end != value && *parse_end == '\0');
+            bool parsed_value_within_range = (minimum_log2 <= parsed_log2 && parsed_log2 <= maximum_log2);
+
+            if (strtol_reported_error || !parsing_reached_end || !parsed_value_within_range) {
+                std::cerr << variable_name << "=" << value << ": expected an integer in ["
+                          << minimum_log2 << ", " << maximum_log2 << "]\n";
+                exit(1);
+            }
+            return size_t{1} << parsed_log2;
+        };
+        size_t table_size = size_from_env("AMAYA_SYLVAN_TABLE_LOG2",     9, 42, 0);
+        size_t table_max  = size_from_env("AMAYA_SYLVAN_TABLE_MAX_LOG2", 9, 42, table_size);
+        size_t cache_size = size_from_env("AMAYA_SYLVAN_CACHE_LOG2",     0, 42, table_size);
+        size_t cache_max  = size_from_env("AMAYA_SYLVAN_CACHE_MAX_LOG2", 0, 42, cache_size);
+        sylvan_set_sizes(table_size, table_max, cache_size, cache_max);
+    }
     //sylvan_set_sizes(1LL << 27, 1LL << 26, 1LL << 26, 1LL << 20);
     //sylvan_set_sizes(1LL << 24, 1LL << 28, 1LL << 24, 1LL << 28);
     sylvan_init_package();
