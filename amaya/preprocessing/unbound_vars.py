@@ -1939,12 +1939,18 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
         dependencies: Dict[Var, List[int]] = defaultdict(list)
 
         is_surjection = False
+        bound_var_has_other_constraints = False
 
         relations: Tuple[Relation,...] = and_node.children  # type: ignore
         for subtree_idx, subtree in enumerate(relations):
             assert isinstance(subtree, Relation)
             if not bound_var in subtree.vars:
                 continue
+
+            if len(subtree.vars) == 1 and not subtree.is_hard_bound():
+                # e.g. (= q 0): neither a bound nor a dependency, the rewrite below would silently drop it
+                bound_var_has_other_constraints = True
+                break
 
             if subtree.is_hard_bound():
                 bound_type, _, bound_val = get_hard_bound_semantics(subtree)
@@ -1960,7 +1966,7 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
                 dependencies[var].append(subtree_idx)
 
         is_fin = (bound_var_value.upper_limit is not None) and (bound_var_value.lower_limit is not None)
-        if is_fin:
+        if is_fin or bound_var_has_other_constraints:
             continue
 
         if len(dependencies) > 1:
