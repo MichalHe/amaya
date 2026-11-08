@@ -738,6 +738,7 @@ NFA determinize_nfa(NFA& nfa) {
     u64 total_state_size = 0;
     u64 processed_states = 0;
     union_applied_cnt = 0;
+    static const bool det_balanced = getenv("AMAYA_DET_BALANCED") != nullptr;
     static const u64 leaf_gc_bytes = getenv("AMAYA_LEAF_GC_MB") ? (u64) atoll(getenv("AMAYA_LEAF_GC_MB")) * 1024ull * 1024ull : 0;
     u64 leaf_gcs = 0;
 
@@ -757,7 +758,34 @@ NFA determinize_nfa(NFA& nfa) {
         }
 
         sylvan::MTBDD macrostate_transitions = sylvan::mtbdd_false;
+        size_t pushed_refs = 0;
+        if (det_balanced) {
+            // PERF-PROTOTYPE: balanced (pairwise) union of the members' MTBDDs. Every leaf created on
+            // a level is the union of 2^level member leaves, so the total size of the intermediate
+            // leaves on a path is O(k log k) instead of the O(k^2) of the left fold below.
+            std::vector<sylvan::MTBDD> level;
+            level.reserve(macrostate.size());
+            for (auto& macrostate_member: macrostate) {
+                auto it = nfa.transitions.find(macrostate_member);
+                if (it != nfa.transitions.end() && it->second != sylvan::mtbdd_false) level.push_back(it->second);
+            }
+            std::vector<sylvan::MTBDD> next_level;
+            while (level.size() > 1) {
+                next_level.clear();
+                for (size_t i = 0; i + 1 < level.size(); i += 2) {
+                    using namespace sylvan;
+                    sylvan::MTBDD u = mtbdd_applyp(level[i], level[i+1], 0u, TASK(transitions_union_op), AMAYA_UNION_OP_ID);
+                    sylvan::mtbdd_refs_push(u);
+                    pushed_refs++;
+                    next_level.push_back(u);
+                }
+                if (level.size() % 2) next_level.push_back(level.back());
+                level.swap(next_level);
+            }
+            macrostate_transitions = level.empty() ? sylvan::mtbdd_false : level[0];
+        } else {
         sylvan::mtbdd_refs_push(macrostate_transitions);
+        pushed_refs = 1;
         for (auto& macrostate_member: macrostate) {
             auto& member_mtbdd = nfa.transitions[macrostate_member];
 
@@ -768,6 +796,7 @@ NFA determinize_nfa(NFA& nfa) {
             sylvan::mtbdd_refs_push(new_macrostate_transitions);
             macrostate_transitions = new_macrostate_transitions;
         }
+        }
 
         using namespace sylvan;
         MTBDD transition_mtbdd = mtbdd_uapplyp(macrostate_transitions,
@@ -776,7 +805,7 @@ NFA determinize_nfa(NFA& nfa) {
                                                reinterpret_cast<u64>(&(ctx)));
 
         sylvan::mtbdd_ref(transition_mtbdd);
-        sylvan::mtbdd_refs_pop(1);
+        sylvan::mtbdd_refs_pop(pushed_refs);
         result.transitions.emplace(handle, transition_mtbdd);
 
         // PERF-PROTOTYPE: sylvan only collects garbage when its node table is full, but the custom
