@@ -2079,7 +2079,7 @@ def _optimize_congruences_on_unbound_vars(root: ASTp_Node, opt_result: Exists_Op
             vars  = [term[1] for term in new_terms]
 
             if not vars:
-                return BoolLiteral(True)
+                return BoolLiteral(root.rhs % new_modulus == 0)
 
             return Congruence(vars=vars, coefs=coefs, modulus=new_modulus, rhs=(root.rhs % new_modulus))
         case Var():
