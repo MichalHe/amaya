@@ -372,7 +372,7 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
 
         else:  # 'or' or '=' (Boolean equivalence)
             connective_type = Connective_Type.OR if ast.node_type == 'or' else Connective_Type.EQUIV
-            vars_to_not_rewrite = filter_vars_with_no_info_from_node(vars_with_rewritten_bounds, ast)
+            vars_to_not_rewrite = set()
             rewritten_subtrees = (_simplify_bounded_atoms(subtree, vars_to_not_rewrite) for subtree in ast.children)
             preserved_subtrees = tuple(tree for tree in rewritten_subtrees if tree)
             if not preserved_subtrees:
