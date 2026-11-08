@@ -2348,6 +2348,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
                 logger.debug('Congruence solving for %s - implied var values: %s', var, implied_var_values)
 
             if not implied_var_values:
+                new_bounds.extend((atom, False) for atom in bound.synthetize_atoms(var))
                 continue
 
             if implied_var_values[0] > implied_var_values[1]:
