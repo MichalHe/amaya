@@ -320,6 +320,11 @@ def normalize_expr(ast: Raw_AST,
         nonlin_constant, _, _ = normalize_expr(ast[2], nonlinear_term_graph, scoper)
         if nonlin_constant.linear_terms:
             raise NonlinearArithmeticError(f'Non-constant divisor/modulus: {ast=}')
+        if not lin_term.linear_terms and not dependent_terms and nonlin_constant.constant_term != 0:
+            # fold ground terms - a placeholder for them would never be defined.
+            m = nonlin_constant.constant_term
+            r = lin_term.constant_term % abs(m)
+            return Expr(constant_term=r if node_type == 'mod' else (lin_term.constant_term - r) // m), set(), support
         lin_terms = tuple(sorted(lin_term.linear_terms.items(), key=lambda var_coef_pair: var_coef_pair[0]))
 
         constant_term = lin_term.constant_term
