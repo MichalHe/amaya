@@ -559,10 +559,11 @@ class Var_Use_Info:
         positive_atom_uses = self.vars_in_positive_atoms[var]
         disequation_uses = self.vars_in_disequalities[var]
 
-        is_var_used_once = (positive_atom_uses + disequation_uses) == 1
-        is_var_used_only_in_diseqs = (positive_atom_uses == 0) and disequation_uses >= 0
+        if var not in self.existentially_quantified_vars:
+            return False  # free variables are constrained by the caller's context
 
-        return is_var_used_once or is_var_used_only_in_diseqs
+        is_var_used_only_in_diseqs = (positive_atom_uses == 0) and disequation_uses > 0
+        return is_var_used_only_in_diseqs
 
     def contains_any_data(self) -> bool:
         return bool(self.vars_in_disequalities) or bool(self.vars_in_disequalities)
