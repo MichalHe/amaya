@@ -218,7 +218,8 @@ def make_value_interval_negation(intervals: List[Value_Interval]) -> List[Value_
     for i in range(len(intervals)-1):
         start = intervals[i].upper_limit + 1  # type: ignore
         end = intervals[i+1].lower_limit - 1  # type: ignore
-        result.append(Value_Interval(lower_limit=start, upper_limit=end))
+        if start <= end:  # adjacent intervals (e.g. <-inf,3>, <4,+inf>) leave no gap
+            result.append(Value_Interval(lower_limit=start, upper_limit=end))
 
     if intervals[-1].upper_limit is not None:
         result.append(Value_Interval(lower_limit=intervals[-1].upper_limit + 1, upper_limit=None))
@@ -402,7 +403,9 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
 
         else:  # 'or' or '=' (Boolean equivalence)
             connective_type = Connective_Type.OR if ast.node_type == 'or' else Connective_Type.EQUIV
-            vars_to_not_rewrite = filter_vars_with_no_info_from_node(vars_with_rewritten_bounds, ast)
+            # The ancestor's bound is (union over branches) /\ (siblings); it does not imply a branch-local
+            # bound, so the atoms of the branches must be kept.
+            vars_to_not_rewrite = set()
             rewritten_subtrees = (_simplify_bounded_atoms(subtree, vars_to_not_rewrite) for subtree in ast.children)
             preserved_subtrees = tuple(tree for tree in rewritten_subtrees if tree)
             if not preserved_subtrees:
@@ -464,6 +467,9 @@ def _simplify_unbounded_equations(ast: ASTp_Node) -> ASTp_Node:
                         continue
                     remaining_lin_terms.append((var, coef))
                 remaining_lin_terms = sorted(remaining_lin_terms, key = lambda var_coef_pair: var_coef_pair[0])
+
+                if not bound_var_coefs:  # no quantified var occurs in the equation (e.g. it cancelled out)
+                    return rel
 
                 if not remaining_lin_terms:
                     return BoolLiteral(value=True)
@@ -586,10 +592,12 @@ class Var_Use_Info:
         positive_atom_uses = self.vars_in_positive_atoms[var]
         disequation_uses = self.vars_in_disequalities[var]
 
-        is_var_used_once = (positive_atom_uses + disequation_uses) == 1
-        is_var_used_only_in_diseqs = (positive_atom_uses == 0) and disequation_uses >= 0
+        if var not in self.existentially_quantified_vars:
+            return False  # free variables are constrained by the caller's context
 
-        return is_var_used_once or is_var_used_only_in_diseqs
+        # The `used once` shortcut ignored polarity and the solvability of the atom (2y = x), dropped.
+        is_var_used_only_in_diseqs = (positive_atom_uses == 0) and disequation_uses > 0
+        return is_var_used_only_in_diseqs
 
     def contains_any_data(self) -> bool:
         return bool(self.vars_in_disequalities) or bool(self.vars_in_disequalities)
@@ -954,7 +962,7 @@ def do_and_or_tree_lookahead_and_produce_dnf(ast: ASTp_Node) -> Optional[ASTp_No
             return FrozenCongruence.from_congruence(atom)
         else:
             assert isinstance(atom, Var) or isinstance(atom, BoolLiteral), atom
-            return atom
+            return ('bool-literal', atom.value) if isinstance(atom, BoolLiteral) else atom
 
     # We have a valid AND-OR tree
 
@@ -1961,12 +1969,18 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
         dependencies: Dict[Var, List[int]] = defaultdict(list)
 
         is_surjection = False
+        bound_var_has_other_constraints = False
 
         relations: Tuple[Relation,...] = and_node.children  # type: ignore
         for subtree_idx, subtree in enumerate(relations):
             assert isinstance(subtree, Relation)
             if not bound_var in subtree.vars:
                 continue
+
+            if len(subtree.vars) == 1 and not subtree.is_hard_bound():
+                # e.g. (= q 0): neither a bound nor a dependency, the rewrite below would silently drop it
+                bound_var_has_other_constraints = True
+                break
 
             if subtree.is_hard_bound():
                 bound_type, _, bound_val = get_hard_bound_semantics(subtree)
@@ -1982,7 +1996,7 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
                 dependencies[var].append(subtree_idx)
 
         is_fin = (bound_var_value.upper_limit is not None) and (bound_var_value.lower_limit is not None)
-        if is_fin:
+        if is_fin or bound_var_has_other_constraints:
             continue
 
         if len(dependencies) > 1:

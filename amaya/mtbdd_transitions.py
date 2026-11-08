@@ -134,6 +134,8 @@ class MTBDDTransitionFn():
         assert variable.id > 0, 'MTBDD variables are numbered via ints from 1 up'
 
         old_vars = self._nfa.vars
+        if variable.id not in old_vars:
+            return  # variable does not occur in the automaton - projection is identity
         var_idx = old_vars.index(variable.id)
         new_vars = old_vars[:var_idx] + old_vars[var_idx + 1:]
 
@@ -412,7 +414,7 @@ class MTBDDTransitionFn():
             atoms.append((libamaya.Atom_Type.CONGRUENCE, dense_coefs, atom.modulus))
             initial_state.append(atom.rhs)
 
-        quantified_local_tracks = [var_id_to_local_track[var.id] for var in sorted(quantified_vars)]
+        quantified_local_tracks = [var_id_to_local_track[var.id] for var in sorted(quantified_vars) if var.id in var_id_to_local_track]
 
         logger.info('Lazy constructing automaton for conjunction: %s', linear_atoms + congruences)
         logger.info('Variables to IDs: %s', var_id_to_local_track)
