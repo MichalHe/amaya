@@ -1,3 +1,4 @@
+#include "../include/interrupt.hpp"
 #include "../include/lazy.hpp"
 #include "../include/tfa_leaf.h"
 #include "../include/algorithms.hpp"
@@ -930,6 +931,7 @@ void explore_macrostate(NFA& constructed_nfa,
 {
     alphabet_iter.reset();
 
+    u64 symbols_since_interrupt_check = 0;
     while (!alphabet_iter.finished) {
         Intermediate_Macrostate post;
         bool is_accepting = false;
@@ -939,6 +941,9 @@ void explore_macrostate(NFA& constructed_nfa,
         bool is_post_top = false;
         bool dbg_was_rewritten = false;
         for (u64 symbol = transition_symbol; alphabet_iter.has_more_quantif_symbols; symbol = alphabet_iter.next_symbol()) {
+            // The alphabet is enumerated explicitly (2^var_count symbols per macrostate), so poll for
+            // SIGINT/SIGTERM here as well, not only once per macrostate.
+            if ((++symbols_since_interrupt_check & 0xFFFF) == 0) AMAYA_CHECK_INTERRUPT();
 #if DEBUG_RUNTIME
             auto start = std::chrono::system_clock::now();
 #endif
