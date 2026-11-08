@@ -928,7 +928,7 @@ def do_and_or_tree_lookahead_and_produce_dnf(ast: ASTp_Node) -> Optional[ASTp_No
             return FrozenCongruence.from_congruence(atom)
         else:
             assert isinstance(atom, Var) or isinstance(atom, BoolLiteral), atom
-            return atom
+            return ('bool-literal', atom.value) if isinstance(atom, BoolLiteral) else atom
 
     # We have a valid AND-OR tree
 
