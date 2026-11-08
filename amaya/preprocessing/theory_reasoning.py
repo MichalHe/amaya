@@ -801,7 +801,27 @@ def scan_variable_use(root_node: ASTp_Node, var_use: Variable_Use_Info):
 
 def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
                                                  var_uses: Variable_Use_Info,
-                                                 desired_polarity: bool) -> ASTp_Node:
+                                                 desired_polarity: bool,
+                                                 _binders: dict | None = None,
+                                                 _block: tuple[int, bool] = (0, True)) -> ASTp_Node:
+    """
+    Replace an atom by a Boolean constant when it contains a variable `v` used nowhere else and `v`
+    can be chosen after all other variables of the atom are fixed.
+
+    `desired_polarity` is the polarity of `root_node` (True = under an even number of negations).
+    `_binders` maps each quantified variable to (alternation block index, binder polarity); free
+    variables are in block 0 with polarity True (implicitly existential). A block index increases
+    whenever a quantifier's polarity differs from the polarity of the enclosing block, i.e. at every
+    quantifier alternation. `v` may be Skolemised over the atom's other variables only if none of
+    them is bound in a later block than `v`. Inside the scope of `v`'s binder, `v` makes the atom
+    take the value that helps the binder: True if the atom's polarity equals the binder's polarity,
+    False otherwise.
+    """
+    binders = _binders if _binders is not None else {}
+
+    def binder_of(var: Var) -> tuple[int, bool]:
+        return binders.get(var, (0, True))
+
     match root_node:
         case BoolLiteral():
             return root_node
@@ -817,36 +837,38 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
             return root_node
 
         case Relation():
-            unconstrained_var_coefs = [
-                coef for var, coef in zip(root_node.vars, root_node.coefs) if var_uses.is_var_used_only_once(var)
-            ]
-
-            if not unconstrained_var_coefs:
-                return root_node
-
-            if root_node.predicate_symbol == '=':
-                # A variable used nowhere else can absorb any value the relation's other terms take
-                # (making the relation trivially true regardless of them) only if it - or, jointly,
-                # the unconstrained variables together - can reach every residue, i.e. their combined
-                # gcd is 1 (e.g. a lone unconstrained variable needs coefficient +-1; two of them with
-                # coefficients 2 and 3 can jointly reach any residue too). A coefficient (or gcd) like
-                # 4194304 can only ever make the relation's variable(s) land on a multiple of 4194304,
-                # not an arbitrary value - dropping the relation in that case would silently discard a
-                # real constraint (e.g. `x = 4194304*y` does NOT mean x is unconstrained).
-                if math.gcd(*unconstrained_var_coefs) != 1:
-                    return root_node
-            # For '<'/'<=', any nonzero coefficient on an otherwise-unconstrained variable already
-            # lets it be driven towards +-infinity in the right direction to satisfy the relation
-            # regardless of the other terms' value - no gcd condition needed.
-
-            return BoolLiteral(True)  # This relation gives us no information about models
+            for var, coef in zip(root_node.vars, root_node.coefs):
+                if coef == 0 or not var_uses.is_var_used_only_once(var):
+                    continue
+                bool_uses = var_uses.bool_var_uses.get(var)
+                if bool_uses is not None and (bool_uses.positive or bool_uses.negative):
+                    continue  # also occurs as a Bool atom (e.g. Bool `=` translated into an integer equation)
+                var_block, binder_polarity = binder_of(var)
+                if any(binder_of(other)[0] > var_block for other in root_node.vars if other != var):
+                    continue  # `var` would have to be chosen before an inner, alternated variable
+                target_value = (desired_polarity == binder_polarity)
+                if root_node.predicate_symbol == '=' and target_value and abs(coef) != 1:
+                    # Variables sharing `var`'s binder can be chosen jointly; together they reach
+                    # every residue iff the gcd of their coefficients is 1.
+                    joint_coefs = [
+                        other_coef for other, other_coef in zip(root_node.vars, root_node.coefs)
+                        if other_coef != 0 and var_uses.is_var_used_only_once(other)
+                        and binder_of(other) == binder_of(var)
+                    ]
+                    if math.gcd(*joint_coefs) != 1:
+                        continue
+                return BoolLiteral(target_value)
+            return root_node
 
         case Congruence():
             return root_node
 
         case AST_Connective():
+            if root_node.type == Connective_Type.EQUIV:
+                return root_node  # children occur in both polarities
+
             new_children = tuple(
-                remove_atoms_satisfied_by_unconstrained_vars(child, var_uses, desired_polarity)
+                remove_atoms_satisfied_by_unconstrained_vars(child, var_uses, desired_polarity, binders, _block)
                 for child in root_node.children
             )
 
@@ -858,41 +880,30 @@ def remove_atoms_satisfied_by_unconstrained_vars(root_node: ASTp_Node,
 
             result = result.remove_idempotent_children()
             return result
-                    
+
         case AST_Quantifier():
-            new_child = remove_atoms_satisfied_by_unconstrained_vars(root_node.child, var_uses, desired_polarity)
+            block_index, block_polarity = _block
+            if desired_polarity != block_polarity:
+                block_index, block_polarity = block_index + 1, desired_polarity
+            inner_binders = dict(binders)
+            for bound_var in root_node.bound_vars:
+                inner_binders[bound_var] = (block_index, block_polarity)
+
+            new_child = remove_atoms_satisfied_by_unconstrained_vars(root_node.child, var_uses, desired_polarity,
+                                                                     inner_binders, (block_index, block_polarity))
             kept_vars = tuple(var for var in root_node.bound_vars if ast_references_var(new_child, var))
 
             if isinstance(new_child, BoolLiteral):
                 return new_child
-            
+
             if not kept_vars:
                 return new_child
 
-            return AST_Quantifier(referenced_vars=tuple(), bound_vars=kept_vars, child=new_child)                
+            return AST_Quantifier(referenced_vars=tuple(), bound_vars=kept_vars, child=new_child)
 
         case AST_Negation():
-            new_polarity = not desired_polarity
-
-            # Perform look-ahead since we are using True to say that a relation
-            # gives no information about models (how it restricts the remaining
-            # variables). Negating True would give us False, which is not what
-            # we want -- we really want to say that anything partial assignment
-            # to the remaining variables can be completed to a model (which is
-            # definitely not False).
-            #
-            # Maybe we should introduce a new (temporary) node type for this kind
-            # of optimisation. For now, we rely on the fact that we always push negations
-            # maximally inwards.
-            if isinstance(root_node.child, Relation):
-                relation: Relation = root_node.child
-                for var in relation.vars:
-                    if var_uses.is_var_used_only_once(var):
-                        result = BoolLiteral(True)
-                        return result
-
-            new_child = remove_atoms_satisfied_by_unconstrained_vars(root_node.child, var_uses, new_polarity)
-
+            new_child = remove_atoms_satisfied_by_unconstrained_vars(root_node.child, var_uses, not desired_polarity,
+                                                                     binders, _block)
             if isinstance(new_child, BoolLiteral):
                 return BoolLiteral(value=not new_child.value)
 
