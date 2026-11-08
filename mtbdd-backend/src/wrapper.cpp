@@ -47,7 +47,7 @@ void init_machinery()
     sylvan_init_mtbdd();
 
     // Initialize leaf type for leaves containing sets - represents outgoing transition from a state
-    g_solver_context = new Solver_Context;
+    g_solver_context = new Solver_Context{};  // Value-initialize: config.flags must not be indeterminate
     Set_Leaf::init_set_leaf(&g_solver_context->leaf_id_store);
     Bit_Set_Leaf::init_bit_set_leaf(&g_solver_context->leaf_id_store);
 
