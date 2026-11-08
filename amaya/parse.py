@@ -1007,7 +1007,7 @@ def try_lazy_construct_conjunction(exists_node: AST_Quantifier, ctx: EvaluationC
             new_atom = divide_relation_by_gcd(atom)
             if isinstance(new_atom, BoolLiteral) and new_atom.value == False:
                 assert ctx.alphabet
-                return NFA.trivial_nonaccepting(ctx.alphabet)
+                return ctx.get_automaton_class_for_current_backend().trivial_nonaccepting(ctx.alphabet)
         else:
             new_atom = atom
         new_atoms.append(new_atom)
@@ -1207,6 +1207,14 @@ def evaluate_exists_expr(exists_expr: AST_Quantifier, ctx: EvaluationContext, _d
     # projection - we have to do it only after the variable has been projected away.
 
     logger.debug(f'Established projection order: {vars_to_project}')
+
+    import os as _os
+    _pynfa = getattr(getattr(nfa, 'transition_fn', None), '_nfa', None)
+    if _os.environ.get('FIX_PROJ') and _pynfa is not None:
+        _tracked = set(_pynfa.vars)
+        vars_to_project = [var for var in vars_to_project if var.id in _tracked]
+        if not vars_to_project:
+            return minimize_automaton_if_configured(exists_expr, nfa, ctx)
 
     last_var_to_project = vars_to_project[-1]
     for var in vars_to_project:
