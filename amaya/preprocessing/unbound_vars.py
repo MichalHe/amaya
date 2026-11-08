@@ -161,49 +161,19 @@ def _make_value_interval_union(left_intervals: List[Value_Interval], right_inter
 
 
 def make_value_interval_union(left_intervals: List[Value_Interval], right_intervals: List[Value_Interval]):
-    if not left_intervals:
-        return right_intervals
-    if not right_intervals:
-        return left_intervals
-
-    # Start = 's', End = 'e'
-    def is_less(point_a, point_b):
-        if point_a[0] is None:
-            return -1 if point_a[1] == 's' else 1
-        if point_b[0] is None:
-            return 1 if point_b[1] == 's' else -1
-        return -1 if point_a[0] < point_b[0] else 1
-
-    points = []
-    for interval in itertools.chain(left_intervals, right_intervals):
-        points.append((interval.lower_limit, 's'))
-        points.append((interval.upper_limit, 'e'))
-
-    sorted_points = sorted(points, key=functools.cmp_to_key(is_less))
-
-    start = None
-    end = None
-    resulting_intervals = []
-    for point in sorted_points:
-        if not start:
-            start = point
-            continue
-        if not end:
-            end = point
-            continue
-
-        if end[1] == point[1] or end[1] == 's':
-            # Both are starts, or both are ends so we can safely add point to the current interval
-            end = point
-        else:
-            resulting_intervals.append(Value_Interval(lower_limit=start[0], upper_limit=end[0]))
-            start = point
-            end = None
-
-    resulting_intervals.append(Value_Interval(lower_limit=start[0], upper_limit=end[0]))
-
-    # @Todo: Do interval coalesence
-    return resulting_intervals
+    intervals = sorted((iv.copy() for iv in itertools.chain(left_intervals, right_intervals)),
+                       key=lambda iv: (iv.lower_limit is not None, iv.lower_limit or 0))
+    result: List[Value_Interval] = []
+    for iv in intervals:
+        if result:
+            last = result[-1]
+            if last.upper_limit is None:
+                break
+            if iv.lower_limit is None or iv.lower_limit <= last.upper_limit + 1:
+                last.upper_limit = None if iv.upper_limit is None else max(last.upper_limit, iv.upper_limit)
+                continue
+        result.append(iv)
+    return result
 
 
 def make_value_interval_negation(intervals: List[Value_Interval]) -> List[Value_Interval]:
@@ -305,7 +275,7 @@ def perform_variable_bounds_analysis_on_ast(ast: ASTp_Node) -> AST_Node_With_Bou
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast.child)
         negated_var_values: Dict[Var, List[Value_Interval]] = {}
 
-        if len(subtree_bounds_info.var_values) == 1:
+        if isinstance(ast.child, Relation) and len(ast.child.vars) == 1 and len(subtree_bounds_info.var_values) == 1:
             for var, bounds in subtree_bounds_info.var_values.items():
                 negated_var_values[var] = make_value_interval_negation(bounds)
         else:
@@ -402,7 +372,7 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
 
         else:  # 'or' or '=' (Boolean equivalence)
             connective_type = Connective_Type.OR if ast.node_type == 'or' else Connective_Type.EQUIV
-            vars_to_not_rewrite = filter_vars_with_no_info_from_node(vars_with_rewritten_bounds, ast)
+            vars_to_not_rewrite = set()
             rewritten_subtrees = (_simplify_bounded_atoms(subtree, vars_to_not_rewrite) for subtree in ast.children)
             preserved_subtrees = tuple(tree for tree in rewritten_subtrees if tree)
             if not preserved_subtrees:
@@ -465,16 +435,16 @@ def _simplify_unbounded_equations(ast: ASTp_Node) -> ASTp_Node:
                     remaining_lin_terms.append((var, coef))
                 remaining_lin_terms = sorted(remaining_lin_terms, key = lambda var_coef_pair: var_coef_pair[0])
 
+                if not bound_var_coefs:
+                    return ast
                 if not remaining_lin_terms:
-                    return BoolLiteral(value=True)
+                    return BoolLiteral(value=(rel.rhs % gcd(*bound_var_coefs) == 0))
 
                 vars, coefs = [], []
                 for var, coef in remaining_lin_terms:
                     vars.append(var)
                     coefs.append(coef)
 
-                if sum(coef > 0 for coef in coefs):
-                    coefs = [-1 * coef for coef in coefs]
 
                 modulus = gcd(*bound_var_coefs)
                 rhs = rel.rhs % modulus
@@ -1209,7 +1179,11 @@ def _are_exists_and_trees_isomorphic(left: ASTp_Node, right: ASTp_Node, isomorph
         if len(left.vars) != len(right.vars):
             return False
 
-        if sorted(left.coefs) != sorted(right.coefs):
+        if sorted(left.coefs) != sorted(right.coefs) or left.rhs != right.rhs:
+            return False
+        if isinstance(left, Relation) and left.predicate_symbol != right.predicate_symbol:
+            return False
+        if isinstance(left, Congruence) and left.modulus != right.modulus:
             return False
 
         left_vars_to_coefs: Dict[Var, int] = {var:coef for coef, var in left.linear_terms()}
@@ -1806,7 +1780,7 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
 
             if not new_vars:
                 if isinstance(root, Relation):
-                    ret = BoolLiteral(True) if new_rhs >= 0 else BoolLiteral(False)
+                    ret = BoolLiteral(new_rhs == 0 if root.predicate_symbol == '=' else new_rhs >= 0)
                     return ret
                 else:  # root is a Congruence
                     ret = BoolLiteral(True) if (new_rhs % root.modulus) == 0 else BoolLiteral(False)
@@ -2043,7 +2017,7 @@ def _rewrite_surjective_transformations(exists_node: AST_Quantifier) -> Rewrite_
                 if value_interval_width != bound_var_coef:
                     continue
 
-                if not bound_var_value.lower_limit and not bound_var_value.upper_limit:
+                if bound_var_value.lower_limit is None and bound_var_value.upper_limit is None:
                     #  E(x2) (x1 - 5x2 \in [K, K+4]) - says nothing about the value of free variable
                     rels_to_replace.append((relation_indices, []))
                     continue
@@ -2105,7 +2079,7 @@ def _optimize_congruences_on_unbound_vars(root: ASTp_Node, opt_result: Exists_Op
             vars  = [term[1] for term in new_terms]
 
             if not vars:
-                return BoolLiteral(True)
+                return BoolLiteral(root.rhs % new_modulus == 0)
 
             return Congruence(vars=vars, coefs=coefs, modulus=new_modulus, rhs=(root.rhs % new_modulus))
         case Var():
@@ -2374,6 +2348,7 @@ def _apply_bound_based_theory_reasoning(connective_type: Connective_Type,
                 logger.debug('Congruence solving for %s - implied var values: %s', var, implied_var_values)
 
             if not implied_var_values:
+                new_bounds.extend((atom, False) for atom in bound.synthetize_atoms(var))
                 continue
 
             if implied_var_values[0] > implied_var_values[1]:
