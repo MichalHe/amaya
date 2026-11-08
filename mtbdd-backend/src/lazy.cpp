@@ -42,7 +42,7 @@ std::size_t hash_array(const Sized_Array<s64>& arr) {
     std::size_t hash = 0;
     for (u64 i = 0; i < arr.size; i++) {
         std::size_t coef_hash = std::hash<s64>{}(arr.items[i]);
-        hash = hash + 0x9e3779b9 + (coef_hash << 6) + (coef_hash >> 2);
+        hash = hash_combine(hash, coef_hash);
     }
     return hash;
 }

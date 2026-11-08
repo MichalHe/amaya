@@ -13,6 +13,7 @@
 uint64_t mtbdd_leaf_type_singleton;
 
 Solver_Context* g_solver_context;
+bool g_amaya_mix_hash = getenv("AMAYA_MIX_HASH") != nullptr;  // PERF-PROTOTYPE
 
 
 sylvan::MTBDD make_set_leaf(Transition_Destination_Set* value) {
