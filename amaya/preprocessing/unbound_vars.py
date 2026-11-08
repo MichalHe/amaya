@@ -438,8 +438,9 @@ def _simplify_unbounded_equations(ast: ASTp_Node) -> ASTp_Node:
                     remaining_lin_terms.append((var, coef))
                 remaining_lin_terms = sorted(remaining_lin_terms, key = lambda var_coef_pair: var_coef_pair[0])
 
-                if not bound_var_coefs:
-                    return ast
+                if not bound_var_coefs:  # no quantified var occurs in the equation (e.g. it cancelled out)
+                    return rel
+
                 if not remaining_lin_terms:
                     return BoolLiteral(value=(rel.rhs % gcd(*bound_var_coefs) == 0))
 
