@@ -947,6 +947,8 @@ struct std::hash<Partition_Refinement> {
 };
 
 
+double g_min_uapply_ms = 0;
+
 NFA minimize_hopcroft(NFA& nfa) {
     LACE_ME;
     Interrupt_Guard interrupt_guard;
@@ -971,6 +973,8 @@ NFA minimize_hopcroft(NFA& nfa) {
         return result;
     }
 
+    g_min_uapply_ms = 0;
+
     // Create initial partitions
     std::set<State> nonfinal_states_ordered;
     std::set_difference(nfa.states.begin(), nfa.states.end(),
@@ -992,6 +996,7 @@ NFA minimize_hopcroft(NFA& nfa) {
     g_replace_states_with_partition_info = &replace_states_with_partition_info;
 
     // Refine partitions untill fixpoint
+    auto min_t0 = std::chrono::steady_clock::now();
     u64 iteration_num = 0;
     u64 operation_id = get_next_operation_id();
 
@@ -1014,10 +1019,12 @@ NFA minimize_hopcroft(NFA& nfa) {
         // Apply uapply on every state MTBDD that converts the leaf contents {<some_state>} into {[<some_state>]_current_partition}
         for (auto [state, state_mtbdd]: nfa.transitions) {
             using namespace sylvan;
+            auto ua_t0 = std::chrono::steady_clock::now();
             sylvan::MTBDD state_eq_mtbdd = mtbdd_uapplyp(state_mtbdd,
                                                          TASK(replace_states_with_partition_ids_op),
                                                          operation_id,
                                                          iteration_num);
+            g_min_uapply_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ua_t0).count();
 
             State previous_eq_class_id = replace_states_with_partition_info.state_to_eq_class_id[state];
             Partition_Refinement refinement = {.eq_class_mtbdd = state_eq_mtbdd, .previous_eq_class_id = previous_eq_class_id};
@@ -1056,6 +1063,13 @@ NFA minimize_hopcroft(NFA& nfa) {
     } while (was_partition_refined);
 
     g_replace_states_with_partition_info = nullptr;
+    if (getenv("AMAYA_MIN_STATS")) {
+        size_t filled = 0, total = 0;
+        { using namespace sylvan; sylvan_table_usage(&filled, &total); }
+        std::cerr << "MIN_STATS states=" << nfa.states.size() << " classes=" << partition.size()
+                  << " iterations=" << iteration_num << " table_filled=" << filled << " uapply_ms=" << g_min_uapply_ms
+                  << " ms=" << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - min_t0).count() << std::endl;
+    }
 
 #if DEBUG
     std::cout << "Fixpoint found. Partitions:" << std::endl;
