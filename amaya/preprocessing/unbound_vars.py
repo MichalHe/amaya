@@ -188,7 +188,8 @@ def make_value_interval_negation(intervals: List[Value_Interval]) -> List[Value_
     for i in range(len(intervals)-1):
         start = intervals[i].upper_limit + 1  # type: ignore
         end = intervals[i+1].lower_limit - 1  # type: ignore
-        result.append(Value_Interval(lower_limit=start, upper_limit=end))
+        if start <= end:  # adjacent intervals (e.g. <-inf,3>, <4,+inf>) leave no gap
+            result.append(Value_Interval(lower_limit=start, upper_limit=end))
 
     if intervals[-1].upper_limit is not None:
         result.append(Value_Interval(lower_limit=intervals[-1].upper_limit + 1, upper_limit=None))
@@ -372,6 +373,8 @@ def _simplify_bounded_atoms(ast: AST_Node_With_Bounds_Info, vars_with_rewritten_
 
         else:  # 'or' or '=' (Boolean equivalence)
             connective_type = Connective_Type.OR if ast.node_type == 'or' else Connective_Type.EQUIV
+            # The ancestor's bound is (union over branches) /\ (siblings); it does not imply a branch-local
+            # bound, so the atoms of the branches must be kept.
             vars_to_not_rewrite = set()
             rewritten_subtrees = (_simplify_bounded_atoms(subtree, vars_to_not_rewrite) for subtree in ast.children)
             preserved_subtrees = tuple(tree for tree in rewritten_subtrees if tree)
