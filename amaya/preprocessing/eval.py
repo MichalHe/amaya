@@ -124,7 +124,7 @@ class Scoper:
     def unwind_quantifier(self):
         """ None of the quantified variables was used in the subformula. """
         scope = self.scopes.pop(-1)
-        self.next_var_id = min(scope.values()).id
+        pass  # Never recycle ids - placeholders created in this scope stay referenced
 
 
     def exit_quantifier(self):
