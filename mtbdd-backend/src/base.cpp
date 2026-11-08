@@ -12,6 +12,7 @@
 #include <iostream>
 #include <set>
 #include <vector>
+#include <unordered_set>
 #include <sstream>
 #include <string>
 
@@ -704,6 +705,7 @@ NFA compute_nfa_intersection(NFA& left, NFA& right) {
 }
 
 extern u64 union_applied_cnt;
+extern u64 g_set_leaf_bytes;
 
 NFA determinize_nfa(NFA& nfa) {
     LACE_ME;
@@ -737,6 +739,10 @@ NFA determinize_nfa(NFA& nfa) {
     u64 total_state_size = 0;
     u64 processed_states = 0;
     union_applied_cnt = 0;
+    static const bool det_balanced = getenv("AMAYA_DET_BALANCED") != nullptr;
+    auto det_t0 = std::chrono::steady_clock::now();
+    static const u64 leaf_gc_bytes = getenv("AMAYA_LEAF_GC_MB") ? (u64) atoll(getenv("AMAYA_LEAF_GC_MB")) * 1024ull * 1024ull : 0;
+    u64 leaf_gcs = 0;
 
     while (!work_queue.empty()) {
         AMAYA_CHECK_INTERRUPT();
@@ -754,7 +760,34 @@ NFA determinize_nfa(NFA& nfa) {
         }
 
         sylvan::MTBDD macrostate_transitions = sylvan::mtbdd_false;
+        size_t pushed_refs = 0;
+        if (det_balanced) {
+            // PERF-PROTOTYPE: balanced (pairwise) union of the members' MTBDDs. Every leaf created on
+            // a level is the union of 2^level member leaves, so the total size of the intermediate
+            // leaves on a path is O(k log k) instead of the O(k^2) of the left fold below.
+            std::vector<sylvan::MTBDD> level;
+            level.reserve(macrostate.size());
+            for (auto& macrostate_member: macrostate) {
+                auto it = nfa.transitions.find(macrostate_member);
+                if (it != nfa.transitions.end() && it->second != sylvan::mtbdd_false) level.push_back(it->second);
+            }
+            std::vector<sylvan::MTBDD> next_level;
+            while (level.size() > 1) {
+                next_level.clear();
+                for (size_t i = 0; i + 1 < level.size(); i += 2) {
+                    using namespace sylvan;
+                    sylvan::MTBDD u = mtbdd_applyp(level[i], level[i+1], 0u, TASK(transitions_union_op), AMAYA_UNION_OP_ID);
+                    sylvan::mtbdd_refs_push(u);
+                    pushed_refs++;
+                    next_level.push_back(u);
+                }
+                if (level.size() % 2) next_level.push_back(level.back());
+                level.swap(next_level);
+            }
+            macrostate_transitions = level.empty() ? sylvan::mtbdd_false : level[0];
+        } else {
         sylvan::mtbdd_refs_push(macrostate_transitions);
+        pushed_refs = 1;
         for (auto& macrostate_member: macrostate) {
             auto& member_mtbdd = nfa.transitions[macrostate_member];
 
@@ -765,6 +798,7 @@ NFA determinize_nfa(NFA& nfa) {
             sylvan::mtbdd_refs_push(new_macrostate_transitions);
             macrostate_transitions = new_macrostate_transitions;
         }
+        }
 
         using namespace sylvan;
         MTBDD transition_mtbdd = mtbdd_uapplyp(macrostate_transitions,
@@ -773,13 +807,34 @@ NFA determinize_nfa(NFA& nfa) {
                                                reinterpret_cast<u64>(&(ctx)));
 
         sylvan::mtbdd_ref(transition_mtbdd);
-        sylvan::mtbdd_refs_pop(1);
+        sylvan::mtbdd_refs_pop(pushed_refs);
         result.transitions.emplace(handle, transition_mtbdd);
+
+        // PERF-PROTOTYPE: sylvan only collects garbage when its node table is full, but the custom
+        // leaves own heap memory that the table does not see. Collect when that memory gets large.
+        if (leaf_gc_bytes > 0 && g_set_leaf_bytes > leaf_gc_bytes) {
+            sylvan_gc();
+            leaf_gcs++;
+        }
 
         total_state_size += current_macrostate_entry->first.size();
         processed_states += 1;
     }
 
+    if (getenv("AMAYA_DET_STATS")) {
+        size_t filled = 0, total = 0;
+        { using namespace sylvan; sylvan_table_usage(&filled, &total); }
+        std::unordered_set<size_t> distinct_hashes;
+        for (auto& [ms, h]: ctx.known_macrostates) distinct_hashes.insert(std::hash<Macrostate>{}(ms));
+        size_t max_bucket = 0;
+        for (size_t b = 0; b < ctx.known_macrostates.bucket_count(); b++) max_bucket = std::max(max_bucket, ctx.known_macrostates.bucket_size(b));
+        std::cerr << "DET_HASH known=" << ctx.known_macrostates.size() << " distinct_hashes=" << distinct_hashes.size() << " max_bucket=" << max_bucket << std::endl;
+        std::cerr << "DET_STATS in_states=" << nfa.states.size() << " macrostates=" << processed_states
+                  << " sum_macrostate_size=" << total_state_size << " leaf_unions=" << union_applied_cnt
+                  << " table_filled=" << filled << " table_total=" << total
+                  << " set_leaf_MB=" << (g_set_leaf_bytes >> 20) << " gcs=" << leaf_gcs
+                  << " ms=" << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - det_t0).count() << std::endl;
+    }
     // std::cout << "# Determinization stats: \n";
     // std::cout << "Union has been applied " << union_applied_cnt << " times.\n";
     // std::cout << "Total states processed: " << processed_states << ".\n";
@@ -892,6 +947,144 @@ struct std::hash<Partition_Refinement> {
 };
 
 
+// PERF-PROTOTYPE (env AMAYA_MIN_INCR): Moore refinement with stable class ids. A state's signature
+// (its transition MTBDD with destinations replaced by their class ids) can only change when one of its
+// successors changed class, so after the first round only the predecessors of states that moved to a
+// new class are re-signed (one mtbdd_uapplyp each) - instead of re-signing every state every round.
+double g_min_uapply_ms = 0;
+
+NFA minimize_moore_incremental(NFA& nfa) {
+    LACE_ME;
+    auto min_t0 = std::chrono::steady_clock::now();
+
+    const u64 n = nfa.states.size();
+    std::vector<State> states(nfa.states.begin(), nfa.states.end());
+    std::unordered_map<State, u64> index_of;
+    index_of.reserve(n);
+    for (u64 i = 0; i < n; i++) index_of[states[i]] = i;
+
+    std::vector<State> cls(n);
+    Replace_States_With_Partition_Info info;
+    g_replace_states_with_partition_info = &info;
+    info.state_to_eq_class_id.reserve(n);
+    for (u64 i = 0; i < n; i++) {
+        cls[i] = nfa.final_states.contains(states[i]) ? 0 : 1;
+        info.state_to_eq_class_id[states[i]] = cls[i];
+    }
+    State next_class_id = 2;
+    u64 class_count = 2;
+
+    std::vector<std::vector<u64>> preds(n);
+    for (u64 i = 0; i < n; i++) {
+        for (State succ: nfa.get_state_post(states[i])) {
+            auto it = index_of.find(succ);
+            if (it != index_of.end()) preds[it->second].push_back(i);
+        }
+    }
+
+    std::vector<sylvan::MTBDD> sig(n, sylvan::mtbdd_invalid);
+    std::vector<u64> dirty(n);
+    for (u64 i = 0; i < n; i++) dirty[i] = i;
+    std::vector<char> dirty_mark(n, 0);
+
+    const u64 operation_id = get_next_operation_id();
+    u64 iteration_num = 0;
+    u64 resigned = 0;
+
+    std::unordered_map<Partition_Refinement, u64> group_of;
+    std::vector<u64> group(n);
+    std::vector<State> group_old_class;
+    std::vector<State> group_new_class;
+    std::unordered_set<State> old_class_taken;
+
+    while (true) {
+        AMAYA_CHECK_INTERRUPT();
+        auto ua_t0 = std::chrono::steady_clock::now();
+        for (u64 i: dirty) {
+            using namespace sylvan;
+            sylvan::MTBDD new_sig = mtbdd_uapplyp(nfa.transitions[states[i]],
+                                                  TASK(replace_states_with_partition_ids_op),
+                                                  operation_id, iteration_num);
+            sylvan::mtbdd_ref(new_sig);
+            if (sig[i] != sylvan::mtbdd_invalid) sylvan::mtbdd_deref(sig[i]);
+            sig[i] = new_sig;
+        }
+        resigned += dirty.size();
+        g_min_uapply_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ua_t0).count();
+
+        group_of.clear();
+        group_old_class.clear();
+        for (u64 i = 0; i < n; i++) {
+            Partition_Refinement key = {.eq_class_mtbdd = sig[i], .previous_eq_class_id = cls[i]};
+            auto [it, inserted] = group_of.emplace(key, group_old_class.size());
+            if (inserted) group_old_class.push_back(cls[i]);
+            group[i] = it->second;
+        }
+        iteration_num++;
+
+        if (group_old_class.size() == class_count) break;
+
+        // Stable ids: the first group of every old class keeps the old id, the others get fresh ones.
+        old_class_taken.clear();
+        group_new_class.assign(group_old_class.size(), 0);
+        for (u64 g = 0; g < group_old_class.size(); g++) {
+            if (old_class_taken.insert(group_old_class[g]).second) group_new_class[g] = group_old_class[g];
+            else group_new_class[g] = next_class_id++;
+        }
+        class_count = group_old_class.size();
+
+        dirty.clear();
+        for (u64 i = 0; i < n; i++) {
+            State new_class = group_new_class[group[i]];
+            if (new_class == cls[i]) continue;
+            cls[i] = new_class;
+            info.state_to_eq_class_id[states[i]] = new_class;
+            for (u64 p: preds[i]) {
+                if (!dirty_mark[p]) { dirty_mark[p] = 1; dirty.push_back(p); }
+            }
+        }
+        for (u64 p: dirty) dirty_mark[p] = 0;
+    }
+
+    g_replace_states_with_partition_info = nullptr;
+
+    NFA result_nfa(nfa.vars, nfa.var_count);
+    result_nfa.initial_states.insert(cls[index_of[*nfa.initial_states.begin()]]);
+    std::unordered_set<State> emitted;
+    for (u64 i = 0; i < n; i++) {
+        if (!emitted.insert(cls[i]).second) continue;
+        result_nfa.transitions[cls[i]] = sig[i];
+        sylvan::mtbdd_ref(sig[i]);
+        result_nfa.states.insert(cls[i]);
+        if (nfa.final_states.contains(states[i])) result_nfa.final_states.insert(cls[i]);
+    }
+    for (u64 i = 0; i < n; i++) sylvan::mtbdd_deref(sig[i]);
+
+    if (getenv("AMAYA_MIN_STATS")) {
+        std::cerr << "MIN_STATS(incr) states=" << n << " classes=" << class_count << " iterations=" << iteration_num
+                  << " resigned=" << resigned << " uapply_ms=" << g_min_uapply_ms
+                  << " ms=" << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - min_t0).count() << std::endl;
+    }
+
+    {
+        std::set<State> reachable = result_nfa.initial_states;
+        std::vector<State> frontier(reachable.begin(), reachable.end());
+        while (!frontier.empty()) {
+            State state = frontier.back();
+            frontier.pop_back();
+            for (State successor : result_nfa.get_state_post(state)) {
+                if (reachable.insert(successor).second) frontier.push_back(successor);
+            }
+        }
+        std::set<State> unreachable;
+        std::set_difference(result_nfa.states.begin(), result_nfa.states.end(),
+                            reachable.begin(), reachable.end(),
+                            std::inserter(unreachable, unreachable.begin()));
+        if (!unreachable.empty()) result_nfa.remove_states(unreachable);
+    }
+    return result_nfa;
+}
+
 NFA minimize_hopcroft(NFA& nfa) {
     LACE_ME;
     Interrupt_Guard interrupt_guard;
@@ -916,6 +1109,18 @@ NFA minimize_hopcroft(NFA& nfa) {
         return result;
     }
 
+    static const bool use_incremental = getenv("AMAYA_MIN_INCR") != nullptr;
+    g_min_uapply_ms = 0;
+    if (use_incremental) {
+        bool every_state_has_transitions = true;
+        for (State s: nfa.states) {
+            if (!nfa.transitions.contains(s)) { every_state_has_transitions = false; break; }
+        }
+        if (every_state_has_transitions && nfa.transitions.size() == nfa.states.size()) {
+            return minimize_moore_incremental(nfa);
+        }
+    }
+
     // Create initial partitions
     std::set<State> nonfinal_states_ordered;
     std::set_difference(nfa.states.begin(), nfa.states.end(),
@@ -937,6 +1142,7 @@ NFA minimize_hopcroft(NFA& nfa) {
     g_replace_states_with_partition_info = &replace_states_with_partition_info;
 
     // Refine partitions untill fixpoint
+    auto min_t0 = std::chrono::steady_clock::now();
     u64 iteration_num = 0;
     u64 operation_id = get_next_operation_id();
 
@@ -959,10 +1165,12 @@ NFA minimize_hopcroft(NFA& nfa) {
         // Apply uapply on every state MTBDD that converts the leaf contents {<some_state>} into {[<some_state>]_current_partition}
         for (auto [state, state_mtbdd]: nfa.transitions) {
             using namespace sylvan;
+            auto ua_t0 = std::chrono::steady_clock::now();
             sylvan::MTBDD state_eq_mtbdd = mtbdd_uapplyp(state_mtbdd,
                                                          TASK(replace_states_with_partition_ids_op),
                                                          operation_id,
                                                          iteration_num);
+            g_min_uapply_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ua_t0).count();
 
             State previous_eq_class_id = replace_states_with_partition_info.state_to_eq_class_id[state];
             Partition_Refinement refinement = {.eq_class_mtbdd = state_eq_mtbdd, .previous_eq_class_id = previous_eq_class_id};
@@ -1001,6 +1209,13 @@ NFA minimize_hopcroft(NFA& nfa) {
     } while (was_partition_refined);
 
     g_replace_states_with_partition_info = nullptr;
+    if (getenv("AMAYA_MIN_STATS")) {
+        size_t filled = 0, total = 0;
+        { using namespace sylvan; sylvan_table_usage(&filled, &total); }
+        std::cerr << "MIN_STATS states=" << nfa.states.size() << " classes=" << partition.size()
+                  << " iterations=" << iteration_num << " table_filled=" << filled << " uapply_ms=" << g_min_uapply_ms
+                  << " ms=" << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - min_t0).count() << std::endl;
+    }
 
 #if DEBUG
     std::cout << "Fixpoint found. Partitions:" << std::endl;

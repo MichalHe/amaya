@@ -13,6 +13,8 @@
 uint64_t mtbdd_leaf_type_singleton;
 
 Solver_Context* g_solver_context;
+u64 g_set_leaf_bytes = 0;
+bool g_amaya_mix_hash = getenv("AMAYA_MIX_HASH") != nullptr;  // PERF-PROTOTYPE  // PERF-PROTOTYPE: heap bytes owned by live set leaves (approx.)
 
 
 sylvan::MTBDD make_set_leaf(Transition_Destination_Set* value) {
@@ -30,6 +32,7 @@ void mk_set_leaf(uint64_t* target_destination_set_ptr) {
 
     auto leaf_contents = *leaf_contents_ptr;
     auto new_leaf_contents = new Transition_Destination_Set(*leaf_contents); // Copy construct
+    g_set_leaf_bytes += sizeof(Transition_Destination_Set) + 16 + new_leaf_contents->destination_set.capacity() * sizeof(State);
 
     // According to the GMP leaf implementation, it should suffice to just write the new value to the state_set_ptr.
     *leaf_contents_ptr = new_leaf_contents;
@@ -37,6 +40,7 @@ void mk_set_leaf(uint64_t* target_destination_set_ptr) {
 
 void destroy_set_leaf(uint64_t leaf_value) {
     auto tds = reinterpret_cast<Transition_Destination_Set*>(leaf_value);
+    g_set_leaf_bytes -= sizeof(Transition_Destination_Set) + 16 + tds->destination_set.capacity() * sizeof(State);
     delete tds;
 }
 
