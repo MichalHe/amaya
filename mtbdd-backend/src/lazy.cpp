@@ -60,7 +60,7 @@ std::size_t hash_chunked_array(const Chunked_Array<s64>& arr) {
 s64 vector_dot(const Sized_Array<s64>& coefs, const u64 symbol) {
     s64 dot = 0;
     for (u64 var_i = 0; var_i < coefs.size; var_i++) {
-        s64 is_bit_set = (symbol & (1u << var_i)) > 0;
+        s64 is_bit_set = (symbol & (1ull << var_i)) > 0;
         dot += is_bit_set * coefs.items[var_i];
     }
     return dot;
