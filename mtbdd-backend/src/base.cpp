@@ -197,7 +197,10 @@ void NFA::add_transition(State from, State to, u8* rich_symbol) {
         auto existing_transitions = present_key_val_it->second;
 
         using namespace sylvan; // Pull the entire sylvan namespace because mtbdd_applyp is a macro
+        // transition_mtbdd is not referenced by anyone; protect it, as applyp may trigger a garbage collection.
+        sylvan::mtbdd_refs_push(transition_mtbdd);
         sylvan::MTBDD updated_mtbdd = mtbdd_applyp(existing_transitions, transition_mtbdd, 0u, TASK(transitions_union_op), AMAYA_UNION_OP_ID);
+        sylvan::mtbdd_refs_pop(1);
 
         sylvan::mtbdd_deref(existing_transitions);
         sylvan::mtbdd_ref(updated_mtbdd);

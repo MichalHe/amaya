@@ -16,6 +16,7 @@
 #include <iostream>
 #include <limits>
 #include <cstring>
+#include <cstdlib>
 
 using namespace sylvan;
 
@@ -39,13 +40,28 @@ void init_machinery()
     lace_startup(0, NULL, NULL);
 
     sylvan_set_limits(1LL << 32, 5, 5);
+
+    // Testing aid: AMAYA_SYLVAN_TABLE_LOG2 (optionally with AMAYA_SYLVAN_TABLE_MAX_LOG2,
+    // AMAYA_SYLVAN_CACHE_LOG2 and AMAYA_SYLVAN_CACHE_MAX_LOG2) shrinks sylvan's tables so that garbage
+    // collection runs often, which exposes MTBDDs that are not protected across allocating calls.
+    if (const char* table_log2 = getenv("AMAYA_SYLVAN_TABLE_LOG2")) {
+        auto size_from_env = [](const char* name, size_t fallback) -> size_t {
+            const char* value = getenv(name);
+            return value ? (size_t{1} << atoi(value)) : fallback;
+        };
+        size_t table_size = size_t{1} << atoi(table_log2);
+        size_t table_max  = size_from_env("AMAYA_SYLVAN_TABLE_MAX_LOG2", table_size);
+        size_t cache_size = size_from_env("AMAYA_SYLVAN_CACHE_LOG2", table_size);
+        size_t cache_max  = size_from_env("AMAYA_SYLVAN_CACHE_MAX_LOG2", cache_size);
+        sylvan_set_sizes(table_size, table_max, cache_size, cache_max);
+    }
     //sylvan_set_sizes(1LL << 27, 1LL << 26, 1LL << 26, 1LL << 20);
     //sylvan_set_sizes(1LL << 24, 1LL << 28, 1LL << 24, 1LL << 28);
     sylvan_init_package();
     sylvan_init_mtbdd();
 
     // Initialize leaf type for leaves containing sets - represents outgoing transition from a state
-    g_solver_context = new Solver_Context;
+    g_solver_context = new Solver_Context{};  // Value-initialize: config.flags must not be indeterminate
     Set_Leaf::init_set_leaf(&g_solver_context->leaf_id_store);
     Bit_Set_Leaf::init_bit_set_leaf(&g_solver_context->leaf_id_store);
 
