@@ -16,6 +16,8 @@
 #include <iostream>
 #include <limits>
 #include <cstring>
+#include <functional>
+#include <stdexcept>
 
 using namespace sylvan;
 
@@ -66,6 +68,11 @@ void shutdown_machinery()
 
 NFA construct_dfa_for_atom_conjunction(Serialized_Quantified_Atom_Conjunction* raw_formula) {
     Interrupt_Guard interrupt_guard;
+
+    if (raw_formula->var_cnt >= 64) {
+        // Symbols are enumerated as u64 bit vectors (Alphabet_Iterator), so >= 64 tracks cannot be represented.
+        throw std::invalid_argument("construct_dfa_for_atom_conjunction: at most 63 variables are supported");
+    }
 
     Formula_Description formula_desc;
     formula_desc.var_count = raw_formula->var_cnt;
@@ -148,6 +155,79 @@ NFA perform_pad_closure_using_bit_sets(NFA& nfa) {
     return do_pad_closure_using_bit_sets(&nfa, g_solver_context->bit_set_alloc);
 }
 
+/*
+ * Symbolic construction of the transition MTBDD of a single state of an atom automaton.
+ *
+ * For linear atoms (inequations, equations, congruences) the destination(s) of a transition leaving a
+ * fixed state depend on the read symbol only through the dot product `coefs . symbol`. Instead of
+ * enumerating all 2^var_count symbols - exponential, and previously done with 32-bit shifts, so that
+ * atoms with 32 or more variables silently lost (or garbled) most of their transitions, see GitHub
+ * issue #7 - branch on one variable at a time and share every subtree reached with the same partial
+ * dot product. At most var_count * (sum |coefs| + 1) MTBDD nodes are created per state.
+ *
+ * `vars` must hold the atom's variables in ascending order (the order in which mtbdd_cube reads a
+ * symbol and in which mtbdd_makenode expects variables along a path); `coefs[i]` is the coefficient
+ * of `vars[i]`. `leaf_for_dot(dot)` returns the leaf holding the destinations for symbols with the
+ * given dot product, or mtbdd_false if there is no transition for them. The returned MTBDD carries
+ * one reference that is owned by the caller.
+ */
+template <typename Leaf_For_Dot>
+static MTBDD build_transitions_by_dot_product(const BDDVAR* vars, const s64* coefs, u64 var_count,
+                                              Leaf_For_Dot& leaf_for_dot) {
+    vector<unordered_map<s64, MTBDD>> memo(var_count + 1);
+    vector<MTBDD> referenced_nodes;
+
+    std::function<MTBDD(u64, s64)> build = [&](u64 var_idx, s64 partial_dot) -> MTBDD {
+        auto& level_memo = memo[var_idx];
+        auto cached = level_memo.find(partial_dot);
+        if (cached != level_memo.end()) return cached->second;
+
+        MTBDD result;
+        if (var_idx == var_count) {
+            result = leaf_for_dot(partial_dot);
+        } else {
+            MTBDD low  = build(var_idx + 1, partial_dot);
+            MTBDD high = build(var_idx + 1, partial_dot + coefs[var_idx]);
+            result = mtbdd_makenode(vars[var_idx], low, high);
+        }
+
+        // Keep every intermediate node alive until the whole MTBDD is built - a garbage collection
+        // triggered by a later mtbdd_makenode would otherwise be free to reclaim it.
+        mtbdd_ref(result);
+        referenced_nodes.push_back(result);
+        level_memo.emplace(partial_dot, result);
+        return result;
+    };
+
+    MTBDD root = build(0, 0);
+    mtbdd_ref(root);
+    for (MTBDD node : referenced_nodes) mtbdd_deref(node);
+    return root;
+}
+
+// Install the transition MTBDD built by `build_transitions_by_dot_product` for `state`, taking over its
+// reference. Every state is explored exactly once, so there are no transitions to merge with.
+static void set_state_transitions(NFA& nfa, State state, MTBDD state_transitions) {
+    if (state_transitions == mtbdd_false) return;  // No outgoing transitions - same as never calling add_transition
+    auto [position, was_inserted] = nfa.transitions.emplace(state, state_transitions);
+    assert(was_inserted);
+}
+
+static MTBDD make_destination_leaf(State destination, bool also_final, State final_state) {
+    Transition_Destination_Set leaf_contents;
+    leaf_contents.insert(destination);
+    if (also_final) leaf_contents.insert(final_state);
+    leaf_contents.sort();
+    return make_set_leaf(&leaf_contents);
+}
+
+static vector<BDDVAR> bddset_to_vector(BDDSET vars, u64 var_count) {
+    assert(mtbdd_set_count(vars) == var_count);
+    vector<BDDVAR> var_arr(var_count);
+    mtbdd_set_to_array(vars, var_arr.data());
+    return var_arr;
+}
+
 struct Congruence_State {
     s64 modulus_odd;
     s64 modulus_2pow;
@@ -181,25 +261,19 @@ static void explore_congruence_states(NFA& nfa,
                                       unordered_map<Congruence_State, s64>& discovered_states,
                                       vector<pair<Congruence_State, s64>>& worklist) {
     assert(var_count > 0);
-    vector<u8> symbol_arr(var_count);
+    vector<BDDVAR> var_arr = bddset_to_vector(nfa.vars, var_count);
 
     while (!worklist.empty()) {
         AMAYA_CHECK_INTERRUPT();
 
-        auto [state, handle] = worklist.back();
+        Congruence_State state = worklist.back().first;
+        s64 handle = worklist.back().second;
         worklist.pop_back();
 
         s64 modulus = combine_moduli(state.modulus_2pow, state.modulus_odd);
         nfa.states.insert(handle);
 
-        for (u64 symbol = 0; symbol < (1ull << var_count); symbol++) {
-            if ((symbol & 0xFFFF) == 0) AMAYA_CHECK_INTERRUPT();
-
-            s64 dot = 0;
-            for (u64 i = 0; i < var_count; i++) {
-                s64 is_bit_set = (symbol & (1ull << i)) > 0;
-                dot += is_bit_set * coefs[i];
-            }
+        auto leaf_for_dot = [&](s64 dot) -> MTBDD {
             s64 post = state.value - dot;
             s64 fin_post = state.value + dot;
 
@@ -208,17 +282,15 @@ static void explore_congruence_states(NFA& nfa,
             dest_state.modulus_2pow = 0;
 
             if (state.modulus_2pow > 0) {
-                if ((post % 2) == 0) {
-                    post /= 2;
-                    s64 new_modulus = combine_moduli(state.modulus_2pow - 1, state.modulus_odd);
-                    post %= new_modulus;
-                    post += (post < 0) * new_modulus;
+                if ((post % 2) != 0) return mtbdd_false;
 
-                    dest_state.modulus_2pow = state.modulus_2pow-1;
-                    dest_state.value = post;
-                } else {
-                    continue;
-                }
+                post /= 2;
+                s64 new_modulus = combine_moduli(state.modulus_2pow - 1, state.modulus_odd);
+                post %= new_modulus;
+                post += (post < 0) * new_modulus;
+
+                dest_state.modulus_2pow = state.modulus_2pow-1;
+                dest_state.value = post;
             } else {
                 post += state.modulus_odd * ((post % 2) != 0);
                 post /= 2;
@@ -234,16 +306,12 @@ static void explore_congruence_states(NFA& nfa,
                 worklist.push_back({dest_state, dest_handle});
             }
 
-            for (u64 i = 0; i < var_count; i++) {
-                symbol_arr[i] = (symbol >> i) & 1;
-            }
+            bool is_also_final = (fin_post % modulus) == 0;
+            return make_destination_leaf(dest_handle, is_also_final, final_state_handle);
+        };
 
-            nfa.add_transition(handle, dest_handle, symbol_arr.data());
-
-            if ((fin_post % modulus) == 0) {
-                nfa.add_transition(handle, final_state_handle, symbol_arr.data());
-            }
-        }
+        MTBDD state_transitions = build_transitions_by_dot_product(var_arr.data(), coefs, var_count, leaf_for_dot);
+        set_state_transitions(nfa, handle, state_transitions);
     }
 }
 
@@ -398,7 +466,7 @@ NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, BDDSET vars, 
     vector<pair<s64, s64>> worklist = {{init_state, init_state_handle}};
 
     assert(var_count > 0);
-    u8 symbol_arr[var_count];
+    vector<BDDVAR> var_arr = bddset_to_vector(vars, var_count);
 
     NFA constructed_nfa(vars);
     constructed_nfa.var_count = var_count;
@@ -408,26 +476,19 @@ NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, BDDSET vars, 
     while (!worklist.empty()) {
         AMAYA_CHECK_INTERRUPT();
 
-        auto [state, handle] = worklist.back();
+        s64 state  = worklist.back().first;
+        s64 handle = worklist.back().second;
         worklist.pop_back();
 
         constructed_nfa.states.insert(handle);
 
-        for (u64 symbol = 0; symbol < (1 << var_count); symbol++) {
-            if ((symbol & 0xFFFF) == 0) AMAYA_CHECK_INTERRUPT();
-
-            s64 dot = 0;
-            for (int i = 0; i < var_count; i++) {
-                s64 is_bit_set = (symbol & (1u << i)) > 0;
-                dot += is_bit_set * ineq->coefs[i];
-            }
-
+        auto leaf_for_dot = [&](s64 dot) -> MTBDD {
             s64 post     = state - dot;
             s64 fin_post = state + dot;
 
             s64 post_div_2 = post / 2;
             s64 post_mod_2 = post % 2;
-            post_div_2 -= (post_mod_2 != 0) * (post < 0);
+            post_div_2 -= (post_mod_2 != 0) * (post < 0);  // floor((state - dot) / 2)
             post = post_div_2;
 
             s64 post_handle = discovered_states.size();
@@ -438,16 +499,11 @@ NFA construct_nfa_from_ineq(Serialized_Atom* ineq, s64 init_state, BDDSET vars, 
                 post_handle = insert_pos->second;
             }
 
-            for (int i = 0; i < var_count; i++) {
-                symbol_arr[i] = (symbol >> i) & 1;
-            }
+            return make_destination_leaf(post_handle, fin_post >= 0, final_state_handle);
+        };
 
-            constructed_nfa.add_transition(handle, post_handle, symbol_arr);
-
-            if (fin_post >= 0) {
-                constructed_nfa.add_transition(handle, final_state_handle, symbol_arr);
-            }
-        }
+        MTBDD state_transitions = build_transitions_by_dot_product(var_arr.data(), ineq->coefs, var_count, leaf_for_dot);
+        set_state_transitions(constructed_nfa, handle, state_transitions);
     }
 
     return constructed_nfa;
@@ -467,45 +523,30 @@ NFA construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 
     vector<pair<s64, s64>> worklist = {{init_state, init_state_handle}};
 
     assert(var_count > 0);
-    u8 symbol_arr[var_count];
+    vector<BDDVAR> var_arr = bddset_to_vector(vars, var_count);
 
     NFA constructed_nfa(vars);
     constructed_nfa.var_count = var_count;
     constructed_nfa.initial_states.insert(init_state_handle);
     constructed_nfa.add_state_final(final_state_handle);
 
-    s64 states_processed = 0;
-
     while (!worklist.empty()) {
         AMAYA_CHECK_INTERRUPT();
 
-        auto [state, handle] = worklist.back();
+        s64 state  = worklist.back().first;
+        s64 handle = worklist.back().second;
         worklist.pop_back();
 
         constructed_nfa.states.insert(handle);
 
-        states_processed += 1;
-
-        for (u64 symbol = 0; symbol < (1 << var_count); symbol++) {
-            if ((symbol & 0xFFFF) == 0) AMAYA_CHECK_INTERRUPT();
-
-            s64 dot = 0;
-            for (int i = 0; i < var_count; i++) {
-                s64 is_bit_set = (symbol & (1u << i)) > 0;
-                dot += is_bit_set * eq->coefs[i];
-            }
-
+        auto leaf_for_dot = [&](s64 dot) -> MTBDD {
             s64 post     = state - dot;
             s64 fin_post = state + dot;
 
             if ((post % 2) != 0) {
-                continue;
+                return mtbdd_false;  // (state - dot) odd => fin_post odd as well, so no transition at all
             }
-
-            s64 post_div_2 = post / 2;
-            s64 post_mod_2 = post % 2;
-            post_div_2 -= (post_mod_2 != 0) * (post < 0);
-            post = post_div_2;
+            post /= 2;
 
             s64 post_handle = discovered_states.size();
             auto [insert_pos, insert_happend] = discovered_states.emplace(post, post_handle);
@@ -515,16 +556,11 @@ NFA construct_nfa_from_eq(Serialized_Atom* eq, s64 init_state, BDDSET vars, u64 
                 post_handle = insert_pos->second;
             }
 
-            for (int i = 0; i < var_count; i++) {
-                symbol_arr[i] = (symbol >> i) & 1;
-            }
+            return make_destination_leaf(post_handle, fin_post == 0, final_state_handle);
+        };
 
-            constructed_nfa.add_transition(handle, post_handle, symbol_arr);
-
-            if (fin_post == 0) {
-                constructed_nfa.add_transition(handle, final_state_handle, symbol_arr);
-            }
-        }
+        MTBDD state_transitions = build_transitions_by_dot_product(var_arr.data(), eq->coefs, var_count, leaf_for_dot);
+        set_state_transitions(constructed_nfa, handle, state_transitions);
     }
 
     return constructed_nfa;

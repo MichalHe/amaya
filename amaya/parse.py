@@ -658,6 +658,9 @@ def minimize_automaton_if_configured(ast: ASTp_Node, nfa: NFA, ctx: EvaluationCo
     return minimized_dfa
 
 
+LAZY_EVALUATION_MAX_VARS = 24
+
+
 def select_children_to_lazily_evaluate(and_expr: AST_Connective, density_treshold: float = 0.5) -> Tuple[List[AST_Atom], List[ASTp_Node]] | None:
     """
     Decompose the given and expression into atoms and non-atomic formulae.
@@ -677,6 +680,12 @@ def select_children_to_lazily_evaluate(and_expr: AST_Connective, density_treshol
         not_atoms.append(child)
 
     if not atoms:
+        return
+
+    # The lazy construction enumerates the alphabet explicitly - 2^len(vars) symbols per macrostate,
+    # encoded as u64 bit vectors - so it is hopeless (and, beyond 63 variables, impossible) for wide
+    # conjunctions. The per-atom constructions build their transition MTBDDs symbolically instead.
+    if len(vars) > LAZY_EVALUATION_MAX_VARS:
         return
 
     # Calculate density
@@ -996,6 +1005,10 @@ def try_lazy_construct_conjunction(exists_node: AST_Quantifier, ctx: EvaluationC
 
     if not all(isinstance(child, (Relation, Congruence)) for child in and_node.children):
         return
+
+    conjunction_vars = set(var for child in and_node.children for var in child.vars)  # type: ignore
+    if len(conjunction_vars) > LAZY_EVALUATION_MAX_VARS:
+        return  # See `select_children_to_lazily_evaluate`
 
     logger.info('Lazy constructing %s', and_node)
     atoms: List[Relation | Congruence] = list(and_node.children[0:])  # type: ignore

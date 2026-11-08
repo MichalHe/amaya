@@ -1,3 +1,4 @@
+#include "../include/interrupt.hpp"
 #include "../include/lazy.hpp"
 #include "../include/tfa_leaf.h"
 #include "../include/algorithms.hpp"
@@ -60,7 +61,7 @@ std::size_t hash_chunked_array(const Chunked_Array<s64>& arr) {
 s64 vector_dot(const Sized_Array<s64>& coefs, const u64 symbol) {
     s64 dot = 0;
     for (u64 var_i = 0; var_i < coefs.size; var_i++) {
-        s64 is_bit_set = (symbol & (1u << var_i)) > 0;
+        s64 is_bit_set = (symbol & (1ull << var_i)) > 0;
         dot += is_bit_set * coefs.items[var_i];
     }
     return dot;
@@ -930,6 +931,7 @@ void explore_macrostate(NFA& constructed_nfa,
 {
     alphabet_iter.reset();
 
+    u64 symbols_since_interrupt_check = 0;
     while (!alphabet_iter.finished) {
         Intermediate_Macrostate post;
         bool is_accepting = false;
@@ -939,6 +941,9 @@ void explore_macrostate(NFA& constructed_nfa,
         bool is_post_top = false;
         bool dbg_was_rewritten = false;
         for (u64 symbol = transition_symbol; alphabet_iter.has_more_quantif_symbols; symbol = alphabet_iter.next_symbol()) {
+            // The alphabet is enumerated explicitly (2^var_count symbols per macrostate), so poll for
+            // SIGINT/SIGTERM here as well, not only once per macrostate.
+            if ((++symbols_since_interrupt_check & 0xFFFF) == 0) AMAYA_CHECK_INTERRUPT();
 #if DEBUG_RUNTIME
             auto start = std::chrono::system_clock::now();
 #endif

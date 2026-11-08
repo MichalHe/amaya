@@ -349,11 +349,11 @@ struct Alphabet_Iterator {
     {
         quantified_bits_mask = 0u;
         for (auto quantified_var: quantified_vars) {
-            quantified_bits_mask |= (1u << quantified_var);
+            quantified_bits_mask |= (1ull << quantified_var);
         }
 
-        quantified_bits_inc_limit = 1u << quantified_vars.size();
-        free_bits_inc_limit = 1u << (var_count - quantified_vars.size());
+        quantified_bits_inc_limit = 1ull << quantified_vars.size();
+        free_bits_inc_limit = 1ull << (var_count - quantified_vars.size());
     };
 
     u64 next_symbol() {
