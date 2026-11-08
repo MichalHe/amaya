@@ -318,6 +318,8 @@ def normalize_expr(ast: Raw_AST,
     elif node_type in {'mod', 'div'}:
         lin_term, dependent_terms, support = normalize_expr(ast[1], nonlinear_term_graph, scoper)
         nonlin_constant, _, _ = normalize_expr(ast[2], nonlinear_term_graph, scoper)
+        if nonlin_constant.linear_terms:
+            raise NonlinearArithmeticError(f'Non-constant divisor/modulus: {ast=}')
         lin_terms = tuple(sorted(lin_term.linear_terms.items(), key=lambda var_coef_pair: var_coef_pair[0]))
 
         constant_term = lin_term.constant_term
