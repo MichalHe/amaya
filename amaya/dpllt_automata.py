@@ -1466,6 +1466,7 @@ class Assertion_Automaton_Builder:
     longest_prefix_hit_length: int = 0
 
     def build_automaton_for_assertion(self, assertion: ASTp_Node, ctx: EvaluationContext) -> NFA:
+        self.last_empty_prefix = None
         decomposition = self._decompose_assertion_into_conjunction(assertion)
 
         if decomposition is None or not self._is_prefix_caching_applicable(assertion, decomposition):
@@ -1543,8 +1544,10 @@ class Assertion_Automaton_Builder:
 
         nfa, first_conjunct_to_build = self._find_longest_cached_prefix(ordered_conjunct_ids)
 
+        self.last_empty_prefix = None
         for conjunct_index in range(first_conjunct_to_build, len(ordered_conjuncts)):
             if nfa is not None and not nfa.final_states:
+                self.last_empty_prefix = list(ordered_conjuncts[:conjunct_index])
                 return nfa
 
             conjunct_nfa = parse.run_evaluation_procedure(ordered_conjuncts[conjunct_index], ctx)
@@ -1560,6 +1563,8 @@ class Assertion_Automaton_Builder:
             self._store_prefix(ordered_conjunct_ids[:conjunct_index + 1], nfa)
 
         assert nfa is not None, 'A conjunction with no conjuncts should not have been decomposed'
+        if not nfa.final_states:
+            self.last_empty_prefix = list(ordered_conjuncts)
         return nfa
 
     def _order_conjuncts_canonically(self,
@@ -1852,6 +1857,15 @@ def _enumerate_implicants(abstraction: Monotone_Literal_Abstraction,
                     return model_of_iteration
 
                 atom_ids_to_block = asserted_atom_ids
+                import os as _os
+                prefix = getattr(builder, 'last_empty_prefix', None)
+                if _os.environ.get('DPLLT_PREFIX_CORE') and prefix is not None:
+                    id_of_node = {id(node): atom_id for atom_id, node in abstraction.manager.literal_by_atom_id.items()}
+                    core = {id_of_node.get(id(node)) for node in prefix}
+                    if None not in core and core and core <= set(asserted_atom_ids):
+                        statistics.bounds_refutation_core_literals += 0
+                        logger.info('DPLL(T): prefix core %d of %d literals', len(core), len(asserted_atom_ids))
+                        atom_ids_to_block = core
 
             blocking_clause = abstraction.make_blocking_clause(atom_ids_to_block)
             if not blocking_clause:
