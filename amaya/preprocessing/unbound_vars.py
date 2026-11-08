@@ -275,7 +275,7 @@ def perform_variable_bounds_analysis_on_ast(ast: ASTp_Node) -> AST_Node_With_Bou
         subtree_bounds_info = perform_variable_bounds_analysis_on_ast(ast.child)
         negated_var_values: Dict[Var, List[Value_Interval]] = {}
 
-        if len(subtree_bounds_info.var_values) == 1:
+        if isinstance(ast.child, Relation) and len(ast.child.vars) == 1 and len(subtree_bounds_info.var_values) == 1:
             for var, bounds in subtree_bounds_info.var_values.items():
                 negated_var_values[var] = make_value_interval_negation(bounds)
         else:
