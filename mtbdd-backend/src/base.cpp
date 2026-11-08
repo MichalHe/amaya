@@ -12,6 +12,7 @@
 #include <iostream>
 #include <set>
 #include <vector>
+#include <unordered_set>
 #include <sstream>
 #include <string>
 
@@ -739,6 +740,7 @@ NFA determinize_nfa(NFA& nfa) {
     u64 processed_states = 0;
     union_applied_cnt = 0;
     static const bool det_balanced = getenv("AMAYA_DET_BALANCED") != nullptr;
+    auto det_t0 = std::chrono::steady_clock::now();
     static const u64 leaf_gc_bytes = getenv("AMAYA_LEAF_GC_MB") ? (u64) atoll(getenv("AMAYA_LEAF_GC_MB")) * 1024ull * 1024ull : 0;
     u64 leaf_gcs = 0;
 
@@ -819,6 +821,20 @@ NFA determinize_nfa(NFA& nfa) {
         processed_states += 1;
     }
 
+    if (getenv("AMAYA_DET_STATS")) {
+        size_t filled = 0, total = 0;
+        { using namespace sylvan; sylvan_table_usage(&filled, &total); }
+        std::unordered_set<size_t> distinct_hashes;
+        for (auto& [ms, h]: ctx.known_macrostates) distinct_hashes.insert(std::hash<Macrostate>{}(ms));
+        size_t max_bucket = 0;
+        for (size_t b = 0; b < ctx.known_macrostates.bucket_count(); b++) max_bucket = std::max(max_bucket, ctx.known_macrostates.bucket_size(b));
+        std::cerr << "DET_HASH known=" << ctx.known_macrostates.size() << " distinct_hashes=" << distinct_hashes.size() << " max_bucket=" << max_bucket << std::endl;
+        std::cerr << "DET_STATS in_states=" << nfa.states.size() << " macrostates=" << processed_states
+                  << " sum_macrostate_size=" << total_state_size << " leaf_unions=" << union_applied_cnt
+                  << " table_filled=" << filled << " table_total=" << total
+                  << " set_leaf_MB=" << (g_set_leaf_bytes >> 20) << " gcs=" << leaf_gcs
+                  << " ms=" << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - det_t0).count() << std::endl;
+    }
     // std::cout << "# Determinization stats: \n";
     // std::cout << "Union has been applied " << union_applied_cnt << " times.\n";
     // std::cout << "Total states processed: " << processed_states << ".\n";
