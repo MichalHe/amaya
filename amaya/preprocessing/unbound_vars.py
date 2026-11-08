@@ -1780,7 +1780,7 @@ def _substitute_var_with_value(root: ASTp_Node, var: Var, value: Optional[int], 
 
             if not new_vars:
                 if isinstance(root, Relation):
-                    ret = BoolLiteral(True) if new_rhs >= 0 else BoolLiteral(False)
+                    ret = BoolLiteral(new_rhs == 0 if root.predicate_symbol == '=' else new_rhs >= 0)
                     return ret
                 else:  # root is a Congruence
                     ret = BoolLiteral(True) if (new_rhs % root.modulus) == 0 else BoolLiteral(False)
