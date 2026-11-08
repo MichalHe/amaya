@@ -162,6 +162,8 @@ struct NFA {
     void write_into_mata_format(std::ostream& output_stream) const;
 
     std::set<State> get_state_post(State state);
+    // One (arbitrary) symbol per destination reachable from `state`, in time linear in the size of its MTBDD.
+    std::vector<Transition> get_state_post_with_some_symbol(State state) const;
 
     void remove_states(std::set<State>& states_to_remove);
 

@@ -121,6 +121,7 @@ cdef extern from "base.hpp":
         void write_into_mata_format(ostream& output_stream) except +
 
         cpp_set[State] get_state_post(State state) except +
+        vector[Transition] get_state_post_with_some_symbol(State state) except +
 
         void remove_states(cpp_set[State]& states_to_remove) except +
 
@@ -251,6 +252,11 @@ cdef class PyNFA:
 
     def get_state_post(self, State state):
         return self._c_nfa.get_state_post(state)
+
+    def get_state_post_with_some_symbol(self, State state):
+        """[(dest, symbol)] with one symbol (bytes, one 0/1 per track) for every destination reachable from `state`."""
+        cdef vector[Transition] transitions = self._c_nfa.get_state_post_with_some_symbol(state)
+        return [(t.to, bytes(t.symbol)) for t in transitions]
 
     def get_symbolic_transitions_for_state(self, State state):
         cdef vector[Transition] transitions = self._c_nfa.get_symbolic_transitions_for_state(state)
