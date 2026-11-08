@@ -571,13 +571,10 @@ def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var
     # both Emitted and New are in [0, M-1] and we have   E + E_offset ~= N + N_offset
     assert node.mod_rewrite_var
     new_var: Var = node.mod_rewrite_var
-    new_var_offset = (-node.body.lin_term_constant) % node.body.nonlin_constant
 
     # combine offset into total offset: N ~= E + (E_offset - N_offset)
-    total_offset = (-emitted_var_offset + new_var_offset) % node.body.nonlin_constant
 
     # we have N = f(E) = E + total_offset, but due to congruence there is a nonlinear jump - find the spot where to create disjunction
-    zero_point = node.body.nonlin_constant - total_offset
 
     def make_and(children: Tuple[ASTp_Node, ...]) -> ASTp_Node:
         return AST_Connective(referenced_vars=_referenced_vars_of_children(children), type=Connective_Type.AND, children=children)
@@ -600,22 +597,18 @@ def rewrite_reminder_using_linearization(emitted_reminder_with_offset: Tuple[Var
         new_var_val     = Relation(vars=[new_var], coefs=[1], rhs=new_var_rhs, predicate_symbol='=')
         return make_and((emitted_var_val, new_var_val))
 
-    modulus = node.body.nonlin_constant
+    # N = (L + k2) mod M, E = (L + k1) mod M  =>  N = (E + d) mod M with d = (k2 - k1) mod M.
+    modulus = abs(node.body.nonlin_constant)
+    d = (node.body.lin_term_constant + emitted_var_offset) % modulus
     fn_terms = sorted([(emitted_var, 1), (new_var, -1)], key=lambda it: it[0])
     fn_vars  = [it[0] for it in fn_terms]
     fn_coefs = [it[1] for it in fn_terms]
-    fn         = Relation(vars=fn_vars, coefs=fn_coefs, rhs=total_offset, predicate_symbol='=')
-    shifted_fn = Relation(vars=fn_vars, coefs=fn_coefs, rhs=total_offset-modulus, predicate_symbol='=')
-
-    left_interval = (0, zero_point-1)
-    right_interval = (zero_point, modulus-1)
-
-    if left_interval[0] == left_interval[1]:
-        result_fn = make_or(fn_case_for_fixed_value(left_interval[0]), fn_case(right_interval[0], right_interval[1], shifted_fn))
-    elif right_interval[0] == right_interval[1]:
-        result_fn = make_or(fn_case(left_interval[0], left_interval[1], fn), fn_case_for_fixed_value(right_interval[0]))
+    no_wrap = Relation(vars=fn_vars, coefs=fn_coefs, rhs=-d, predicate_symbol='=')           # N = E + d
+    wrap    = Relation(vars=fn_vars, coefs=fn_coefs, rhs=modulus - d, predicate_symbol='=')  # N = E + d - M
+    if d == 0:
+        result_fn = no_wrap
     else:
-        result_fn = make_or(fn_case(0, zero_point-1, fn), fn_case(zero_point, modulus-1, shifted_fn))
+        result_fn = make_or(fn_case(0, modulus - 1 - d, no_wrap), fn_case(modulus - d, modulus - 1, wrap))
 
     rewrite_instructions.new_formulae.append(result_fn)
     rewrite_instructions.vars_to_quantify.add(new_var)
