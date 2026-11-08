@@ -161,49 +161,19 @@ def _make_value_interval_union(left_intervals: List[Value_Interval], right_inter
 
 
 def make_value_interval_union(left_intervals: List[Value_Interval], right_intervals: List[Value_Interval]):
-    if not left_intervals:
-        return right_intervals
-    if not right_intervals:
-        return left_intervals
-
-    # Start = 's', End = 'e'
-    def is_less(point_a, point_b):
-        if point_a[0] is None:
-            return -1 if point_a[1] == 's' else 1
-        if point_b[0] is None:
-            return 1 if point_b[1] == 's' else -1
-        return -1 if point_a[0] < point_b[0] else 1
-
-    points = []
-    for interval in itertools.chain(left_intervals, right_intervals):
-        points.append((interval.lower_limit, 's'))
-        points.append((interval.upper_limit, 'e'))
-
-    sorted_points = sorted(points, key=functools.cmp_to_key(is_less))
-
-    start = None
-    end = None
-    resulting_intervals = []
-    for point in sorted_points:
-        if not start:
-            start = point
-            continue
-        if not end:
-            end = point
-            continue
-
-        if end[1] == point[1] or end[1] == 's':
-            # Both are starts, or both are ends so we can safely add point to the current interval
-            end = point
-        else:
-            resulting_intervals.append(Value_Interval(lower_limit=start[0], upper_limit=end[0]))
-            start = point
-            end = None
-
-    resulting_intervals.append(Value_Interval(lower_limit=start[0], upper_limit=end[0]))
-
-    # @Todo: Do interval coalesence
-    return resulting_intervals
+    intervals = sorted((iv.copy() for iv in itertools.chain(left_intervals, right_intervals)),
+                       key=lambda iv: (iv.lower_limit is not None, iv.lower_limit or 0))
+    result: List[Value_Interval] = []
+    for iv in intervals:
+        if result:
+            last = result[-1]
+            if last.upper_limit is None:
+                break
+            if iv.lower_limit is None or iv.lower_limit <= last.upper_limit + 1:
+                last.upper_limit = None if iv.upper_limit is None else max(last.upper_limit, iv.upper_limit)
+                continue
+        result.append(iv)
+    return result
 
 
 def make_value_interval_negation(intervals: List[Value_Interval]) -> List[Value_Interval]:
