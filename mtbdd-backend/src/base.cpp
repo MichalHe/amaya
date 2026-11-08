@@ -12,6 +12,7 @@
 #include <iostream>
 #include <set>
 #include <vector>
+#include <unordered_set>
 #include <sstream>
 #include <string>
 
@@ -357,9 +358,15 @@ void NFA::perform_pad_closure() {
     sylvan::mtbdd_deref(frontier); // -frontier
 }
 
-void collect_reachable_states_from_mtbdd_leaves(MTBDD root, std::set<State>& output) {
-    // @Todo: This should be implemented as a proper sylvan (standalong) task utilizing cache
+static void collect_reachable_states_from_mtbdd_leaves_rec(MTBDD root, std::set<State>& output, std::unordered_set<MTBDD>& visited) {
     if (root == sylvan::mtbdd_false) {
+        return;
+    }
+
+    // Transition MTBDDs are DAGs with heavily shared subtrees (e.g. the one of an atom over many
+    // variables), so walking them as trees costs time proportional to the number of paths, which is
+    // exponential in the number of variables. Visit every node once.
+    if (!visited.insert(root).second) {
         return;
     }
 
@@ -369,9 +376,14 @@ void collect_reachable_states_from_mtbdd_leaves(MTBDD root, std::set<State>& out
 
         output.insert(leaf_contents->destination_set.begin(), leaf_contents->destination_set.end());
     } else {
-        collect_reachable_states_from_mtbdd_leaves(sylvan::mtbdd_getlow(root), output);
-        collect_reachable_states_from_mtbdd_leaves(sylvan::mtbdd_gethigh(root), output);
+        collect_reachable_states_from_mtbdd_leaves_rec(sylvan::mtbdd_getlow(root), output, visited);
+        collect_reachable_states_from_mtbdd_leaves_rec(sylvan::mtbdd_gethigh(root), output, visited);
     }
+}
+
+void collect_reachable_states_from_mtbdd_leaves(MTBDD root, std::set<State>& output) {
+    std::unordered_set<MTBDD> visited;
+    collect_reachable_states_from_mtbdd_leaves_rec(root, output, visited);
 }
 
 std::set<State> NFA::get_state_post(State state) {
