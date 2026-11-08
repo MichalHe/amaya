@@ -346,6 +346,11 @@ def normalize_expr(ast: Raw_AST,
 
         if not dependent_terms:
             nonlinear_term_graph.make_node_root(term_node)
+        else:
+            # a non-root term must also be dropped when a variable of its own body is bound.
+            for var, _ in term_node.body.lin_terms:
+                if not any(n is term_node for n in nonlinear_term_graph.index[var]):
+                    nonlinear_term_graph.index[var].append(term_node)
 
         support.add(placeholder_var)
         return expr, {term_node}, support
