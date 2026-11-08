@@ -65,7 +65,7 @@ def _perform_miniscoping(quantif_node: AST_Quantifier) -> ASTp_Node:
         if not var_to_child_indices:
             break
 
-        min_scope_var = min(var_to_child_indices, key=lambda var: len(var_to_child_indices[var]))
+        min_scope_var = min(var_to_child_indices, key=lambda var: (len(var_to_child_indices[var]), var))
 
         if len(var_to_child_indices[min_scope_var]) == len(scope_range):
             min_var_covers_entire_scope = True
