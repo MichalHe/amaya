@@ -1179,7 +1179,11 @@ def _are_exists_and_trees_isomorphic(left: ASTp_Node, right: ASTp_Node, isomorph
         if len(left.vars) != len(right.vars):
             return False
 
-        if sorted(left.coefs) != sorted(right.coefs):
+        if sorted(left.coefs) != sorted(right.coefs) or left.rhs != right.rhs:
+            return False
+        if isinstance(left, Relation) and left.predicate_symbol != right.predicate_symbol:
+            return False
+        if isinstance(left, Congruence) and left.modulus != right.modulus:
             return False
 
         left_vars_to_coefs: Dict[Var, int] = {var:coef for coef, var in left.linear_terms()}
