@@ -169,7 +169,7 @@ void NFA::add_transition(State from, State to, const u64 symbol, const u64 quant
     u8 rich_symbol[var_count];
 
     for (u64 bit_i = 0u; bit_i < var_count; bit_i++) {
-        u64 current_bit = (1u << bit_i);
+        u64 current_bit = (1ull << bit_i);
         bool dont_care = (current_bit & quantified_bits_mask) > 0;
         u8 care_val = (symbol & current_bit) > 0;
 

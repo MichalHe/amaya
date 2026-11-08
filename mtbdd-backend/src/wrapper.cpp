@@ -16,6 +16,7 @@
 #include <iostream>
 #include <limits>
 #include <cstring>
+#include <stdexcept>
 
 using namespace sylvan;
 
@@ -66,6 +67,11 @@ void shutdown_machinery()
 
 NFA construct_dfa_for_atom_conjunction(Serialized_Quantified_Atom_Conjunction* raw_formula) {
     Interrupt_Guard interrupt_guard;
+
+    if (raw_formula->var_cnt >= 64) {
+        // Symbols are enumerated as u64 bit vectors (Alphabet_Iterator), so >= 64 tracks cannot be represented.
+        throw std::invalid_argument("construct_dfa_for_atom_conjunction: at most 63 variables are supported");
+    }
 
     Formula_Description formula_desc;
     formula_desc.var_count = raw_formula->var_cnt;
