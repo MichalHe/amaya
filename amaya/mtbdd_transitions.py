@@ -301,15 +301,9 @@ class MTBDDTransitionFn():
 
     def get_state_post_with_some_symbol(self, state: int) -> List[Tuple[int, LSBF_AlphabetSymbol]]:
         '''Retrieves the state post set including an examplatory symbol for each destination.'''
-        seen_dests: Set[int] = set()
-        result: List[Tuple[int, LSBF_AlphabetSymbol]] = []
-        for _origin, dest, symbol in self._nfa.get_symbolic_transitions_for_state(state):
-            if dest in seen_dests:
-                continue
-            seen_dests.add(dest)
-            concrete_symbol = tuple(0 if bit == 2 else bit for bit in symbol)
-            result.append((dest, concrete_symbol))
-        return result
+        # Computed in C++ by a single pass over the state's MTBDD; enumerating the symbolic transitions
+        # (one per MTBDD path) instead is exponential in the number of tracks for wide atoms.
+        return [(dest, tuple(symbol)) for dest, symbol in self._nfa.get_state_post_with_some_symbol(state)]
 
     def remove_states(self, removed_states: Iterable[int]):
         self._nfa.remove_states(set(removed_states))

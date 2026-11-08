@@ -13,6 +13,7 @@
 #include <set>
 #include <vector>
 #include <unordered_set>
+#include <unordered_map>
 #include <sstream>
 #include <string>
 
@@ -384,6 +385,53 @@ static void collect_reachable_states_from_mtbdd_leaves_rec(MTBDD root, std::set<
 void collect_reachable_states_from_mtbdd_leaves(MTBDD root, std::set<State>& output) {
     std::unordered_set<MTBDD> visited;
     collect_reachable_states_from_mtbdd_leaves_rec(root, output, visited);
+}
+
+// Helper for NFA::get_state_post_with_some_symbol.
+// `visited` ensures every MTBDD node is processed once: all paths reaching a node lead to the same leaves,
+// so the first path found is a valid witness. The traversal is therefore linear in the number of MTBDD nodes
+// rather than in the number of paths, which can be exponential in the number of tracks.
+static void collect_post_with_some_symbol_rec(MTBDD node, State origin, std::vector<u8>& path,
+                                              const std::unordered_map<u32, u64>& var_to_track,
+                                              std::unordered_set<MTBDD>& visited,
+                                              std::set<State>& seen_destinations,
+                                              std::vector<Transition>& output) {
+    if (node == sylvan::mtbdd_false) return;
+    if (!visited.insert(node).second) return;  // Any path to a node is as good as any other
+
+    if (sylvan::mtbdd_isleaf(node)) {
+        auto leaf_contents = reinterpret_cast<Transition_Destination_Set*>(sylvan::mtbdd_getvalue(node));
+        for (State destination : leaf_contents->destination_set) {
+            if (seen_destinations.insert(destination).second) {
+                output.push_back({.from = origin, .to = destination, .symbol = path});
+            }
+        }
+        return;
+    }
+
+    u64 track = var_to_track.at(sylvan::mtbdd_getvar(node));
+    path[track] = 0;
+    collect_post_with_some_symbol_rec(sylvan::mtbdd_getlow(node), origin, path, var_to_track, visited, seen_destinations, output);
+    path[track] = 1;
+    collect_post_with_some_symbol_rec(sylvan::mtbdd_gethigh(node), origin, path, var_to_track, visited, seen_destinations, output);
+    path[track] = 0;  // Tracks the MTBDD does not test along a path are don't-care; report them as 0
+}
+
+std::vector<Transition> NFA::get_state_post_with_some_symbol(State state) const {
+    auto state_mtbdd_it = transitions.find(state);
+    if (state_mtbdd_it == transitions.end()) return {};
+
+    std::vector<u32> var_arr(var_count);
+    sylvan::mtbdd_set_to_array(vars, var_arr.data());
+    std::unordered_map<u32, u64> var_to_track;
+    for (u64 track = 0; track < var_count; track++) var_to_track[var_arr[track]] = track;
+
+    std::vector<u8> path(var_count, 0);
+    std::unordered_set<MTBDD> visited;
+    std::set<State> seen_destinations;
+    std::vector<Transition> output;
+    collect_post_with_some_symbol_rec(state_mtbdd_it->second, state, path, var_to_track, visited, seen_destinations, output);
+    return output;
 }
 
 std::set<State> NFA::get_state_post(State state) {
