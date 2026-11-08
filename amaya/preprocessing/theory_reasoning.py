@@ -53,6 +53,18 @@ class Asserted_Model_Properties:
     congruence still needed by an atom the local, in-order scan has not reached yet).
     """
 
+    var_uses_total: dict[Var, int] = field(default_factory=dict)
+    """ number of atoms (including hard bounds) referencing each var in the original formula. """
+
+    hard_bound_count_per_var: list[dict[Var, int]] = field(default_factory=lambda: [{}])
+    """
+    Stack parallel to `var_bounds`: entry `[frame][var]` is the number of hard-bound atoms on `var`
+    stored in that frame by `assert_hard_bound` whose relation was left unchanged by
+    `_substitute_known_aliases`. Bounds produced by alias substitution are not counted, because
+    `_find_vars_covered_by_hard_bounds` compares the sum over all frames on the stack against
+    `var_uses_total`, which counts atoms of the formula before substitution.
+    """
+
     vars_covered_by_congruence_bounds: set[Var] = field(default_factory=set)
     """
     Variables whose hard bounds were found to cover a congruence's whole period, letting that
@@ -102,6 +114,7 @@ class Asserted_Model_Properties:
         self.bool_atom_values.append(dict())
         self.var_aliases.append(dict())
         self.var_bounds.append(dict())
+        self.hard_bound_count_per_var.append(dict())
         self.stack_entry_negation_depths.append(self.negation_depth)
 
     def pop_stack(self):
@@ -109,6 +122,7 @@ class Asserted_Model_Properties:
         self.equations.pop(-1)
         self.var_aliases.pop(-1)
         self.var_bounds.pop(-1)
+        self.hard_bound_count_per_var.pop(-1)
         self.stack_entry_negation_depths.pop(-1)
 
     def is_unconditionally_true_for_current_stack_frame(self) -> bool:
@@ -312,15 +326,23 @@ def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asser
     abs_term = 0
     substituted_anything = False
 
-    for var, coef in zip(relation.vars, relation.coefs):
+    # Example: in `exists x, y, z. (x = y + 1) and (y = z - 2) and (x <= 5) and phi(z)` the aliases
+    # `x -> y + 1` and `y -> z - 2` are recorded in that order, and both binders are dropped.
+    # Substituting once turns `x <= 5` into `y + 1 <= 5`, leaving `y` without a binder; substituting
+    # transitively turns it into `z - 1 <= 5`.
+    worklist = list(zip(relation.vars, relation.coefs))
+    while worklist:
+        var, coef = worklist.pop()
         alias = assertions.get_alias(var)
         if alias is None:
             new_terms[var] = new_terms[var] + coef
             continue
 
         substituted_anything = True
+        # the alias expression may itself mention variables that received an alias later -
+        # expand transitively, otherwise an eliminated (binder-dropped) variable is reintroduced.
         for alias_var, alias_coef in zip(alias.vars, alias.coefs):
-            new_terms[alias_var] = new_terms[alias_var] + coef * alias_coef
+            worklist.append((alias_var, coef * alias_coef))
         abs_term += coef * alias.const
 
     if not substituted_anything:
@@ -330,12 +352,16 @@ def _substitute_known_aliases(relation: Relation | Congruence, assertions: Asser
     if isinstance(relation, Congruence):
         sorted_terms = [(var, coef) for var, coef in sorted_terms if (coef % relation.modulus != 0)]
     
-    new_vars = [var for var, _ in sorted_terms]
     new_coefs = [coef for _, coef in sorted_terms]
+    new_vars = [var for var, _ in sorted_terms]
     new_rhs = relation.rhs - abs_term
 
     if not new_coefs:
-        return BoolLiteral(True)
+        if isinstance(relation, Relation):
+            if relation.predicate_symbol == '=':
+                return BoolLiteral(new_rhs == 0)
+            return BoolLiteral(0 <= new_rhs)
+        return BoolLiteral(new_rhs % relation.modulus == 0)
 
     if isinstance(relation, Relation):
         return Relation(vars=new_vars, coefs=new_coefs, rhs=new_rhs, predicate_symbol=relation.predicate_symbol)
@@ -436,6 +462,10 @@ def _register_unresolved_equation(equation: Relation, assertions: Asserted_Model
         return None
 
     if assertions.is_unconditionally_true_for_owning_quantifier(elim_var):
+        # the alias must stay visible for the whole body of elim_var's binder.
+        elim_scope = assertions.find_owning_quantifier_scope_index(elim_var)
+        if target_depth > assertions.get_own_body_stack_depth(elim_scope):
+            return None
         assertions.vars_eliminated_via_alias.add(elim_var)
         return BoolLiteral(True)
 
@@ -464,7 +494,21 @@ def _count_var_uses_excluding_hard_bounds(root_node: ASTp_Node, counts: dict[Var
             raise ValueError(f'Unhandled node type when counting variable uses: {type(root_node)} :: {root_node}')
 
 
-def _find_vars_covered_by_hard_bounds(congruence: Congruence, assertions: Asserted_Model_Properties) -> set[Var]:
+def _count_all_var_uses(root_node, counts) -> None:
+    match root_node:
+        case Relation() | Congruence():
+            for var in set(root_node.vars):
+                counts[var] = counts.get(var, 0) + 1
+        case AST_Connective():
+            for child in root_node.children:
+                _count_all_var_uses(child, counts)
+        case AST_Negation() | AST_Quantifier():
+            _count_all_var_uses(root_node.child, counts)
+        case _:
+            pass
+
+
+def _find_vars_covered_by_hard_bounds(congruence: Congruence, assertions: Asserted_Model_Properties, original_vars=()) -> set[Var]:
     """
     Find the subset of `congruence`'s variables that are free enough - not used anywhere else in the
     formula, and hard-bounded over an interval at least as wide as the period their own coefficient
@@ -481,6 +525,19 @@ def _find_vars_covered_by_hard_bounds(congruence: Congruence, assertions: Assert
 
     for var, coef in zip(congruence.vars, congruence.coefs):
         if assertions.var_uses_excluding_hard_bounds.get(var, 0) > 1:
+            continue
+        # every atom mentioning `var` must be this congruence or a visible, unconditional
+        # hard bound, and `var` must be existential at this position (bound by a quantifier whose
+        # body we are unconditionally in, or free with no negation/branch crossed at all).
+        if var not in original_vars:
+            continue
+        visible_bound_atoms = sum(level.get(var, 0) for level in assertions.hard_bound_count_per_var)
+        if assertions.var_uses_total.get(var, 0) != 1 + visible_bound_atoms:
+            continue
+        if assertions.find_owning_quantifier_scope_index(var) is None:
+            if assertions.negation_depth != 0 or assertions.branch_depth != 0:
+                continue
+        elif not assertions.is_unconditionally_true_for_owning_quantifier(var):
             continue
 
         bounds = assertions.get_hard_bounds(var)
@@ -521,6 +578,8 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
     # use the in-order traversal has not reached yet, nor go stale across repeated top-level calls.
     assertions.var_uses_excluding_hard_bounds.clear()
     _count_var_uses_excluding_hard_bounds(root_node, assertions.var_uses_excluding_hard_bounds)
+    assertions.var_uses_total.clear()
+    _count_all_var_uses(root_node, assertions.var_uses_total)
     return _simplify_formula_using_model_properties(root_node, assertions)
 
 
@@ -529,7 +588,8 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
         case Var():
             asserted_value = assertions.get_asserted_values_for_bool_atom(root_node)
             if asserted_value is None:
-                assertions.assert_bool_atom(root_node, True)
+                if assertions.is_unconditionally_true_for_current_stack_frame():
+                    assertions.assert_bool_atom(root_node, True)
                 return root_node
             return BoolLiteral(asserted_value)
 
@@ -559,7 +619,7 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
             if rewritten_congruence.is_unsat():
                 return BoolLiteral(False)
 
-            covered_vars = _find_vars_covered_by_hard_bounds(rewritten_congruence, assertions)
+            covered_vars = _find_vars_covered_by_hard_bounds(rewritten_congruence, assertions, set(root_node.vars))
             if covered_vars:
                 # These variables' own hard bounds already guarantee the congruence always holds -
                 # the bounds are now redundant too, so the Relation() case drops them on sight.
@@ -600,7 +660,11 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
                         # Promoted to the widest frame the bound is unconditionally valid throughout,
                         # same as equations, so it stays visible to sibling branches nested under the
                         # same enclosing quantifier(s) instead of disappearing once its own frame pops.
-                        assertions.assert_hard_bound(substituted, depth=assertions.get_widest_valid_stack_depth())
+                        depth = assertions.get_widest_valid_stack_depth()
+                        assertions.assert_hard_bound(substituted, depth=depth)
+                        if substituted is root_node:
+                            counts = assertions.hard_bound_count_per_var[depth]
+                            counts[bound_var] = counts.get(bound_var, 0) + 1
 
                 assertions.vars_referenced_unsubstituted.update(substituted.vars)
                 return substituted
@@ -675,7 +739,8 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
                 var_value = assertions.get_asserted_values_for_bool_atom(root_node.child)
 
                 if var_value is None:
-                    assertions.assert_bool_atom(root_node.child, False)
+                    if assertions.is_unconditionally_true_for_current_stack_frame():
+                        assertions.assert_bool_atom(root_node.child, False)
                     return root_node
 
                 return BoolLiteral(value=not var_value)
@@ -688,7 +753,7 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
             if isinstance(new_child, BoolLiteral):
                 return BoolLiteral(value=not new_child.value)
 
-            if isinstance(new_child, Var):
+            if isinstance(new_child, Var) and assertions.is_unconditionally_true_for_current_stack_frame():
                 assertions.assert_bool_atom(new_child, False)
 
             result = AST_Negation(referenced_vars=root_node.referenced_vars, child=new_child)
@@ -696,7 +761,11 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
 
         case AST_Quantifier():
             assertions.enter_quantifier_scope(root_node.bound_vars)
+            # give every quantifier body its own frame, so facts that depend on the bound
+            # variables (capped to `get_own_body_stack_depth`) can never outlive the binder.
+            assertions.insert_stack()
             new_child = _simplify_formula_using_model_properties(root_node.child, assertions)
+            assertions.pop_stack()
             assertions.exit_quantifier_scope()
 
             if isinstance(new_child, BoolLiteral):

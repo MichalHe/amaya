@@ -495,10 +495,12 @@ class AST_Connective(ASTp_Node_Base):
         vars_appearing_with_both_polarities = positive_vars & negative_vars
 
         if vars_appearing_with_both_polarities:
-            if self.type == Connective_Type.AND | Connective_Type.EQUIV:
+            # (and p (not p)) is False, (or p (not p)) is True; EQUIV left alone.
+            if self.type == Connective_Type.AND:
                 return BoolLiteral(False)
-
-            return BoolLiteral(False)
+            if self.type == Connective_Type.OR:
+                return BoolLiteral(True)
+            return self
 
         return self
                        
