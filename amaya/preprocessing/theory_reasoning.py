@@ -30,6 +30,14 @@ class Var_Alias:
 
 
 @dataclass
+class Quantifier_Binder:
+    """ The quantifier whose body a stack frame was pushed for, and the walk state when it was entered. """
+    bound_vars: frozenset[Var]
+    entry_branch_depth: int
+    entry_negation_depth: int
+
+
+@dataclass
 class Asserted_Model_Properties:
     equations: list[list[Relation]] = field(default_factory=lambda: [[]])
     bool_atom_values: list[dict[Var, bool]] = field(default_factory=lambda: [{}])
@@ -37,7 +45,7 @@ class Asserted_Model_Properties:
     var_bounds: list[dict[Var, Value_Interval]] = field(default_factory=lambda: [{}])
     """
     Stack of currently known hard bounds (`X <= C`, `-X <= C`), scoped like `equations`/`var_aliases` -
-    one dict per currently open AND/OR frame, pushed/popped alongside them.
+    one dict per currently open AND/OR/quantifier-body frame, pushed/popped alongside them.
     """
 
     var_uses_excluding_hard_bounds: dict[Var, int] = field(default_factory=dict)
@@ -78,18 +86,18 @@ class Asserted_Model_Properties:
     negation_depth: int = 0
     """ How many NOTs we are currently nested under. """
 
-    quantifier_scopes: list[tuple[frozenset[Var], int, int, int]] = field(default_factory=list)
+    quantifier_binder_per_frame: list[Quantifier_Binder | None] = field(default_factory=lambda: [None])
     """
-    Stack of currently open quantifiers: (their bound vars, branch_depth, negation_depth, stack_depth)
-    as they were when we entered that quantifier's body. `stack_depth` is `len(var_aliases)` at that
-    point, i.e. the equations/var_aliases frame that is guaranteed to stay alive for the quantifier's
-    whole body.
+    Stack parallel to `var_aliases`: the quantifier a frame was pushed for by
+    `insert_quantifier_body_stack`, or None for a frame pushed by `insert_stack` (AND, OR/EQUIV
+    child, initial frame). A quantifier's body frame exists for exactly its whole body, so a fact
+    stored there or deeper is removed no later than the binder closes.
     """
 
     stack_entry_negation_depths: list[int] = field(default_factory=lambda: [0])
     """
     negation_depth as it was when the corresponding level of `equations`/`var_aliases`/`bool_atom_values`
-    was pushed (i.e. when we entered the enclosing AND/OR). An equation encountered at a negation_depth
+    was pushed (i.e. when we entered the enclosing AND/OR/quantifier). An equation encountered at a negation_depth
     different from the top of this stack sits under a NOT (or an odd number of them) relative to its
     enclosing conjunction/disjunction, so it is not implied by that branch and must not be remembered.
     """
@@ -116,6 +124,15 @@ class Asserted_Model_Properties:
         self.var_bounds.append(dict())
         self.hard_bound_count_per_var.append(dict())
         self.stack_entry_negation_depths.append(self.negation_depth)
+        self.quantifier_binder_per_frame.append(None)
+
+    def insert_quantifier_body_stack(self, bound_vars: tuple[Var, ...]):
+        self.insert_stack()
+        self.quantifier_binder_per_frame[-1] = Quantifier_Binder(
+            bound_vars=frozenset(bound_vars),
+            entry_branch_depth=self.branch_depth,
+            entry_negation_depth=self.negation_depth,
+        )
 
     def pop_stack(self):
         self.bool_atom_values.pop(-1)
@@ -124,6 +141,7 @@ class Asserted_Model_Properties:
         self.var_bounds.pop(-1)
         self.hard_bound_count_per_var.pop(-1)
         self.stack_entry_negation_depths.pop(-1)
+        self.quantifier_binder_per_frame.pop(-1)
 
     def is_unconditionally_true_for_current_stack_frame(self) -> bool:
         """
@@ -146,15 +164,6 @@ class Asserted_Model_Properties:
     def exit_negation(self):
         self.negation_depth -= 1
 
-    def enter_quantifier_scope(self, bound_vars: tuple[Var, ...]):
-        # The topmost frame that already exists when we enter this quantifier - the one that stays
-        # alive for its *whole* body (any frame the body itself pushes gets popped before the body
-        # is done, so it cannot be used to share facts between the body's own sibling branches).
-        self.quantifier_scopes.append((frozenset(bound_vars), self.branch_depth, self.negation_depth, len(self.var_aliases) - 1))
-
-    def exit_quantifier_scope(self):
-        self.quantifier_scopes.pop(-1)
-
     def no_branch_or_negation_crossed_since_binder_of(self, var: Var) -> bool:
         """
         True if `var` is bound by a currently open quantifier, and we are still in a position that
@@ -163,31 +172,24 @@ class Asserted_Model_Properties:
         treated as asserted throughout the quantifier's whole body, and can therefore be dropped
         (together with `var`'s binding) once it has been substituted away everywhere else.
         """
-        for bound_vars, entry_branch_depth, entry_negation_depth, _entry_stack_depth in reversed(self.quantifier_scopes):
-            if var in bound_vars:
-                return entry_branch_depth == self.branch_depth and entry_negation_depth == self.negation_depth
-        return False
+        body_stack_depth = self.find_quantifier_scope_binding_var(var)
+        if body_stack_depth is None:
+            return False
+        binder = cast(Quantifier_Binder, self.quantifier_binder_per_frame[body_stack_depth])
+        return binder.entry_branch_depth == self.branch_depth and binder.entry_negation_depth == self.negation_depth
 
-    def find_owning_quantifier_scope_index(self, var: Var) -> int | None:
+    def find_quantifier_scope_binding_var(self, var: Var) -> int | None:
         """
-        Index into `quantifier_scopes` (0 = outermost) of the innermost currently open quantifier
-        that binds `var`, or None if `var` is not bound by any currently open quantifier (e.g. it is
-        a free/global formula parameter).
+        Index of the body frame (in `var_aliases` and the other parallel stacks) of the innermost
+        currently open quantifier that binds `var`, or None if `var` is not bound by any currently
+        open quantifier (e.g. it is a free/global formula parameter). A fact stored at this index
+        is visible for the whole body of that quantifier and removed when it closes.
         """
-        for i in range(len(self.quantifier_scopes) - 1, -1, -1):
-            bound_vars, _, _, _ = self.quantifier_scopes[i]
-            if var in bound_vars:
-                return i
+        for stack_depth in range(len(self.quantifier_binder_per_frame) - 1, -1, -1):
+            binder = self.quantifier_binder_per_frame[stack_depth]
+            if binder is not None and var in binder.bound_vars:
+                return stack_depth
         return None
-
-    def get_own_body_stack_depth(self, scope_index: int) -> int:
-        """
-        The equations/var_aliases frame that stays alive for the whole body of `quantifier_scopes[scope_index]`.
-        That quantifier's body may not itself be an AND/OR (e.g. a bare relation, or another quantifier
-        directly) and so may never have pushed its own frame - clamp to the current topmost frame, the
-        most conservative (least-promoted) valid target, in that case.
-        """
-        return min(self.quantifier_scopes[scope_index][3] + 1, len(self.var_aliases) - 1)
 
     def get_widest_valid_stack_depth(self) -> int:
         """
@@ -199,10 +201,14 @@ class Asserted_Model_Properties:
         under the same quantifier - rather than disappearing once its immediate AND/OR is popped.
         """
         widest_depth = len(self.var_aliases) - 1
-        for _bound_vars, entry_branch_depth, entry_negation_depth, entry_stack_depth in reversed(self.quantifier_scopes):
-            if entry_branch_depth != self.branch_depth or entry_negation_depth != self.negation_depth:
+        for stack_depth in range(len(self.quantifier_binder_per_frame) - 1, -1, -1):
+            binder = self.quantifier_binder_per_frame[stack_depth]
+            if binder is None:
+                continue
+            if binder.entry_branch_depth != self.branch_depth or binder.entry_negation_depth != self.negation_depth:
                 break
-            widest_depth = entry_stack_depth
+            # the frame that was topmost when this quantifier was entered
+            widest_depth = stack_depth - 1
         return widest_depth
 
     def negate_last_level(self):
@@ -388,9 +394,9 @@ def _try_extract_alias(equation: Relation, assertions: Asserted_Model_Properties
     # variable; once that inner variable's own (unrelated) binder is later dropped, the alias
     # becomes a dangling reference wherever it still gets substituted in.
     scoped_candidates = [
-        (var, coef, scope_index)
+        (var, coef, binder_body_depth)
         for var, coef in unit_coef_vars
-        if (scope_index := assertions.find_owning_quantifier_scope_index(var)) is not None
+        if (binder_body_depth := assertions.find_quantifier_scope_binding_var(var)) is not None
     ]
     if scoped_candidates:
         elim_var, elim_coef, _ = max(scoped_candidates, key=lambda item: (item[2], item[0].id))
@@ -446,10 +452,9 @@ def _register_unresolved_equation(equation: Relation, assertions: Asserted_Model
     # would reintroduce that variable with no binder left anywhere in the formula. Cap the depth to
     # the innermost (most restrictive) such dependency's own body frame.
     for dependency_var in var_alias.vars:
-        dependency_scope_index = assertions.find_owning_quantifier_scope_index(dependency_var)
-        if dependency_scope_index is None:
+        dependency_body_depth = assertions.find_quantifier_scope_binding_var(dependency_var)
+        if dependency_body_depth is None:
             continue
-        dependency_body_depth = assertions.get_own_body_stack_depth(dependency_scope_index)
         target_depth = max(target_depth, dependency_body_depth)
 
     assertions.assert_alias(elim_var, var_alias, depth=target_depth)
@@ -463,8 +468,8 @@ def _register_unresolved_equation(equation: Relation, assertions: Asserted_Model
 
     if assertions.no_branch_or_negation_crossed_since_binder_of(elim_var):
         # the alias must stay visible for the whole body of elim_var's binder.
-        elim_scope = assertions.find_owning_quantifier_scope_index(elim_var)
-        if target_depth > assertions.get_own_body_stack_depth(elim_scope):
+        elim_body_depth = cast(int, assertions.find_quantifier_scope_binding_var(elim_var))
+        if target_depth > elim_body_depth:
             return None
         assertions.vars_eliminated_via_alias.add(elim_var)
         return BoolLiteral(True)
@@ -534,7 +539,7 @@ def _find_vars_covered_by_hard_bounds(congruence: Congruence, assertions: Assert
         visible_bound_atoms = sum(level.get(var, 0) for level in assertions.hard_bound_count_per_var)
         if assertions.var_uses_total.get(var, 0) != 1 + visible_bound_atoms:
             continue
-        if assertions.find_owning_quantifier_scope_index(var) is None:
+        if assertions.find_quantifier_scope_binding_var(var) is None:
             if assertions.negation_depth != 0 or assertions.branch_depth != 0:
                 continue
         elif not assertions.no_branch_or_negation_crossed_since_binder_of(var):
@@ -760,13 +765,11 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
             return result
 
         case AST_Quantifier():
-            assertions.enter_quantifier_scope(root_node.bound_vars)
             # give every quantifier body its own frame, so facts that depend on the bound
-            # variables (capped to `get_own_body_stack_depth`) can never outlive the binder.
-            assertions.insert_stack()
+            # variables (capped to `find_quantifier_scope_binding_var`) can never outlive the binder.
+            assertions.insert_quantifier_body_stack(root_node.bound_vars)
             new_child = _simplify_formula_using_model_properties(root_node.child, assertions)
             assertions.pop_stack()
-            assertions.exit_quantifier_scope()
 
             if isinstance(new_child, BoolLiteral):
                 assertions.vars_eliminated_via_alias.difference_update(root_node.bound_vars)
