@@ -155,7 +155,7 @@ class Asserted_Model_Properties:
     def exit_quantifier_scope(self):
         self.quantifier_scopes.pop(-1)
 
-    def is_unconditionally_true_for_owning_quantifier(self, var: Var) -> bool:
+    def no_branch_or_negation_crossed_since_binder_of(self, var: Var) -> bool:
         """
         True if `var` is bound by a currently open quantifier, and we are still in a position that
         is unconditionally within that quantifier's whole body - no OR/EQUIV branch and no NOT
@@ -461,7 +461,7 @@ def _register_unresolved_equation(equation: Relation, assertions: Asserted_Model
     if elim_var in assertions.vars_referenced_unsubstituted:
         return None
 
-    if assertions.is_unconditionally_true_for_owning_quantifier(elim_var):
+    if assertions.no_branch_or_negation_crossed_since_binder_of(elim_var):
         # the alias must stay visible for the whole body of elim_var's binder.
         elim_scope = assertions.find_owning_quantifier_scope_index(elim_var)
         if target_depth > assertions.get_own_body_stack_depth(elim_scope):
@@ -537,7 +537,7 @@ def _find_vars_covered_by_hard_bounds(congruence: Congruence, assertions: Assert
         if assertions.find_owning_quantifier_scope_index(var) is None:
             if assertions.negation_depth != 0 or assertions.branch_depth != 0:
                 continue
-        elif not assertions.is_unconditionally_true_for_owning_quantifier(var):
+        elif not assertions.no_branch_or_negation_crossed_since_binder_of(var):
             continue
 
         bounds = assertions.get_hard_bounds(var)
