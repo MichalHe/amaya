@@ -13,6 +13,7 @@
             --sat: #7bd88f; --unsat: #ff8a80; --track-bg: #3d3d3d; }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }  /* also for elements whose class sets display, e.g. .row */
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
   main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
@@ -30,6 +31,7 @@
   button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--border); padding: 7px 14px; }
   button.secondary[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
   .buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+  #example-about { margin: 6px 0 0; color: var(--muted); font-size: 14px; min-height: 1.5em; }
   #status { margin-top: 16px; color: var(--muted); min-height: 1.5em; }
   #answer { font: 700 1.6rem var(--mono); margin: 8px 0; }
   #answer.sat { color: var(--sat); } #answer.unsat { color: var(--unsat); }
@@ -51,10 +53,12 @@
 <body>
 <main>
   <h1>Amaya in the browser</h1>
-  <p class="lead">Amaya, an automata-based LIA SMT solver, running locally as WebAssembly (Pyodide).</p>
+  <p class="lead">Amaya, an automata-based LIA SMT solver, running locally as WebAssembly (Pyodide).
+    Set <em>Automata</em> to <em>graph</em> to see the automata it builds.</p>
 
   <label for="example">Example</label>
   <select id="example"></select>
+  <p id="example-about"></p>
 
   <label for="formula">SMT-LIB2 input</label>
   <textarea id="formula" spellcheck="false"></textarea>
@@ -104,17 +108,40 @@ const VIZ_URL = 'https://cdn.jsdelivr.net/npm/@viz-js/viz@3.31.0/dist/viz.js';
 // Larger automata are only laid out on request: Graphviz runs on the main thread and may take a while.
 const LARGE_STATES = 150, LARGE_EDGES = 600;
 
-const examples = {
-  'Interval (sat)': '(set-logic LIA)\n(declare-fun x () Int)\n(assert (and (> x 3) (< x 5)))\n(check-sat)\n',
-  'Parity (unsat)': '(set-logic LIA)\n(declare-fun x () Int)\n(assert (= (* 2 x) 7))\n(check-sat)\n',
-  'Quantifiers (sat)': '(set-logic LIA)\n(declare-fun y () Int)\n(assert (exists ((x Int)) (and (= y (* 3 x)) (> y 10))))\n(check-sat)\n',
-  'Frobenius coin problem (unsat)': '(set-logic LIA)\n(declare-fun n () Int)\n(assert (and (> n 23)\n  (not (exists ((a Int) (b Int)) (and (>= a 0) (>= b 0) (= n (+ (* 5 a) (* 7 b))))))))\n(check-sat)\n',
-};
+// Each example: [name, what Amaya does with it, SMT-LIB2 body after (set-logic LIA)].
+const examples = [
+  ['Linear system (sat)', 'x + 2y = 7 with x, y ≥ 0 and x > y: an automaton per atom, intersected one by one.',
+   '(declare-fun x () Int)\n(declare-fun y () Int)\n(assert (and (= (+ x (* 2 y)) 7) (>= x 0) (>= y 0) (> x y)))'],
+  ['Even numbers (sat)', '∃k. x = 2k with 5 < x < 9: k is projected away, then the result is intersected with the bounds.',
+   '(declare-fun x () Int)\n(assert (and (exists ((k Int)) (= x (* 2 k))) (> x 5) (< x 9)))'],
+  ['Quantifiers (sat)', '∃x. y = 3x ∧ y > 10: an intersection, then x is projected away.',
+   '(declare-fun y () Int)\n(assert (exists ((x Int)) (and (= y (* 3 x)) (> y 10))))'],
+  ['Universal quantifier (sat)', '∀y. y > x ⇒ 2y > x + 1, evaluated as ¬∃y. ¬(…): complements, a union and a projection.',
+   '(declare-fun x () Int)\n(assert (forall ((y Int)) (=> (> y x) (> (* 2 y) (+ x 1)))))'],
+  ['Divisibility (sat)', '3 divides x + y but not x: two projections and a complement.',
+   '(declare-fun x () Int)\n(declare-fun y () Int)\n(assert (and (exists ((k Int)) (= (+ x y) (* 3 k)))\n  (not (exists ((m Int)) (= x (* 3 m)))) (>= x 0) (>= y 0)))'],
+  ['Odd and even (unsat)', 'x = 2k + 1 and x = 2m: two projections whose intersection accepts nothing.',
+   '(declare-fun x () Int)\n(assert (and (exists ((k Int)) (= x (+ (* 2 k) 1))) (exists ((m Int)) (= x (* 2 m)))))'],
+  ['Congruences (sat)', 'x mod 3 = 1 and x mod 4 = 2: mod introduces auxiliary variables, so many automata are built.',
+   '(declare-fun x () Int)\n(assert (and (= (mod x 3) 1) (= (mod x 4) 2) (> x 0)))'],
+  ['Frobenius coin problem (unsat)', 'Every n > 23 is 5a + 7b with a, b ≥ 0: projections, a complement and an intersection.',
+   '(declare-fun n () Int)\n(assert (and (> n 23)\n  (not (exists ((a Int) (b Int)) (and (>= a 0) (>= b 0) (= n (+ (* 5 a) (* 7 b))))))))'],
+  ['Interval (sat)', 'Preprocessing turns 3 < x < 5 into x = 4, so only one automaton is built.',
+   '(declare-fun x () Int)\n(assert (and (> x 3) (< x 5)))'],
+  ['Parity (unsat)', '2x = 7 has no integer solution; preprocessing decides this, so no automata are built.',
+   '(declare-fun x () Int)\n(assert (= (* 2 x) 7))'],
+].map(([name, about, body]) => ({ name, about, smt2: `(set-logic LIA)\n${body}\n(check-sat)\n` }));
 const exampleSelect = document.getElementById('example');
+const exampleAbout = document.getElementById('example-about');
 const formula = document.getElementById('formula');
-for (const name of Object.keys(examples)) exampleSelect.add(new Option(name, name));
-formula.value = examples[exampleSelect.value];
-exampleSelect.onchange = () => { formula.value = examples[exampleSelect.value]; };
+for (const { name } of examples) exampleSelect.add(new Option(name, name));
+function showExample() {
+  const example = examples.find(({ name }) => name === exampleSelect.value);
+  formula.value = example.smt2;
+  exampleAbout.textContent = example.about;
+}
+showExample();
+exampleSelect.onchange = showExample;
 
 const status = document.getElementById('status');
 const answer = document.getElementById('answer');
@@ -191,6 +218,13 @@ function showAutomata(result) {
     ? `Variable ids, in track order: ${variables.map(([id, name]) => `${id} = ${name}`).join(', ')}.` : '';
   automatonSelect.replaceChildren(...items.map((item, index) => new Option(item.label, String(index))));
   automataSection.hidden = false;
+  automatonSelect.parentElement.parentElement.hidden = !automata.length;
+  if (!automata.length) {
+    automatonInfo.textContent = result.error ? 'No automata were built before the error.'
+      : 'No automata were built: Amaya decided this formula without them (for example during preprocessing).';
+    graphBox.hidden = source.hidden = true;
+    return;
+  }
   // Default to the last automaton built, i.e. the one for the whole formula.
   automatonSelect.value = String(Math.max(0, automata.length - 1));
   showSelected();

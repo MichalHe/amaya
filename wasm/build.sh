@@ -46,6 +46,11 @@ cp "$REPO/mtbdd-backend/wrapper/base.pyx" "$STAGE/mtbdd-backend/wrapper/"
 rsync -a "$BUILD/sylvan-$SYLVAN_VERSION/src/" "$STAGE/sylvan/"
 cp "$HERE/packaging/setup.py" "$HERE/packaging/pyproject.toml" "$HERE/packaging/amaya_wasm_compat.h" "$STAGE/"
 cp "$REPO/LICENSE.txt" "$STAGE/"
+# Browsers cache the wheel by its URL, so every source change must change the file name: the version gets
+# a hash of the staged sources as its local part (0.0.0+wasm.<hash>).
+SOURCE_HASH=$(cd "$STAGE" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)
+sed "s/^version = \"0.0.0+wasm\"/version = \"0.0.0+wasm.$SOURCE_HASH\"/" "$HERE/packaging/pyproject.toml" > "$STAGE/pyproject.toml"
+grep -q "+wasm.$SOURCE_HASH\"" "$STAGE/pyproject.toml"
 
 # 3. cross-build environment and Emscripten
 if ! "$PYODIDE_CLI" xbuildenv versions 2>/dev/null | grep -q "$PYODIDE_VERSION"; then
@@ -77,10 +82,16 @@ rm -f "$DIST"/graphviz-*.whl "$DIST"/dd-*.whl "$DIST"/astutils-*.whl "$DIST"/ply
 cp "$WHEELS"/*.whl "$DIST/"
 VISUALIZATION_WHEELS=$("$HOST_PYTHON" -c 'import json, pathlib, sys; print(json.dumps(sorted(p.name for p in pathlib.Path(sys.argv[1]).glob("*.whl"))))' "$WHEELS")
 
-# 6. web bundle: worker, main-thread API, demo page, and a manifest naming the wheels
-cp "$HERE/web/amaya.js" "$HERE/web/amaya-worker.js" "$HERE/web/index.html" "$DIST/"
+# 6. web bundle: worker, main-thread API, demo page, and a manifest naming the wheels. amaya.js loads the
+#    worker as amaya-worker.js?v=<buildId> and the demo page imports amaya.js?v=<buildId>, so a new build is
+#    never mixed with cached files of an older one.
+BUILD_ID=$(cat "$DIST/$WHEEL" "$HERE/web/amaya.js" "$HERE/web/amaya-worker.js" "$HERE/web/index.html" | sha256sum | cut -c1-12)
+cp "$HERE/web/amaya.js" "$HERE/web/amaya-worker.js" "$DIST/"
+sed "s|from './amaya.js';|from './amaya.js?v=$BUILD_ID';|" "$HERE/web/index.html" > "$DIST/index.html"
+grep -q "amaya.js?v=$BUILD_ID" "$DIST/index.html"
 cat > "$DIST/amaya-build.json" <<EOF
 {
+  "buildId": "$BUILD_ID",
   "wheel": "$WHEEL",
   "visualizationWheels": $VISUALIZATION_WHEELS,
   "pyodideVersion": "$PYODIDE_VERSION",

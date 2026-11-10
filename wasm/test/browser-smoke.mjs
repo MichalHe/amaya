@@ -9,11 +9,18 @@
 import puppeteer from 'puppeteer-core';
 
 const url = process.argv[2] ?? 'http://localhost:8765/';
+// Answers of the demo examples (cross-checked with cvc5).
 const expected = {
+  'Linear system (sat)': 'sat',
+  'Even numbers (sat)': 'sat',
+  'Quantifiers (sat)': 'sat',
+  'Universal quantifier (sat)': 'sat',
+  'Divisibility (sat)': 'sat',
+  'Odd and even (unsat)': 'unsat',
+  'Congruences (sat)': 'sat',
+  'Frobenius coin problem (unsat)': 'unsat',
   'Interval (sat)': 'sat',
   'Parity (unsat)': 'unsat',
-  'Quantifiers (sat)': 'sat',
-  'Frobenius coin problem (unsat)': 'unsat',
 };
 
 const browser = await puppeteer.launch({
@@ -25,12 +32,18 @@ let failures = 0;
 try {
   const page = await browser.newPage();
   page.on('pageerror', (error) => console.log('page error:', error.message));
+  const requested = [];
+  page.on('request', (request) => requested.push(request.url()));
   const t0 = Date.now();
   await page.goto(url);
   await page.waitForFunction(() => !document.getElementById('run').disabled, { timeout: 120000 });
   console.log(`page ready after ${((Date.now() - t0) / 1000).toFixed(1)} s: ` +
               await page.$eval('#status', (e) => e.textContent));
   console.log('footer:', await page.$eval('#footer', (e) => e.textContent));
+  // Files that differ between builds are requested with the build id, so stale cached copies are not used.
+  const versioned = ['amaya.js', 'amaya-worker.js'].every((file) => requested.some((url) => url.includes(`/${file}?v=`)));
+  console.log(`${versioned ? 'ok  ' : 'FAIL'} versioned URLs: ${requested.filter((url) => /amaya(-worker)?\.js|\.whl/.test(url)).map((url) => url.split('/').pop()).join(' ')}`);
+  failures += versioned ? 0 : 1;
 
   async function solve(timeoutSeconds = 60) {
     await page.$eval('#timeout', (e, v) => { e.value = v; }, String(timeoutSeconds));
@@ -72,7 +85,7 @@ try {
   // Exported automata: the graph of the last automaton is rendered (Graphviz from the CDN), the operation
   // trace can be shown, and a text format is displayed as source.
   await page.select('#export', 'dot');
-  await page.select('#example', 'Interval (sat)');
+  await page.select('#example', 'Quantifiers (sat)');
   const exported = await solve();
   await page.waitForSelector('#graph svg', { timeout: 60000 });
   const graph = await page.evaluate(() => {
@@ -81,7 +94,7 @@ try {
              last: select.options[select.options.length - 2]?.textContent,
              nodes: document.querySelectorAll('#graph svg g.node').length };
   });
-  const graphOk = exported.answer === 'sat' && graph.count > 1 && graph.selected === graph.last && graph.nodes > 0;
+  const graphOk = exported.answer === 'sat' && graph.count > 2 && graph.selected === graph.last && graph.nodes > 0;
   console.log(`${graphOk ? 'ok  ' : 'FAIL'} automata graph: ${graph.count - 1} automata + trace, ` +
               `selected '${graph.selected}', ${graph.nodes} nodes drawn`);
   failures += graphOk ? 0 : 1;
@@ -102,6 +115,15 @@ try {
   const vtfOk = !vtf.hidden && vtf.text.startsWith('@NFA');
   console.log(`${vtfOk ? 'ok  ' : 'FAIL'} automata as VTF: ${JSON.stringify(vtf.text.slice(0, 40))}`);
   failures += vtfOk ? 0 : 1;
+
+  await page.select('#example', 'Parity (unsat)');
+  await solve();
+  const none = await page.$eval('#automaton-info', (e) => e.textContent);
+  // The empty automaton selector and its buttons are hidden, not just left empty.
+  const selectorShown = await page.$eval('#automaton', (e) => e.offsetParent !== null);
+  const noneOk = /No automata were built: Amaya decided/.test(none) && !selectorShown;
+  console.log(`${noneOk ? 'ok  ' : 'FAIL'} formula decided without automata (selector ${selectorShown ? 'shown' : 'hidden'}): ${none}`);
+  failures += noneOk ? 0 : 1;
 } finally {
   await browser.close();
 }
