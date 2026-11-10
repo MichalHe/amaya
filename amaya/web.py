@@ -177,7 +177,7 @@ def solve(smt2_text: str, args: Optional[Sequence[str]] = None, mode: str = 'get
                 else:
                     print(code, file=sys.stderr)
                     exit_code = 1
-            except Exception as error:  # report instead of killing the host page/worker
+            except Exception:  # report instead of killing the host page/worker
                 import traceback
                 traceback.print_exc()
                 exit_code = 2

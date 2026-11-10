@@ -73,7 +73,6 @@ def convert_automaton_to_graphviz(nfa,
                                   node_naming_fn: Callable[[int], str] = None):
 
     raise RuntimeError('This is deprecated!')
-    from graphviz import Digraph  # imported on use: an optional dependency, installed on demand under Pyodide
     graph = Digraph('automaton', strict=True, graph_attr={'rankdir': 'LR', 'ranksep': '1'})
 
     if not node_naming_fn:
