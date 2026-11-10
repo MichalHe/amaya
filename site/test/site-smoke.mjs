@@ -70,6 +70,9 @@ try {
   await page.setViewport({ width: 360, height: 800 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check(overflow <= 0, `no horizontal page scroll at 360 px (overflow ${overflow} px)`);
+  // The automaton is scaled down on phones; its smallest label must stay readable (box of 13 px: an 11 px font).
+  const smallestLabel = await page.$$eval('#hero-automaton text', (texts) => Math.min(...texts.map((t) => t.getBoundingClientRect().height)));
+  check(smallestLabel >= 13, `hero labels readable at 360 px (smallest box ${smallestLabel.toFixed(1)} px)`);
   await page.setViewport({ width: 1280, height: 900 });
 
   // The link below the automaton opens the playground on the same formula with graphs, and Amaya's last
