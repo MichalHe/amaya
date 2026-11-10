@@ -83,12 +83,15 @@ cp "$WHEELS"/*.whl "$DIST/"
 VISUALIZATION_WHEELS=$("$HOST_PYTHON" -c 'import json, pathlib, sys; print(json.dumps(sorted(p.name for p in pathlib.Path(sys.argv[1]).glob("*.whl"))))' "$WHEELS")
 
 # 6. web bundle: worker, main-thread API, demo page, and a manifest naming the wheels. amaya.js loads the
-#    worker as amaya-worker.js?v=<buildId> and the demo page imports amaya.js?v=<buildId>, so a new build is
-#    never mixed with cached files of an older one.
-BUILD_ID=$(cat "$DIST/$WHEEL" "$HERE/web/amaya.js" "$HERE/web/amaya-worker.js" "$HERE/web/index.html" | sha256sum | cut -c1-12)
+#    worker as amaya-worker.js?v=<buildId>, the demo page loads playground.js?v=<buildId>, which imports
+#    amaya.js?v=<buildId>, so a new build is never mixed with cached files of an older one.
+WEB_FILES=("$HERE/web/amaya.js" "$HERE/web/amaya-worker.js" "$HERE/web/playground.js" "$HERE/web/index.html")
+BUILD_ID=$(cat "$DIST/$WHEEL" "${WEB_FILES[@]}" | sha256sum | cut -c1-12)
 cp "$HERE/web/amaya.js" "$HERE/web/amaya-worker.js" "$DIST/"
-sed "s|from './amaya.js';|from './amaya.js?v=$BUILD_ID';|" "$HERE/web/index.html" > "$DIST/index.html"
-grep -q "amaya.js?v=$BUILD_ID" "$DIST/index.html"
+sed "s|from './amaya.js';|from './amaya.js?v=$BUILD_ID';|" "$HERE/web/playground.js" > "$DIST/playground.js"
+sed "s|src=\"./playground.js\"|src=\"./playground.js?v=$BUILD_ID\"|" "$HERE/web/index.html" > "$DIST/index.html"
+grep -q "amaya.js?v=$BUILD_ID" "$DIST/playground.js"
+grep -q "playground.js?v=$BUILD_ID" "$DIST/index.html"
 cat > "$DIST/amaya-build.json" <<EOF
 {
   "buildId": "$BUILD_ID",

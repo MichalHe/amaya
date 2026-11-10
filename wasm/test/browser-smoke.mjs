@@ -8,9 +8,16 @@
 // and that the page recovers afterwards.
 import puppeteer from 'puppeteer-core';
 
+// Click an element after scrolling it to the middle of the viewport, so that no sticky header covers it.
+async function click(page, selector) {
+  await page.$eval(selector, (element) => element.scrollIntoView({ block: 'center', inline: 'center' }));
+  await page.click(selector);
+}
+
 const url = process.argv[2] ?? 'http://localhost:8765/';
 // Answers of the demo examples (cross-checked with cvc5).
 const expected = {
+  'Residue modulo 3 (sat)': 'sat',
   'Linear system (sat)': 'sat',
   'Even numbers (sat)': 'sat',
   'Quantifiers (sat)': 'sat',
@@ -41,13 +48,13 @@ try {
               await page.$eval('#status', (e) => e.textContent));
   console.log('footer:', await page.$eval('#footer', (e) => e.textContent));
   // Files that differ between builds are requested with the build id, so stale cached copies are not used.
-  const versioned = ['amaya.js', 'amaya-worker.js'].every((file) => requested.some((url) => url.includes(`/${file}?v=`)));
-  console.log(`${versioned ? 'ok  ' : 'FAIL'} versioned URLs: ${requested.filter((url) => /amaya(-worker)?\.js|\.whl/.test(url)).map((url) => url.split('/').pop()).join(' ')}`);
+  const versioned = ['playground.js', 'amaya.js', 'amaya-worker.js'].every((file) => requested.some((url) => url.includes(`/${file}?v=`)));
+  console.log(`${versioned ? 'ok  ' : 'FAIL'} versioned URLs: ${requested.filter((url) => /(amaya|amaya-worker|playground)\.js|\.whl/.test(url)).map((url) => url.split('/').pop()).join(' ')}`);
   failures += versioned ? 0 : 1;
 
   async function solve(timeoutSeconds = 60) {
     await page.$eval('#timeout', (e, v) => { e.value = v; }, String(timeoutSeconds));
-    await page.click('#run');
+    await click(page, '#run');
     await page.waitForFunction(() => !document.getElementById('run').disabled, { timeout: 180000 });
     return {
       answer: await page.$eval('#answer', (e) => e.textContent),
@@ -103,10 +110,10 @@ try {
   // Tracks are labelled with variable names by default, with ids when the box is unchecked.
   const trackLabels = () => page.$$eval('#graph svg text', (texts) => texts.map((t) => t.textContent).filter((t) => t.endsWith(':')));
   const named = await trackLabels();
-  await page.click('#names');
+  await click(page, '#names');
   await page.waitForFunction(() => [...document.querySelectorAll('#graph svg text')].some((t) => t.textContent.startsWith('Var(id=')));
   const ids = await trackLabels();
-  await page.click('#names');
+  await click(page, '#names');
   await page.waitForFunction(() => [...document.querySelectorAll('#graph svg text')].some((t) => t.textContent === 'y:'));
   const namesOk = named.includes('y:') && !named.some((t) => t.startsWith('Var(id=')) && ids.some((t) => t.startsWith('Var(id='));
   console.log(`${namesOk ? 'ok  ' : 'FAIL'} track labels: ${[...new Set(named)].join(' ')} / unchecked: ${[...new Set(ids)].join(' ')}`);

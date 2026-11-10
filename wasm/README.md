@@ -12,7 +12,8 @@ This directory builds Amaya for WebAssembly so that it runs on a static web page
 | `amaya-worker.js` | Web Worker that runs Pyodide and Amaya off the main thread |
 | `graphviz-*.whl`, `dd-*.whl`, `astutils-*.whl`, `ply-*.whl` | Pure-Python packages for exporting automata (about 160 kB), loaded on first use |
 | `amaya-build.json` | Names of the wheels and the Pyodide/sylvan versions they were built for |
-| `index.html` | Demo page |
+| `playground.js` | The playground: examples, solving, automata viewer (shared with the website, `site/playground/`) |
+| `index.html` | Demo page (the playground without the website around it) |
 
 ## Building
 
@@ -67,8 +68,8 @@ From Python inside Pyodide the same entry point is `amaya.web.solve(smt2_text, a
 **Updating a deployment.** Static hosts let browsers cache files (GitHub Pages for 10 minutes), and a page
 must not mix files of two builds. The wheel's version carries a hash of its sources
 (`amaya-0.0.0+wasm.<hash>-….whl`), `amaya-build.json` is revalidated on every load, and `amaya.js` loads
-the worker as `amaya-worker.js?v=<buildId>`. The demo page imports `amaya.js?v=<buildId>` (stamped by
-`build.sh`); a page of your own should do the same, e.g. read `buildId` from `amaya-build.json` and import
+the worker as `amaya-worker.js?v=<buildId>`. The demo page loads `playground.js?v=<buildId>`, which imports
+`amaya.js?v=<buildId>` (both stamped by `build.sh`); a page of your own should do the same, e.g. read `buildId` from `amaya-build.json` and import
 `amaya.js?v=${buildId}`, or be served with headers that make browsers revalidate `amaya.js`.
 
 ### Exporting automata
