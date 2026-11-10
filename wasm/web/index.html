@@ -30,7 +30,8 @@
   button:disabled { opacity: .55; cursor: default; }
   button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--border); padding: 7px 14px; }
   button.secondary[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
-  .buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  label.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 6px; font-weight: 600; }
   #example-about { margin: 6px 0 0; color: var(--muted); font-size: 14px; min-height: 1.5em; }
   #status { margin-top: 16px; color: var(--muted); min-height: 1.5em; }
   #answer { font: 700 1.6rem var(--mono); margin: 8px 0; }
@@ -90,6 +91,7 @@
         <button id="view-source" class="secondary" aria-pressed="false">Source</button>
         <button id="zoom" class="secondary">Actual size</button>
         <button id="download" class="secondary">Download</button>
+        <label class="inline"><input id="names" type="checkbox" checked> variable names</label>
       </div>
     </div>
     <div id="automaton-info"></div>
@@ -101,7 +103,7 @@
 </main>
 
 <script type="module">
-import { Amaya, AmayaTimeoutError } from './amaya.js';
+import { Amaya, AmayaTimeoutError, dotWithVariableNames } from './amaya.js';
 
 // Graphviz compiled to WebAssembly, loaded the first time a graph is shown.
 const VIZ_URL = 'https://cdn.jsdelivr.net/npm/@viz-js/viz@3.31.0/dist/viz.js';
@@ -192,7 +194,9 @@ const source = document.getElementById('source');
 const graphButton = document.getElementById('view-graph');
 const sourceButton = document.getElementById('view-source');
 const zoomButton = document.getElementById('zoom');
+const namesBox = document.getElementById('names');
 let items = [];
+let variables = {};
 let variablesNote = '';
 let view = 'graph';
 let renderToken = 0;
@@ -213,9 +217,9 @@ function showAutomata(result) {
     label: `#${a.id} ${a.operation} (${a.states} states, ${a.transitions} ${a.format === 'dot' ? 'edges' : 'transitions'})`,
   }));
   if (result.trace) items.push({ label: 'operation trace', name: 'trace-info.dot', format: 'dot', text: result.trace });
-  const variables = Object.entries(result.variables ?? {}).sort((a, b) => Number(a[0]) - Number(b[0]));
-  variablesNote = variables.length
-    ? `Variable ids, in track order: ${variables.map(([id, name]) => `${id} = ${name}`).join(', ')}.` : '';
+  variables = result.variables ?? {};
+  const byId = Object.entries(variables).sort((a, b) => Number(a[0]) - Number(b[0]));
+  variablesNote = byId.length ? `Variable ids, in track order: ${byId.map(([id, name]) => `${id} = ${name}`).join(', ')}.` : '';
   automatonSelect.replaceChildren(...items.map((item, index) => new Option(item.label, String(index))));
   automataSection.hidden = false;
   automatonSelect.parentElement.parentElement.hidden = !automata.length;
@@ -230,6 +234,12 @@ function showAutomata(result) {
   showSelected();
 }
 
+// What is shown and downloaded: DOT automata with the tracks labelled by variable names, if chosen.
+function displayedText(item) {
+  const hasTracks = item.format === 'dot' && item.states !== undefined;
+  return hasTracks && namesBox.checked ? dotWithVariableNames(item.text, variables) : item.text;
+}
+
 function showSelected(force = false) {
   const item = items[Number(automatonSelect.value)];
   if (!item) {
@@ -240,12 +250,13 @@ function showSelected(force = false) {
   const isGraph = item.format === 'dot';
   const mode = isGraph ? view : 'source';
   graphButton.disabled = zoomButton.disabled = !isGraph;
+  namesBox.disabled = !isGraph || item.states === undefined;
   graphButton.setAttribute('aria-pressed', String(mode === 'graph'));
   sourceButton.setAttribute('aria-pressed', String(mode === 'source'));
   automatonInfo.textContent = item.states === undefined
     ? 'Graph of the operations performed: an edge leads from a result to its operands.'
     : `${item.states} states, ${item.transitions} ${isGraph ? 'edges' : 'transitions'} (${item.name}). ${variablesNote}`;
-  source.textContent = item.text;
+  source.textContent = displayedText(item);
   source.hidden = mode !== 'source';
   graphBox.hidden = mode !== 'graph';
   if (mode === 'graph') renderGraph(item, force);
@@ -273,7 +284,7 @@ async function renderGraph(item, force) {
     const fg = style.getPropertyValue('--fg').trim();
     const font = 'Helvetica,Arial,sans-serif';
     // Display only: the track-name cells use Graphviz "gray", which is unreadable on a dark background.
-    const dot = item.text.replaceAll('BGCOLOR="gray"', `BGCOLOR="${style.getPropertyValue('--track-bg').trim()}"`);
+    const dot = displayedText(item).replaceAll('BGCOLOR="gray"', `BGCOLOR="${style.getPropertyValue('--track-bg').trim()}"`);
     const svg = viz.renderSVGElement(dot, {
       graphAttributes: { bgcolor: 'transparent' },
       nodeAttributes: { color: fg, fontcolor: fg, fontname: font },
@@ -286,6 +297,7 @@ async function renderGraph(item, force) {
 }
 
 automatonSelect.onchange = () => showSelected();
+namesBox.onchange = () => showSelected(true);
 graphButton.onclick = () => { view = 'graph'; showSelected(); };
 sourceButton.onclick = () => { view = 'source'; showSelected(); };
 zoomButton.onclick = () => {
@@ -296,7 +308,7 @@ document.getElementById('download').onclick = () => {
   const item = items[Number(automatonSelect.value)];
   if (!item) return;
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(new Blob([item.text], { type: 'text/plain' }));
+  link.href = URL.createObjectURL(new Blob([displayedText(item)], { type: 'text/plain' }));
   link.download = item.name;
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);

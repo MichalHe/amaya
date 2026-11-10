@@ -8,9 +8,11 @@
 import { loadPyodide } from 'pyodide';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const dist = resolve(process.argv[2] ?? 'wasm/dist');
 const build = JSON.parse(readFileSync(`${dist}/amaya-build.json`, 'utf8'));
+const { dotWithVariableNames } = await import(pathToFileURL(`${dist}/amaya.js`).href);
 
 const builtinCases = [
   { name: 'sat interval', args: ['--fast'], expected: 'sat',
@@ -30,6 +32,11 @@ const builtinCases = [
   })),
   { name: 'export automata (native backend)', args: ['--backend', 'native'], expected: 'unsat', exportAutomata: 'dot',
     smt2: '(set-logic LIA)\n(declare-fun x () Int)\n(assert (and (> x 3) (< x 4)))\n(check-sat)\n' },
+  // Track labels with names: a shadowed x gets its id appended, a quoted name is escaped for the HTML label.
+  { name: 'export automata (variable names)', args: ['--fast'], expected: 'sat', exportAutomata: 'dot',
+    checkLabels: (labels) => labels.has('a&lt;b &amp; c') && [...labels].filter((l) => /^x#\d+$/.test(l)).length === 2,
+    smt2: '(set-logic LIA)\n(declare-fun x () Int)\n(declare-fun |a<b & c| () Int)\n' +
+          '(assert (and (> x 0) (= (+ x |a<b & c|) 5) (exists ((x Int)) (and (< x 0) (> (+ x |a<b & c|) 0)))))\n(check-sat)\n' },
 ];
 const header = { dot: 'digraph automaton', vtf: '@NFA', mata: '@NFA-explicit' };
 
@@ -44,6 +51,13 @@ function exportProblems(c, result) {
   if (automata.some((a) => !Number.isInteger(a.states)) || !automata.some((a) => a.states > 0)) problems.push('state count');
   if (!result.trace?.includes('digraph traceviz')) problems.push('no trace');
   if (!Object.values(result.variables ?? {}).includes('x')) problems.push('no variable names');
+  const withEdges = automata.filter((a) => a.transitions > 0).at(-1);  // the last one may be empty
+  if (c.exportAutomata === 'dot' && withEdges) {
+    const named = dotWithVariableNames(withEdges.text, result.variables);
+    const labels = new Set([...named.matchAll(/BGCOLOR="gray">(.*?):<\/TD>/g)].map((m) => m[1]));
+    if (!labels.size || [...labels].some((label) => /^(Var\(id=)?\d+\)?$/.test(label))) problems.push(`track labels ${[...labels]}`);
+    if (c.checkLabels && !c.checkLabels(labels)) problems.push(`unexpected labels ${[...labels]}`);
+  }
   return problems;
 }
 const cases = process.argv[3] ? JSON.parse(readFileSync(process.argv[3], 'utf8')) : builtinCases;

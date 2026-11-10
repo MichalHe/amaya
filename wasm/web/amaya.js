@@ -14,6 +14,30 @@
 
 export const DEFAULT_PYODIDE_VERSION = '0.29.5';
 
+/**
+ * Label the tracks of an automaton exported as DOT with the SMT names of the variables instead of their ids
+ * (`Var(id=3)` with the MTBDD backend, `3` with the native one). `variables` is `result.variables` of
+ * {@link Amaya#solve}. A name shared by several variables, e.g. a bound variable shadowing a free one, gets
+ * its id appended (`x#3`). Other text is left unchanged.
+ * @param {string} dot
+ * @param {Object<string, string>} variables  variable id -> name
+ * @returns {string}
+ */
+export function dotWithVariableNames(dot, variables) {
+  const names = new Map(Object.entries(variables ?? {}));
+  const uses = new Map();
+  for (const name of names.values()) uses.set(name, (uses.get(name) ?? 0) + 1);
+  const escape = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // The track cell written by compute_html_label_for_symbols in amaya/visualization.py.
+  return dot.replace(/(<TD BORDER="0" BGCOLOR="gray">)(?:Var\(id=(\d+)\)|(\d+)):(<\/TD>)/g,
+    (cell, open, mtbddId, nativeId, close) => {
+      const id = mtbddId ?? nativeId;
+      const name = names.get(id);
+      if (name === undefined) return cell;
+      return `${open}${escape(uses.get(name) > 1 ? `${name}#${id}` : name)}:${close}`;
+    });
+}
+
 export class AmayaTimeoutError extends Error {
   constructor(timeoutMs) {
     super(`Amaya did not finish within ${timeoutMs} ms`);

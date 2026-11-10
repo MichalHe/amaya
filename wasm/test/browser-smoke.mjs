@@ -99,6 +99,18 @@ try {
               `selected '${graph.selected}', ${graph.nodes} nodes drawn`);
   failures += graphOk ? 0 : 1;
 
+  // Tracks are labelled with variable names by default, with ids when the box is unchecked.
+  const trackLabels = () => page.$$eval('#graph svg text', (texts) => texts.map((t) => t.textContent).filter((t) => t.endsWith(':')));
+  const named = await trackLabels();
+  await page.click('#names');
+  await page.waitForFunction(() => [...document.querySelectorAll('#graph svg text')].some((t) => t.textContent.startsWith('Var(id=')));
+  const ids = await trackLabels();
+  await page.click('#names');
+  await page.waitForFunction(() => [...document.querySelectorAll('#graph svg text')].some((t) => t.textContent === 'y:'));
+  const namesOk = named.includes('y:') && !named.some((t) => t.startsWith('Var(id=')) && ids.some((t) => t.startsWith('Var(id='));
+  console.log(`${namesOk ? 'ok  ' : 'FAIL'} track labels: ${[...new Set(named)].join(' ')} / unchecked: ${[...new Set(ids)].join(' ')}`);
+  failures += namesOk ? 0 : 1;
+
   await page.evaluate(() => {
     const select = document.getElementById('automaton');
     select.value = String(select.options.length - 1);
