@@ -23,3 +23,5 @@ tool_paper/*.pdf
 # WebAssembly build outputs (wasm/build.sh)
 wasm/build/
 wasm/dist/
+site/_site/
+node_modules/
