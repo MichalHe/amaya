@@ -37,7 +37,7 @@ namespace Bit_Set {
             u64 chunk_offset = biased_state % 64;
 
             assert(target_chunk < this->block_cnt);
-            return (this->data[target_chunk] & (1ul << chunk_offset)) > 0;
+            return (this->data[target_chunk] & (1ull << chunk_offset)) > 0;
         }
 
         bool has_any_state(std::vector<State>& states) {
@@ -62,7 +62,7 @@ namespace Bit_Set {
             u64 chunk_offset = biased_state % 64;
 
             assert(target_chunk < this->block_cnt);
-            this->data[target_chunk] = this->data[target_chunk] | (1ul << chunk_offset);
+            this->data[target_chunk] = this->data[target_chunk] | (1ull << chunk_offset);
         }
 
         /* The number of states this set can hold - `block_cnt` blocks worth of bits. */

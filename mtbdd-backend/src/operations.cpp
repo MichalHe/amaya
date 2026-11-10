@@ -71,7 +71,7 @@ Pad_Closure_Info2* g_pad_closure_info = nullptr;
  */
 u64 union_applied_cnt = 0;
 
-TASK_IMPL_3(MTBDD, transitions_union_op, MTBDD *, left_op_ptr, MTBDD *, right_op_ptr, uint64_t, param)
+TASK_IMPL_3(MTBDD, transitions_union_op, MTBDD *, left_op_ptr, MTBDD *, right_op_ptr, size_t, param)
 {
     MTBDD left_mtbdd = *left_op_ptr, right_mtbdd = *right_op_ptr;
 
@@ -113,7 +113,7 @@ TASK_IMPL_3(MTBDD, project_variable_away_abstract_op, MTBDD, left_mtbdd, MTBDD, 
  * The param is actually not used, since the (const) param would cause the sylvan cache to return
  * a result from some previous remove-states-op application.
  */
-TASK_IMPL_2(MTBDD, remove_states_op, MTBDD, dd, uint64_t, param) {
+TASK_IMPL_2(MTBDD, remove_states_op, MTBDD, dd, size_t, param) {
     if (dd == mtbdd_false) return mtbdd_false;
 
     if (mtbdd_isleaf(dd)) {
@@ -144,7 +144,7 @@ TASK_IMPL_2(MTBDD, remove_states_op, MTBDD, dd, uint64_t, param) {
 }
 
 
-TASK_IMPL_2(MTBDD, rename_states_op, MTBDD, dd, uint64_t, param) {
+TASK_IMPL_2(MTBDD, rename_states_op, MTBDD, dd, size_t, param) {
     if (dd == mtbdd_false) return mtbdd_false;
 
     if (mtbdd_isleaf(dd)) {
@@ -209,7 +209,7 @@ std::string array_to_str(T* array, const uint64_t array_size) {
 }
 
 
-TASK_IMPL_3(MTBDD, build_pad_closure_fronier_op, MTBDD *, p_extension, MTBDD *, p_frontier, u64, raw_extension_origin_state)
+TASK_IMPL_3(MTBDD, build_pad_closure_fronier_op, MTBDD *, p_extension, MTBDD *, p_frontier, size_t, raw_extension_origin_state)
 {
     State extension_origin_state = static_cast<State>(raw_extension_origin_state);
     MTBDD extension = *p_extension, frontier = *p_frontier;
@@ -250,7 +250,7 @@ TASK_IMPL_3(MTBDD, build_pad_closure_fronier_op, MTBDD *, p_extension, MTBDD *, 
     return mtbdd_invalid;
 }
 
-TASK_IMPL_3(MTBDD, build_pad_closure_bit_set_fronier_op, MTBDD *, p_extension, MTBDD *, p_frontier, u64, raw_extension_origin_state)
+TASK_IMPL_3(MTBDD, build_pad_closure_bit_set_fronier_op, MTBDD *, p_extension, MTBDD *, p_frontier, size_t, raw_extension_origin_state)
 {
     State state_to_extend_frontier_with = static_cast<State>(raw_extension_origin_state);
     MTBDD extension = *p_extension;  // Set_Leaf
@@ -293,7 +293,7 @@ TASK_IMPL_3(MTBDD, build_pad_closure_bit_set_fronier_op, MTBDD *, p_extension, M
     return sylvan::mtbdd_invalid;
 }
 
-TASK_IMPL_3(MTBDD, add_pad_transitions_bit_set_op, MTBDD *, p_transitions, MTBDD *, p_frontier, u64, raw_origin_state) {
+TASK_IMPL_3(MTBDD, add_pad_transitions_bit_set_op, MTBDD *, p_transitions, MTBDD *, p_frontier, size_t, raw_origin_state) {
     State origin_state = static_cast<State>(raw_origin_state);
 
     assert(g_pad_closure_info != nullptr);
@@ -342,7 +342,7 @@ TASK_IMPL_3(MTBDD, add_pad_transitions_bit_set_op, MTBDD *, p_transitions, MTBDD
     return transitions;
 }
 
-TASK_IMPL_3(MTBDD, add_pad_transitions_op, MTBDD *, p_transitions, MTBDD *, p_frontier, u64, raw_origin_state) {
+TASK_IMPL_3(MTBDD, add_pad_transitions_op, MTBDD *, p_transitions, MTBDD *, p_frontier, size_t, raw_origin_state) {
     State origin_state = static_cast<State>(raw_origin_state);
 
     assert(g_pad_closure_info != nullptr);
@@ -419,7 +419,7 @@ bool skip_product_state_due_to_no_post(Intersection_Info2& info, std::pair<State
 #endif
 }
 
-TASK_IMPL_3(MTBDD, transitions_intersection2_op, MTBDD *, pa, MTBDD *, pb, uint64_t, param) {
+TASK_IMPL_3(MTBDD, transitions_intersection2_op, MTBDD *, pa, MTBDD *, pb, size_t, param) {
     MTBDD a = *pa, b = *pb;
 
     if (a == mtbdd_false || b == mtbdd_false) {
@@ -472,7 +472,7 @@ TASK_IMPL_3(MTBDD, transitions_intersection2_op, MTBDD *, pa, MTBDD *, pb, uint6
     return intersection_leaf;
 }
 
-TASK_IMPL_2(MTBDD, replace_macrostates_with_handles_op, MTBDD, dd, uint64_t, param) {
+TASK_IMPL_2(MTBDD, replace_macrostates_with_handles_op, MTBDD, dd, size_t, param) {
     if (dd == mtbdd_false) {
         auto ctx = reinterpret_cast<Determinization_Context*>(param);
         ctx->is_trapstate_needed = true;
@@ -503,7 +503,7 @@ TASK_IMPL_2(MTBDD, replace_macrostates_with_handles_op, MTBDD, dd, uint64_t, par
     return new_leaf;
 }
 
-TASK_IMPL_2(MTBDD, remove_states2_op, MTBDD, dd, uint64_t, param) {
+TASK_IMPL_2(MTBDD, remove_states2_op, MTBDD, dd, size_t, param) {
     if (dd == mtbdd_false) return mtbdd_false;
 
     if (mtbdd_isleaf(dd)) {
@@ -528,7 +528,7 @@ TASK_IMPL_2(MTBDD, remove_states2_op, MTBDD, dd, uint64_t, param) {
  */
 Replace_States_With_Partition_Info* g_replace_states_with_partition_info = nullptr;
 
-TASK_IMPL_2(MTBDD, replace_states_with_partition_ids_op, MTBDD, dd, uint64_t, iteration_number) {
+TASK_IMPL_2(MTBDD, replace_states_with_partition_ids_op, MTBDD, dd, size_t, iteration_number) {
     if (dd == mtbdd_false) return dd;
 
     assert(g_replace_states_with_partition_info);

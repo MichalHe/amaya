@@ -1006,8 +1006,6 @@ NFA minimize_hopcroft(NFA& nfa) {
         {nonfinal_states_ordered, 1},
     };
 
-    std::unordered_set<State, u64> state_to_partition_id_map;
-    state_to_partition_id_map.reserve(nfa.states.size());
 
     Replace_States_With_Partition_Info replace_states_with_partition_info;
     g_replace_states_with_partition_info = &replace_states_with_partition_info;

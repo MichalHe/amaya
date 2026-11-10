@@ -57,25 +57,25 @@ int   tfa_pareto_leaf_equals(u64 a_ptr, u64 b_ptr);
 u64   tfa_pareto_leaf_hash(const u64 contents_ptr, const u64 seed);
 char* tfa_pareto_leaf_to_str(int comp, u64 leaf_val, char* buf, size_t buflen);
 
-TASK_DECL_3(sylvan::MTBDD, tfa_mtbdd_union, sylvan::MTBDD *, sylvan::MTBDD *, uint64_t);
+TASK_DECL_3(sylvan::MTBDD, tfa_mtbdd_union, sylvan::MTBDD *, sylvan::MTBDD *, size_t);
 MTBDD perform_tfa_mtbdd_union(MTBDD left, MTBDD right);
 
-TASK_DECL_3(sylvan::MTBDD, tfa_mtbdd_intersection, sylvan::MTBDD *, sylvan::MTBDD *, uint64_t);
+TASK_DECL_3(sylvan::MTBDD, tfa_mtbdd_intersection, sylvan::MTBDD *, sylvan::MTBDD *, size_t);
 MTBDD perform_tfa_mtbdd_intersection(MTBDD left, MTBDD right);
 MTBDD make_tfa_intersection_top();
 
-TASK_DECL_3(sylvan::MTBDD, tfa_mtbdd_pareto_union, sylvan::MTBDD *, sylvan::MTBDD *, u64);
+TASK_DECL_3(sylvan::MTBDD, tfa_mtbdd_pareto_union, sylvan::MTBDD *, sylvan::MTBDD *, size_t);
 MTBDD perform_tfa_pareto_union(MTBDD left, MTBDD right, Formula_Structure_Info* formula_info);
 
 TASK_DECL_3(sylvan::MTBDD, tfa_mtbdd_pareto_projection_op, sylvan::MTBDD, sylvan::MTBDD, int)
 sylvan::MTBDD perform_tfa_pareto_projection(sylvan::MTBDD bdd, sylvan::BDDSET var_to_project_away, Formula_Structure_Info* formula_structure);
 
-TASK_DECL_2(sylvan::MTBDD, tfa_make_tfa_leaves_into_macrostate, sylvan::MTBDD, uint64_t);
+TASK_DECL_2(sylvan::MTBDD, tfa_make_tfa_leaves_into_macrostate, sylvan::MTBDD, size_t);
 sylvan::MTBDD convert_tfa_leaves_into_macrostates(sylvan::MTBDD bdd, NFA_Construction_Ctx* ctx);
 
 void init_tfa_leaves();
 
-TASK_DECL_3(sylvan::MTBDD, are_mtbdds_identic_op, sylvan::MTBDD *, sylvan::MTBDD *, u64);
+TASK_DECL_3(sylvan::MTBDD, are_mtbdds_identic_op, sylvan::MTBDD *, sylvan::MTBDD *, size_t);
 bool check_mtbdds_are_identical(MTBDD left, MTBDD right);
 
 #endif
