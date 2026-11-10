@@ -1,0 +1,71 @@
+name: tests
+
+on:
+  push:
+    branches: [master, devel]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  SYLVAN_VERSION: v1.5.0
+  # Outside the checkout, so the cached install does not appear as untracked files.
+  SYLVAN_PREFIX: /home/runner/sylvan-install
+
+jobs:
+  pytest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev libhwloc-dev cmake
+
+      # Sylvan is built from source (as in Dockerfile) and cached per version.
+      - name: Cache sylvan
+        id: cache-sylvan
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SYLVAN_PREFIX }}
+          key: sylvan-${{ env.SYLVAN_VERSION }}-${{ runner.os }}-ubuntu-24.04
+
+      - name: Build sylvan
+        if: steps.cache-sylvan.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$SYLVAN_VERSION" https://github.com/trolando/sylvan.git "$RUNNER_TEMP/sylvan"
+          cd "$RUNNER_TEMP/sylvan"
+          sed -i 's/-Werror//g' CMakeLists.txt
+          # CMAKE_POLICY_VERSION_MINIMUM: sylvan v1.5.0 declares a cmake_minimum_required older
+          # than CMake 4.x accepts.
+          cmake -S . -B build \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_PREFIX="$SYLVAN_PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib
+          cmake --build build -j"$(nproc)"
+          cmake --install build
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt cython setuptools
+
+      # compile_wrapper.py hard-codes developer-machine include/library paths; CPATH,
+      # LIBRARY_PATH and LDFLAGS point the build at the sylvan prefix instead.
+      - name: Build libamaya extension
+        run: |
+          export CPATH="$SYLVAN_PREFIX/include"
+          export LIBRARY_PATH="$SYLVAN_PREFIX/lib"
+          export LDFLAGS="-Wl,-rpath,$SYLVAN_PREFIX/lib"
+          make -C mtbdd-backend libamaya PYTHON="$(which python)"
+
+      - name: Run tests
+        env:
+          LD_LIBRARY_PATH: ${{ env.SYLVAN_PREFIX }}/lib
+        run: python -m pytest tests -q
