@@ -137,6 +137,7 @@
 
 /* Base */
 *, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }  /* also for elements whose class sets display, e.g. .controls */
 html { -webkit-text-size-adjust: 100%; scroll-padding-top: 5rem; }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 body {
