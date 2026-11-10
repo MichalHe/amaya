@@ -186,7 +186,7 @@ char* tfa_leaf_intersection_to_str(int comp, u64 leaf_val, char *buf, size_t buf
     }
 }
 
-TASK_IMPL_3(MTBDD, tfa_mtbdd_union, MTBDD *, left_op_ptr, MTBDD *, right_op_ptr, u64, param)
+TASK_IMPL_3(MTBDD, tfa_mtbdd_union, MTBDD *, left_op_ptr, MTBDD *, right_op_ptr, size_t, param)
 {
     MTBDD left_mtbdd = *left_op_ptr, right_mtbdd = *right_op_ptr;
 
@@ -205,7 +205,7 @@ MTBDD perform_tfa_mtbdd_union(MTBDD left, MTBDD right) {
     return mtbdd_applyp(left, right, 0u, TASK(tfa_mtbdd_union), AMAYA_TFA_UNION_OP_ID);
 }
 
-TASK_IMPL_3(MTBDD, tfa_mtbdd_intersection, MTBDD *, left_op_ptr, MTBDD *, right_op_ptr, u64, param)
+TASK_IMPL_3(MTBDD, tfa_mtbdd_intersection, MTBDD *, left_op_ptr, MTBDD *, right_op_ptr, size_t, param)
 {
     MTBDD left_mtbdd = *left_op_ptr, right_mtbdd = *right_op_ptr;
 
@@ -290,7 +290,7 @@ TASK_IMPL_3(
     tfa_mtbdd_pareto_union,
     MTBDD*, left_ptr,
     MTBDD*, right_ptr,
-    u64, formula_struct_raw)
+    size_t, formula_struct_raw)
 {
     MTBDD left = *left_ptr;
     MTBDD right = *right_ptr;
@@ -409,7 +409,7 @@ char* tfa_pareto_leaf_to_str(int comp, u64 leaf_val, char *buf, size_t buflen) {
     }
 }
 
-TASK_IMPL_3(MTBDD, are_mtbdds_identic_op, sylvan::MTBDD*, left_ptr, sylvan::MTBDD*, right_ptr, u64, result_raw_ptr) {
+TASK_IMPL_3(MTBDD, are_mtbdds_identic_op, sylvan::MTBDD*, left_ptr, sylvan::MTBDD*, right_ptr, size_t, result_raw_ptr) {
     MTBDD left  = *left_ptr;
     MTBDD right = *right_ptr;
 
@@ -532,7 +532,7 @@ Transition_Destination_Set make_singleton_macrostate_known(TFA_Leaf_Intersection
 }
 
 
-TASK_IMPL_2(MTBDD, tfa_make_tfa_leaves_into_macrostate, MTBDD, dd, uint64_t, param) {
+TASK_IMPL_2(MTBDD, tfa_make_tfa_leaves_into_macrostate, MTBDD, dd, size_t, param) {
     if (!mtbdd_isleaf(dd)) return mtbdd_invalid;
     auto construction_ctx = reinterpret_cast<NFA_Construction_Ctx*>(param);
 

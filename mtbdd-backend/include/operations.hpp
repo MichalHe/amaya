@@ -58,19 +58,19 @@ extern Pad_Closure_Info2* g_pad_closure_info;
  * still <k> number of variables in the variable set passed to abstract_apply.
  */
 TASK_DECL_3(sylvan::MTBDD, project_variable_away_abstract_op, sylvan::MTBDD, sylvan::MTBDD, int);
-TASK_DECL_3(sylvan::MTBDD, transitions_union_op, sylvan::MTBDD *, sylvan::MTBDD *, uint64_t);
+TASK_DECL_3(sylvan::MTBDD, transitions_union_op, sylvan::MTBDD *, sylvan::MTBDD *, size_t);
 
-TASK_DECL_2(sylvan::MTBDD, remove_states_op, sylvan::MTBDD, uint64_t);
-TASK_DECL_2(sylvan::MTBDD, rename_states_op, sylvan::MTBDD, uint64_t);
+TASK_DECL_2(sylvan::MTBDD, remove_states_op, sylvan::MTBDD, size_t);
+TASK_DECL_2(sylvan::MTBDD, rename_states_op, sylvan::MTBDD, size_t);
 
-TASK_DECL_3(sylvan::MTBDD, build_pad_closure_fronier_op, sylvan::MTBDD*, sylvan::MTBDD*, u64);
-TASK_DECL_3(sylvan::MTBDD, build_pad_closure_bit_set_fronier_op, sylvan::MTBDD*, sylvan::MTBDD*, u64);
-TASK_DECL_3(sylvan::MTBDD, add_pad_transitions_op, sylvan::MTBDD*, sylvan::MTBDD*, u64);
-TASK_DECL_3(sylvan::MTBDD, add_pad_transitions_bit_set_op, sylvan::MTBDD*, sylvan::MTBDD*, u64);
+TASK_DECL_3(sylvan::MTBDD, build_pad_closure_fronier_op, sylvan::MTBDD*, sylvan::MTBDD*, size_t);
+TASK_DECL_3(sylvan::MTBDD, build_pad_closure_bit_set_fronier_op, sylvan::MTBDD*, sylvan::MTBDD*, size_t);
+TASK_DECL_3(sylvan::MTBDD, add_pad_transitions_op, sylvan::MTBDD*, sylvan::MTBDD*, size_t);
+TASK_DECL_3(sylvan::MTBDD, add_pad_transitions_bit_set_op, sylvan::MTBDD*, sylvan::MTBDD*, size_t);
 
-TASK_DECL_3(sylvan::MTBDD, transitions_intersection2_op, sylvan::MTBDD *, sylvan::MTBDD *, uint64_t);
-TASK_DECL_2(sylvan::MTBDD, replace_macrostates_with_handles_op, sylvan::MTBDD, uint64_t);
-TASK_DECL_2(sylvan::MTBDD, remove_states2_op, sylvan::MTBDD, uint64_t);
+TASK_DECL_3(sylvan::MTBDD, transitions_intersection2_op, sylvan::MTBDD *, sylvan::MTBDD *, size_t);
+TASK_DECL_2(sylvan::MTBDD, replace_macrostates_with_handles_op, sylvan::MTBDD, size_t);
+TASK_DECL_2(sylvan::MTBDD, remove_states2_op, sylvan::MTBDD, size_t);
 
 
 struct Replace_States_With_Partition_Info {
@@ -78,7 +78,7 @@ struct Replace_States_With_Partition_Info {
 };
 extern Replace_States_With_Partition_Info* g_replace_states_with_partition_info;
 
-TASK_DECL_2(sylvan::MTBDD, replace_states_with_partition_ids_op, sylvan::MTBDD, uint64_t);
+TASK_DECL_2(sylvan::MTBDD, replace_states_with_partition_ids_op, sylvan::MTBDD, size_t);
 
 typedef struct
 {

@@ -2,7 +2,7 @@
 #include <sylvan_int.h>
 #include "../include/sylvan-extra.h"
 
-TASK_IMPL_4(MTBDD, mtbdd_uapplyp, MTBDD, dd, mtbdd_uapply_op, op, size_t, opid, size_t, param) {
+TASK_IMPL_4(MTBDD, mtbdd_uapplyp, MTBDD, dd, mtbdd_uapply_op, op, uint64_t, opid, size_t, param) {
     sylvan_gc_test();
 
     MTBDD result;

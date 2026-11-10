@@ -31,7 +31,31 @@ using std::map;
 void init_machinery()
 {
     int n_workers = 1;
+#ifdef __EMSCRIPTEN__
+    // WebAssembly: mmap allocates memory eagerly and the address space is at most 4 GB, so the Lace
+    // task deque and sylvan's tables must be much smaller than on a native build.
+    size_t dequeue_size = 1 << 18;
+    size_t sylvan_memory_mb = 256;
+#else
     size_t dequeue_size = 10000000;
+    size_t sylvan_memory_mb = 4096;
+#endif
+    // Upper bound for sylvan's node table plus operation cache (both are allocated up front).
+    // A value that is not a number of megabytes in [1, 2^24] is reported and ignored: strtoull would turn it
+    // into 0, which sylvan rejects, or into a cap whose conversion to bytes overflows.
+    if (const char* memory_mb = getenv("AMAYA_SYLVAN_MEMORY_MB")) {
+        char* parse_end = nullptr;
+        errno = 0;
+        unsigned long long parsed_mb = strtoull(memory_mb, &parse_end, 10);
+        bool is_number = errno == 0 && parse_end != memory_mb && *parse_end == '\0' && memory_mb[0] != '-';
+        if (is_number && parsed_mb >= 1 && parsed_mb <= (1ull << 24)) {
+            sylvan_memory_mb = parsed_mb;
+        } else {
+            std::cerr << "AMAYA_SYLVAN_MEMORY_MB=" << memory_mb << ": expected a number of megabytes in [1, "
+                      << (1ull << 24) << "]; using " << sylvan_memory_mb << "\n";
+        }
+    }
+    if (sizeof(size_t) == 4 && sylvan_memory_mb >= 4096) sylvan_memory_mb = 4095;  // 32-bit address space
 
     lace_init(n_workers, dequeue_size);
     //lace_startup(program_stack_size, TASK(_main), NULL);
@@ -42,7 +66,7 @@ void init_machinery()
     const size_t stack_size = 1LL << 20;
     lace_startup(0, NULL, NULL);
 
-    sylvan_set_limits(1LL << 32, 5, 5);
+    sylvan_set_limits(sylvan_memory_mb << 20, 5, 5);
 
     // Testing aid: AMAYA_SYLVAN_TABLE_LOG2 (optionally with AMAYA_SYLVAN_TABLE_MAX_LOG2,
     // AMAYA_SYLVAN_CACHE_LOG2 and AMAYA_SYLVAN_CACHE_MAX_LOG2) shrinks sylvan's tables so that garbage
