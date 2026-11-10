@@ -84,6 +84,11 @@ result.trace      // DOT graph of the operations (an edge leads from a result to
 result.variables  // {variable id: SMT name}; tracks are labelled with variable ids, in increasing order
 ```
 
+Amaya labels the tracks of the automata with variable ids. `dotWithVariableNames(dot, result.variables)`,
+exported by `amaya.js`, relabels a DOT automaton with the SMT names; a name shared by several variables (a
+bound variable shadowing a free one) gets its id appended (`x#2`). The demo page does this by default, for
+the graph, the source and the download (checkbox *variable names*).
+
 The first such call installs `graphviz` and `dd` into the worker (they are pure Python and are only needed
 for exporting). The demo page lays the DOT output out with [viz.js](https://github.com/mdaines/viz-js)
 (Graphviz compiled to WebAssembly, loaded from jsDelivr when the first graph is shown); automata with more
