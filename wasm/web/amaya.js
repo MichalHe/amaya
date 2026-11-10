@@ -27,14 +27,14 @@ export function dotWithVariableNames(dot, variables) {
   const names = new Map(Object.entries(variables ?? {}));
   const uses = new Map();
   for (const name of names.values()) uses.set(name, (uses.get(name) ?? 0) + 1);
-  const escape = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const escapeHtml = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   // The track cell written by compute_html_label_for_symbols in amaya/visualization.py.
   return dot.replace(/(<TD BORDER="0" BGCOLOR="gray">)(?:Var\(id=(\d+)\)|(\d+)):(<\/TD>)/g,
     (cell, open, mtbddId, nativeId, close) => {
       const id = mtbddId ?? nativeId;
       const name = names.get(id);
       if (name === undefined) return cell;
-      return `${open}${escape(uses.get(name) > 1 ? `${name}#${id}` : name)}:${close}`;
+      return `${open}${escapeHtml(uses.get(name) > 1 ? `${name}#${id}` : name)}:${close}`;
     });
 }
 

@@ -12,7 +12,7 @@
  * plus {automata, trace, variables} when `exportAutomata` ('dot' | 'vtf' | 'mata') is given. The wheels needed
  * for exporting (visualizationWheelURLs) are loaded the first time automata are requested.
  */
-/* global importScripts, loadPyodide */
+/* global loadPyodide */  // defined by importScripts(pyodide.js)
 let pyodide = null;
 let amayaWeb = null;
 let visualizationWheelURLs = [];
