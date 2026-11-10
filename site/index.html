@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amaya: an automata-based SMT solver for linear integer arithmetic</title>
+<meta name="description" content="Amaya decides quantified linear integer arithmetic (Presburger arithmetic) with finite automata. Try it in your browser.">
+<link rel="canonical" href="https://verifit.github.io/amaya/">
+<meta property="og:title" content="Amaya: an automata-based SMT solver for linear integer arithmetic">
+<meta property="og:description" content="Amaya decides quantified linear integer arithmetic with finite automata. Try it in your browser.">
+<meta property="og:image" content="https://verifit.github.io/amaya/assets/amaya-logo.png">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/source-serif-4-roman-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script type="module" src="assets/site.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="masthead">
+  <div class="masthead-inner">
+    <a class="wordmark" href="./"><img src="assets/favicon.svg" alt="" width="26" height="26">Amaya</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#start">Get started</a>
+      <a href="playground/">Playground</a>
+      <a href="#papers">Publications</a>
+      <a href="#more">Documentation</a>
+      <a href="https://github.com/VeriFIT/amaya">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch the colour theme">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-text">
+      <h1 id="hero-title">Amaya</h1>
+      <p class="hero-tagline">An automata-based SMT solver for linear integer arithmetic with quantifiers.</p>
+      <p>Amaya decides formulae of Presburger arithmetic: linear equations, inequations and congruences over the
+        integers, combined with Boolean connectives and arbitrarily nested quantifiers. It translates a formula
+        into a finite automaton that accepts the binary encodings of the formula’s solutions, so the formula is
+        satisfiable exactly when the automaton accepts a word.</p>
+      <p>Amaya reads SMT-LIB&nbsp;2, answers <code>sat</code> or <code>unsat</code>, and can print a model. It is
+        written in Python, with a C++ backend that represents transitions symbolically using the Sylvan
+        decision-diagram library.</p>
+      <div class="button-row">
+        <a class="button button-primary" href="playground/">Try the playground</a>
+        <a class="button" href="https://github.com/VeriFIT/amaya">Source on GitHub</a>
+      </div>
+    </div>
+
+    <figure class="hero-figure" id="hero-automaton">
+      <div class="hero-controls">
+        <label>x = <input type="number" value="7" step="1" min="-1000000" max="1000000" aria-describedby="hero-caption"></label>
+        <button type="button" class="button button-small hero-replay">Replay</button>
+      </div>
+      <div class="hero-tape" aria-label="x in binary"></div>
+      <p class="hero-tape-legend">x in binary, least significant bit first; the dashed cell is the sign bit.</p>
+      <svg viewBox="48 -14 432 334" role="img" aria-label="Amaya's minimal automaton for x mod 3 = 1: five states, q0 to q4, of which q3 and q4 are final"></svg>
+      <p class="hero-verdict" aria-live="polite"></p>
+      <figcaption id="hero-caption">The minimal automaton that Amaya builds for <span class="math">∃k. x = 3k + 1</span>,
+        that is, for <span class="math">x mod 3 = 1</span>. Type a number to watch it being read; double circles are
+        final states. <a href="playground/?example=Residue%20modulo%203%20(sat)&amp;automata=dot">See Amaya build it</a>.</figcaption>
+    </figure>
+  </section>
+
+  <section class="chapter" id="how" aria-labelledby="how-title">
+    <h2 id="how-title">How Amaya decides a formula</h2>
+    <p class="chapter-lead">Amaya follows the classical automata-based approach to Presburger arithmetic, which goes
+      back to Büchi, and strengthens it with algebraic reasoning on the formulae that label the automata’s states.</p>
+    <ol class="steps">
+      <li>
+        <h3>Encode</h3>
+        <p>An integer is a word of bits, least significant bit first, ending with the sign bit (two’s complement).
+          The variables of a formula are read in parallel, one track each.</p>
+      </li>
+      <li>
+        <h3>Build</h3>
+        <p>Every equation, inequation and congruence becomes an automaton whose states are themselves linear
+          constraints, derived from the atom bit by bit. Only the reachable part is built.</p>
+      </li>
+      <li>
+        <h3>Combine</h3>
+        <p>Conjunction becomes intersection, disjunction union, negation complement, and an existential quantifier
+          the projection of its variable’s track. Determinization and minimization keep the automata small.</p>
+      </li>
+      <li>
+        <h3>Decide</h3>
+        <p>The formula is satisfiable when its automaton accepts a word. Decoding an accepted word track by track
+          gives a model.</p>
+      </li>
+    </ol>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Quantified linear integer arithmetic</h3>
+        <p>Linear constraints over the integers, <code>mod</code> and <code>div</code> by constants, Boolean
+          variables, and any nesting of <span class="math">∃</span> and <span class="math">∀</span>, read from
+          SMT-LIB&nbsp;2.</p>
+      </div>
+      <div class="card">
+        <h3>Symbolic transitions</h3>
+        <p>The MTBDD backend (<code>--fast</code>) stores transitions as multi-terminal binary decision diagrams,
+          so automata over many variables stay compact. A native backend with explicit symbols is there for
+          experiments.</p>
+      </div>
+      <div class="card">
+        <h3>Preprocessing</h3>
+        <p>Before any automaton is built, Amaya simplifies the formula: GCD rewriting, interval analysis,
+          miniscoping, elimination of variables squeezed between bounds, and more. <code>-O all</code> enables all
+          of them.</p>
+      </div>
+      <div class="card">
+        <h3>Models</h3>
+        <p>For a satisfiable formula, <code>get-sat -p</code> prints values of the free variables that satisfy
+          it.</p>
+      </div>
+      <div class="card">
+        <h3>Every automaton, inspectable</h3>
+        <p><code>get-sat -o DIR</code> writes every automaton built during the decision procedure in the DOT, VTF
+          or Mata format, together with a graph of the operations that built them.</p>
+      </div>
+      <div class="card">
+        <h3>In the browser</h3>
+        <p>Compiled to WebAssembly with Pyodide and Emscripten, Amaya runs in the
+          <a href="playground/">playground</a> without installing anything.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter" id="start" aria-labelledby="start-title">
+    <h2 id="start-title">Get started</h2>
+    <p class="chapter-lead">Amaya needs Python and Sylvan&nbsp;1.5, the decision-diagram library behind its C++
+      backend. The instructions below are for Linux.</p>
+    <div class="start-grid">
+      <div>
+        <h3>Install</h3>
+        <div class="tabs" role="tablist" aria-label="Ways to install Amaya">
+          <button type="button" role="tab" id="tab-source" aria-controls="panel-source" aria-selected="true">From source</button>
+          <button type="button" role="tab" id="tab-docker" aria-controls="panel-docker" aria-selected="false" tabindex="-1">Docker</button>
+        </div>
+        <div id="panel-source" role="tabpanel" aria-labelledby="tab-source">
+          <p>Sylvan needs CMake, GMP and hwloc; the C++ backend needs a C++ compiler and Cython.</p>
+          <div class="code"><pre><span class="comment"># Sylvan 1.5</span>
+git clone --depth 1 --branch v1.5.0 https://github.com/trolando/sylvan.git
+sed -i 's/-Werror//g' sylvan/CMakeLists.txt
+cmake -S sylvan -B sylvan/build -DBUILD_SHARED_LIBS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build sylvan/build -j
+sudo cmake --install sylvan/build &amp;&amp; sudo ldconfig
+
+<span class="comment"># Amaya and its C++ backend</span>
+git clone --branch devel https://github.com/VeriFIT/amaya.git
+cd amaya
+python3 -m pip install -r requirements.txt cython setuptools
+make -C mtbdd-backend libamaya PYTHON=python3</pre></div>
+        </div>
+        <div id="panel-docker" role="tabpanel" aria-labelledby="tab-docker" hidden>
+          <p>The Dockerfile builds Sylvan and Amaya in a Debian image.</p>
+          <div class="code"><pre>git clone --branch devel https://github.com/VeriFIT/amaya.git
+cd amaya
+docker build -t amaya .
+docker run --rm -v "$PWD":/data amaya \
+    python3 run-amaya.py --fast get-sat /data/formula.smt2</pre></div>
+        </div>
+      </div>
+      <div>
+        <h3>Run</h3>
+        <p>Save a formula as <code>formula.smt2</code>:</p>
+        <div class="code"><pre>(set-logic LIA)
+(declare-fun x () Int)
+(declare-fun y () Int)
+(assert (and (= (+ x (* 2 y)) 7) (>= x 0) (>= y 0) (> x y)))
+(check-sat)</pre></div>
+        <p>and ask Amaya about it:</p>
+        <div class="code"><pre><span class="comment"># sat</span>
+python3 run-amaya.py --fast get-sat formula.smt2
+<span class="comment"># sat, and the model x = 5, y = 1</span>
+python3 run-amaya.py --fast get-sat -p formula.smt2
+<span class="comment"># with all the preprocessing</span>
+python3 run-amaya.py --fast -O all get-sat formula.smt2
+<span class="comment"># every automaton built, as DOT files in automata/</span>
+python3 run-amaya.py --fast get-sat -o automata --output-format dot formula.smt2</pre></div>
+        <p><code>run-amaya.py --help</code> lists the global options, <code>run-amaya.py get-sat --help</code> those
+          of the mode. SMT-COMP&nbsp;2025 ran Amaya with <code>--fast -O all</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter chapter-playground" id="playground" aria-labelledby="playground-title">
+    <div class="teaser">
+      <div>
+        <p class="eyebrow">No installation</p>
+        <h2 id="playground-title">Try it in your browser</h2>
+        <p>The playground runs Amaya compiled to WebAssembly: Python on Pyodide, and the C++ backend and Sylvan
+          compiled with Emscripten. Write a formula in SMT-LIB&nbsp;2 or pick an example, and look at every
+          automaton Amaya builds on its way to the answer. Everything runs on your computer; nothing is
+          uploaded.</p>
+        <div class="button-row"><a class="button button-primary" href="playground/">Open the playground</a></div>
+      </div>
+      <ul>
+        <li>Examples from linear systems to the Frobenius coin problem</li>
+        <li>Every intermediate automaton drawn as a graph, with the variable names on its tracks</li>
+        <li>Models, and the automata in the DOT, VTF and Mata formats</li>
+        <li>The same answers as the native build on the 306 benchmarks we compared</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="chapter" id="papers" aria-labelledby="papers-title">
+    <h2 id="papers-title">Publications</h2>
+    <p class="chapter-lead">Amaya’s decision procedure, which combines automata with algebraic reasoning, is
+      described in the following paper. If you use Amaya in your research, please cite it.</p>
+    <article class="paper">
+      <p class="paper-authors">Peter Habermehl, Vojtěch Havlena, Michal Hečko, Lukáš Holík and Ondřej Lengál</p>
+      <h3 class="paper-title"><a href="https://doi.org/10.1007/978-3-031-65627-9_3">Algebraic Reasoning Meets Automata in Solving Linear Integer Arithmetic</a></h3>
+      <p class="paper-venue">In <em>Computer Aided Verification (CAV 2024)</em>, Lecture Notes in Computer Science,
+        pages 42–67. Springer, 2024.</p>
+      <div class="paper-links">
+        <a href="https://doi.org/10.1007/978-3-031-65627-9_3">DOI</a>
+        <a href="https://arxiv.org/abs/2403.18995">Technical report (arXiv)</a>
+        <details>
+          <summary>BibTeX</summary>
+          <div class="code"><pre>@inproceedings{amaya-cav24,
+  author    = {Habermehl, Peter and Havlena, Vojt{\v{e}}ch and He{\v{c}}ko, Michal and
+               Hol{\'i}k, Luk{\'a}{\v{s}} and Leng{\'a}l, Ond{\v{r}}ej},
+  title     = {Algebraic Reasoning Meets Automata in Solving Linear Integer Arithmetic},
+  booktitle = {Computer Aided Verification (CAV 2024)},
+  series    = {Lecture Notes in Computer Science},
+  pages     = {42--67},
+  publisher = {Springer},
+  year      = {2024},
+  doi       = {10.1007/978-3-031-65627-9_3}
+}</pre></div>
+        </details>
+      </div>
+    </article>
+    <p>Amaya competed in <a href="https://smt-comp.github.io/2025/participants/">SMT-COMP 2025</a>, in the
+      <a href="https://smt-comp.github.io/2025/results/lia-single-query/">LIA</a> and NIA divisions of the
+      single-query track.</p>
+  </section>
+
+  <section class="chapter" id="more" aria-labelledby="more-title">
+    <h2 id="more-title">Documentation and help</h2>
+    <div class="link-grid">
+      <a class="link-card" href="https://github.com/VeriFIT/amaya/blob/devel/README.md">
+        <strong>README</strong><span>Building Amaya and its command-line interface.</span></a>
+      <a class="link-card" href="https://github.com/VeriFIT/amaya/blob/devel/wasm/README.md">
+        <strong>WebAssembly build</strong><span>Building the playground, and using Amaya from your own web page.</span></a>
+      <a class="link-card" href="https://github.com/VeriFIT/amaya/tree/devel/docs">
+        <strong>Design notes</strong><span>Documents on the decision procedure and its extensions.</span></a>
+      <a class="link-card" href="https://github.com/VeriFIT/amaya/issues">
+        <strong>Issue tracker</strong><span>Report bugs and wrong answers, ideally with the formula.</span></a>
+      <a class="link-card" href="https://github.com/VeriFIT/amaya">
+        <strong>Source code</strong><span>The repository on GitHub; development happens on the <code>devel</code> branch.</span></a>
+      <a class="link-card" href="https://github.com/VeriFIT/amaya/blob/devel/LICENSE.txt">
+        <strong>Licence</strong><span>Amaya is free software under the Mozilla Public License 2.0.</span></a>
+    </div>
+  </section>
+</main>
+
+<footer class="colophon">
+  <div class="colophon-inner">
+    <p>Amaya was created by Michal Hečko and is developed at the
+      <a href="https://www.fit.vut.cz/">Faculty of Information Technology, Brno University of Technology</a>.
+      It is free software under the Mozilla Public License 2.0.</p>
+    <p>This site uses the Source Serif&nbsp;4 and IBM Plex typefaces (SIL Open Font License).</p>
+  </div>
+</footer>
+</body>
+</html>

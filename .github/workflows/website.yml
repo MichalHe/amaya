@@ -1,0 +1,116 @@
+name: website
+# Builds the website (site/): the landing page, and the playground, which runs Amaya compiled to WebAssembly
+# (wasm/). Pushes to devel publish it on GitHub Pages through the gh-pages branch; pull requests only check that it
+# builds and works. See site/README.md.
+on:
+  push:
+    branches: [devel]
+    paths:
+      - site/**
+      - wasm/**
+      - amaya/**
+      - mtbdd-backend/**
+      - run-amaya.py
+      - extras/amaya_logo.png
+      - .github/workflows/website.yml
+  pull_request:
+    paths:
+      - site/**
+      - wasm/**
+      - amaya/**
+      - mtbdd-backend/**
+      - run-amaya.py
+      - extras/amaya_logo.png
+      - .github/workflows/website.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The Pyodide release the playground runs on; wasm/build.sh builds for it and the page loads it from jsDelivr.
+  PYODIDE_VERSION: 0.29.5
+  PYODIDE_BUILD_VERSION: 0.39.3
+  PUPPETEER_VERSION: 23.11.1
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # pyodide-build must run on the Python version of the Pyodide release (3.13 for 0.29).
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The Pyodide cross-build environment with its Emscripten SDK, installed by wasm/build.sh on first use.
+      - name: Cache the cross-build environment
+        uses: actions/cache@v6
+        with:
+          path: wasm/build/xbuildenv
+          key: pyodide-xbuildenv-${{ env.PYODIDE_VERSION }}-${{ env.PYODIDE_BUILD_VERSION }}
+
+      - name: Install pyodide-build
+        run: python -m pip install "pyodide-build==$PYODIDE_BUILD_VERSION"
+
+      - name: Build Amaya for WebAssembly
+        run: PYODIDE_VERSION="$PYODIDE_VERSION" HOST_PYTHON=python ./wasm/build.sh
+
+      - name: Assemble the website
+        run: ./site/build.sh
+
+      - name: Install the test dependencies
+        run: npm install --no-save --no-package-lock "pyodide@$PYODIDE_VERSION" "puppeteer-core@$PUPPETEER_VERSION"
+
+      - name: Test the automaton of the landing page
+        run: node site/test/hero.mjs
+
+      - name: Test the WebAssembly build under Node.js
+        run: node wasm/test/node-smoke.mjs wasm/dist
+
+      - name: Test the website in Chrome
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          python -m http.server -d site/_site 8000 > "$RUNNER_TEMP/http.log" 2>&1 &
+          for attempt in $(seq 30); do curl -sf http://localhost:8000/ > /dev/null && break; sleep 1; done
+          node site/test/site-smoke.mjs http://localhost:8000/
+          node wasm/test/browser-smoke.mjs http://localhost:8000/playground/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: website
+          path: site/_site
+          include-hidden-files: true  # .nojekyll
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/devel'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: website
+          path: site/_site
+
+      - name: Publish on the gh-pages branch
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: site/_site
+          branch: gh-pages
