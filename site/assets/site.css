@@ -73,6 +73,7 @@
   --peach: #f2c48a;
   --peach-wash: #fcebd4;
   --on-peach: #3a2508;
+  --focus: #b4610f;  /* 4.1:1 on --paper */
   --edge: #66787a;
   --accept: #1d7a4b;
   --reject: #b4232f;
@@ -105,6 +106,7 @@
     --peach: #e8b472;
     --peach-wash: #3a2a17;
     --on-peach: #1d1204;
+    --focus: #e8b472;
     --edge: #8aa09f;
     --accept: #5fd394;
     --reject: #ff8a90;
@@ -128,6 +130,7 @@
   --peach: #e8b472;
   --peach-wash: #3a2a17;
   --on-peach: #1d1204;
+  --focus: #e8b472;
   --edge: #8aa09f;
   --accept: #5fd394;
   --reject: #ff8a90;
@@ -149,7 +152,7 @@ body {
 }
 a { color: var(--teal); text-decoration-thickness: 0.07em; text-underline-offset: 0.18em; }
 a:hover { color: var(--teal-hover); }
-:focus-visible { outline: 3px solid var(--peach); outline-offset: 2px; border-radius: 3px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.2; margin: 0; text-wrap: balance; }
 p { margin: 0 0 1em; }
 code, kbd, pre { font-family: var(--mono); font-size: 0.9em; }
@@ -266,6 +269,12 @@ main { display: block; }
 .hero-verdict.is-accepted { color: var(--accept); }
 .hero-verdict.is-rejected { color: var(--reject); }
 .hero-figure figcaption { font-size: 0.9rem; color: var(--ink-soft); border-top: 1px solid var(--rule); padding-top: 0.7rem; }
+/* On phones the drawing is scaled to about 60 %: larger SVG text keeps the labels at 11 px or more. */
+@media (max-width: 30rem) {
+  .hero-figure { padding: 0.9rem 0.8rem 0.8rem; }
+  .hero-edge text { font-size: 19px; }
+  .hero-state text { font-size: 19px; }
+}
 
 /* How it works: numbered steps */
 .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; counter-reset: step; }
