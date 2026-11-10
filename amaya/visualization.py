@@ -34,7 +34,10 @@ from amaya.utils import (
     number_to_bit_tuple,
 )
 
-from graphviz import Digraph
+try:
+    from graphviz import Digraph
+except ImportError:  # `graphviz` is only needed for visualisation; optional under Pyodide (WebAssembly)
+    Digraph = None
 
 
 def compute_html_label_for_symbols(variable_names: List[str], symbols: List[Tuple[int, ...]]):

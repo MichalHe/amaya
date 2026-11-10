@@ -20,7 +20,10 @@ from typing import (
 )
 
 from amaya.stats import AutomatonInfo, StatPoint
-from graphviz import Digraph
+try:
+    from graphviz import Digraph
+except ImportError:  # `graphviz` is only needed for visualisation; optional under Pyodide (WebAssembly)
+    Digraph = None
 
 
 T = TypeVar('T')

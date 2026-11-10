@@ -17,7 +17,10 @@ from typing import (
     Generic
 )
 import functools
-from dd.autoref import BDD
+try:
+    from dd.autoref import BDD  # only used by the BDD-based transition functions below
+except ImportError:  # `dd` is optional, e.g. under Pyodide (WebAssembly)
+    BDD = object
 
 from amaya import logger
 import amaya.utils

@@ -19,3 +19,7 @@ tool_paper/*.aux
 tool_paper/*.log
 tool_paper/*.out
 tool_paper/*.pdf
+
+# WebAssembly build outputs (wasm/build.sh)
+wasm/build/
+wasm/dist/
