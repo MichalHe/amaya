@@ -20,10 +20,6 @@ from typing import (
 )
 
 from amaya.stats import AutomatonInfo, StatPoint
-try:
-    from graphviz import Digraph
-except ImportError:  # `graphviz` is only needed for visualisation; optional under Pyodide (WebAssembly)
-    Digraph = None
 
 
 T = TypeVar('T')
@@ -236,6 +232,7 @@ def construct_newick_tree_from_trace(trace: List[StatPoint]) -> str:
 
 
 def construct_dot_tree_from_trace(trace: List[StatPoint]) -> str:
+    from graphviz import Digraph  # imported on use: an optional dependency, installed on demand under Pyodide
     graph = Digraph('traceviz', strict=True, graph_attr={'rankdir': 'LR', 'ranksep': '1'})
     for op in trace:
         graph.node(str(op.output.automaton_id), f'{op.operation.value}, size={op.output.size}, ID={op.operation_id}')

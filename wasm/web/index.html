@@ -6,10 +6,11 @@
 <title>Amaya in the browser</title>
 <style>
   :root { --bg: #fafafa; --fg: #1c1c1c; --muted: #666; --panel: #fff; --border: #d4d4d4; --accent: #2457c5;
-          --sat: #1e7d32; --unsat: #b3261e; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+          --sat: #1e7d32; --unsat: #b3261e; --track-bg: #e3e3e3;
+          --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #161616; --fg: #e6e6e6; --muted: #9a9a9a; --panel: #1f1f1f; --border: #3a3a3a; --accent: #7aa2ff;
-            --sat: #7bd88f; --unsat: #ff8a80; }
+            --sat: #7bd88f; --unsat: #ff8a80; --track-bg: #3d3d3d; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
@@ -26,12 +27,25 @@
              border: 1px solid var(--border); border-radius: 6px; }
   button { padding: 8px 18px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
   button:disabled { opacity: .55; cursor: default; }
+  button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--border); padding: 7px 14px; }
+  button.secondary[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+  .buttons { display: flex; flex-wrap: wrap; gap: 6px; }
   #status { margin-top: 16px; color: var(--muted); min-height: 1.5em; }
   #answer { font: 700 1.6rem var(--mono); margin: 8px 0; }
   #answer.sat { color: var(--sat); } #answer.unsat { color: var(--unsat); }
   pre { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px;
         font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
   footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
+  #automata { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 8px; }
+  #automata h2 { font-size: 1.1rem; margin: 8px 0 0; }
+  #automaton-info { margin: 10px 0; font-size: 14px; color: var(--muted); }
+  #graph { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+           overflow: auto; max-height: 75vh; min-height: 80px; }
+  #graph.fit svg { max-width: 100%; height: auto; }
+  #graph svg { display: block; margin: 0 auto; }
+  #graph p { margin: 0; color: var(--muted); }
+  #graph p button { margin-left: 8px; }
+  #source { max-height: 75vh; }
 </style>
 </head>
 <body>
@@ -48,6 +62,13 @@
   <div class="row">
     <div><label for="args">Options</label><input id="args" type="text" value="--fast"></div>
     <div style="flex: 0 1 160px"><label for="timeout">Timeout (s)</label><input id="timeout" type="number" min="1" value="60"></div>
+    <div style="flex: 0 1 170px"><label for="export">Automata</label>
+      <select id="export">
+        <option value="">don't export</option>
+        <option value="dot">graph (DOT)</option>
+        <option value="vtf">VTF</option>
+        <option value="mata">Mata</option>
+      </select></div>
     <div style="flex: 0 1 auto"><label><input id="model" type="checkbox"> print model</label></div>
     <div style="flex: 0 1 auto"><button id="run" disabled>Solve</button></div>
   </div>
@@ -56,11 +77,32 @@
   <div id="answer"></div>
   <pre id="output" hidden></pre>
 
+  <section id="automata" hidden>
+    <h2>Automata</h2>
+    <div class="row">
+      <div><label for="automaton">Automaton</label><select id="automaton"></select></div>
+      <div style="flex: 0 1 auto" class="buttons">
+        <button id="view-graph" class="secondary" aria-pressed="true">Graph</button>
+        <button id="view-source" class="secondary" aria-pressed="false">Source</button>
+        <button id="zoom" class="secondary">Actual size</button>
+        <button id="download" class="secondary">Download</button>
+      </div>
+    </div>
+    <div id="automaton-info"></div>
+    <div id="graph" class="fit"></div>
+    <pre id="source" hidden></pre>
+  </section>
+
   <footer id="footer"></footer>
 </main>
 
 <script type="module">
 import { Amaya, AmayaTimeoutError } from './amaya.js';
+
+// Graphviz compiled to WebAssembly, loaded the first time a graph is shown.
+const VIZ_URL = 'https://cdn.jsdelivr.net/npm/@viz-js/viz@3.31.0/dist/viz.js';
+// Larger automata are only laid out on request: Graphviz runs on the main thread and may take a while.
+const LARGE_STATES = 150, LARGE_EDGES = 600;
 
 const examples = {
   'Interval (sat)': '(set-logic LIA)\n(declare-fun x () Int)\n(assert (and (> x 3) (< x 5)))\n(check-sat)\n',
@@ -93,22 +135,137 @@ run.onclick = async () => {
   run.disabled = true;
   answer.textContent = ''; answer.className = '';
   output.hidden = true; backendOutput = [];
+  automataSection.hidden = true;
   status.textContent = 'Solving…';
   const args = document.getElementById('args').value.split(/\s+/).filter(Boolean);
   const timeoutMs = 1000 * Number(document.getElementById('timeout').value || 60);
   const modeArgs = document.getElementById('model').checked ? ['-p'] : [];
+  const exportAutomata = document.getElementById('export').value || undefined;
   try {
-    const result = await amaya.solve(formula.value, { args, modeArgs, timeoutMs });
+    const result = await amaya.solve(formula.value, { args, modeArgs, timeoutMs, exportAutomata });
     answer.textContent = result.answer ?? 'no answer';
     answer.className = result.answer ?? '';
     status.textContent = result.error ? `Error: ${result.error}` : `Finished in ${result.seconds.toFixed(2)} s.`;
     const text = [result.stdout.trim(), result.stderr.trim(), backendOutput.join('\n').trim()].filter(Boolean).join('\n\n');
     if (text) { output.textContent = text; output.hidden = false; }
+    if (exportAutomata) showAutomata(result);
   } catch (error) {
     status.textContent = error instanceof AmayaTimeoutError ? `${error.message}; the solver was stopped.` : `Error: ${error.message}`;
   } finally {
     run.disabled = false;
   }
+};
+
+// ---- automata viewer ----
+const automataSection = document.getElementById('automata');
+const automatonSelect = document.getElementById('automaton');
+const automatonInfo = document.getElementById('automaton-info');
+const graphBox = document.getElementById('graph');
+const source = document.getElementById('source');
+const graphButton = document.getElementById('view-graph');
+const sourceButton = document.getElementById('view-source');
+const zoomButton = document.getElementById('zoom');
+let items = [];
+let variablesNote = '';
+let view = 'graph';
+let renderToken = 0;
+let vizInstance = null;
+
+function loadViz() {
+  if (!vizInstance) {
+    vizInstance = import(VIZ_URL).then((module) => module.instance());
+    vizInstance.catch(() => { vizInstance = null; });
+  }
+  return vizInstance;
+}
+
+function showAutomata(result) {
+  const automata = result.automata ?? [];
+  items = automata.map((a) => ({
+    ...a,
+    label: `#${a.id} ${a.operation} (${a.states} states, ${a.transitions} ${a.format === 'dot' ? 'edges' : 'transitions'})`,
+  }));
+  if (result.trace) items.push({ label: 'operation trace', name: 'trace-info.dot', format: 'dot', text: result.trace });
+  const variables = Object.entries(result.variables ?? {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+  variablesNote = variables.length
+    ? `Variable ids, in track order: ${variables.map(([id, name]) => `${id} = ${name}`).join(', ')}.` : '';
+  automatonSelect.replaceChildren(...items.map((item, index) => new Option(item.label, String(index))));
+  automataSection.hidden = false;
+  // Default to the last automaton built, i.e. the one for the whole formula.
+  automatonSelect.value = String(Math.max(0, automata.length - 1));
+  showSelected();
+}
+
+function showSelected(force = false) {
+  const item = items[Number(automatonSelect.value)];
+  if (!item) {
+    automatonInfo.textContent = 'No automata were built.';
+    graphBox.hidden = source.hidden = true;
+    return;
+  }
+  const isGraph = item.format === 'dot';
+  const mode = isGraph ? view : 'source';
+  graphButton.disabled = zoomButton.disabled = !isGraph;
+  graphButton.setAttribute('aria-pressed', String(mode === 'graph'));
+  sourceButton.setAttribute('aria-pressed', String(mode === 'source'));
+  automatonInfo.textContent = item.states === undefined
+    ? 'Graph of the operations performed: an edge leads from a result to its operands.'
+    : `${item.states} states, ${item.transitions} ${isGraph ? 'edges' : 'transitions'} (${item.name}). ${variablesNote}`;
+  source.textContent = item.text;
+  source.hidden = mode !== 'source';
+  graphBox.hidden = mode !== 'graph';
+  if (mode === 'graph') renderGraph(item, force);
+}
+
+async function renderGraph(item, force) {
+  const token = ++renderToken;
+  const note = document.createElement('p');
+  if (!force && (item.states > LARGE_STATES || item.transitions > LARGE_EDGES)) {
+    const button = document.createElement('button');
+    button.className = 'secondary';
+    button.textContent = 'Render anyway';
+    button.onclick = () => showSelected(true);
+    note.append(`Large automaton (${item.states} states, ${item.transitions} edges): laying it out may take a while.`, button);
+    graphBox.replaceChildren(note);
+    return;
+  }
+  note.textContent = 'Rendering…';
+  graphBox.replaceChildren(note);
+  try {
+    const viz = await loadViz();
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));  // let "Rendering…" paint
+    if (token !== renderToken) return;
+    const style = getComputedStyle(document.documentElement);
+    const fg = style.getPropertyValue('--fg').trim();
+    const font = 'Helvetica,Arial,sans-serif';
+    // Display only: the track-name cells use Graphviz "gray", which is unreadable on a dark background.
+    const dot = item.text.replaceAll('BGCOLOR="gray"', `BGCOLOR="${style.getPropertyValue('--track-bg').trim()}"`);
+    const svg = viz.renderSVGElement(dot, {
+      graphAttributes: { bgcolor: 'transparent' },
+      nodeAttributes: { color: fg, fontcolor: fg, fontname: font },
+      edgeAttributes: { color: fg, fontcolor: fg, fontname: font },
+    });
+    if (token === renderToken) graphBox.replaceChildren(svg);
+  } catch (error) {
+    if (token === renderToken) note.textContent = `Cannot render the graph: ${error.message ?? error}`;
+  }
+}
+
+automatonSelect.onchange = () => showSelected();
+graphButton.onclick = () => { view = 'graph'; showSelected(); };
+sourceButton.onclick = () => { view = 'source'; showSelected(); };
+zoomButton.onclick = () => {
+  const fit = graphBox.classList.toggle('fit');
+  zoomButton.textContent = fit ? 'Actual size' : 'Fit width';
+};
+document.getElementById('download').onclick = () => {
+  const item = items[Number(automatonSelect.value)];
+  if (!item) return;
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([item.text], { type: 'text/plain' }));
+  link.download = item.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 };
 </script>
 </body>

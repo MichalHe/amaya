@@ -11,6 +11,8 @@
 #   PYODIDE_CLI              path of the pyodide-build CLI (default: pyodide)
 #   PYODIDE_XBUILDENV_PATH   where to keep the cross-build environment (default: wasm/build/xbuildenv)
 #   SYLVAN_VERSION           sylvan git tag (default v1.5.0)
+#   HOST_PYTHON              Python with pip, used to build the pure-Python wheels needed for exporting
+#                            automata (graphviz, dd and dd's dependencies); default python3
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -20,6 +22,10 @@ DIST="$HERE/dist"
 PYODIDE_VERSION=${PYODIDE_VERSION:-0.29.5}
 PYODIDE_CLI=${PYODIDE_CLI:-pyodide}
 SYLVAN_VERSION=${SYLVAN_VERSION:-v1.5.0}
+HOST_PYTHON=${HOST_PYTHON:-python3}
+# Pure-Python packages that exporting automata needs (amaya/visualization.py); loaded by the page on demand.
+# dd 0.6.0 requires ply <= 3.10.
+VISUALIZATION_PACKAGES=(graphviz==0.21 dd==0.6.0 astutils==0.0.6 ply==3.10)
 export PYODIDE_XBUILDENV_PATH=${PYODIDE_XBUILDENV_PATH:-$BUILD/xbuildenv}
 
 mkdir -p "$BUILD" "$DIST"
@@ -58,11 +64,25 @@ rm -f "$DIST"/amaya-*.whl
 (cd "$STAGE" && "$PYODIDE_CLI" build --outdir "$DIST")
 WHEEL=$(cd "$DIST" && ls amaya-*.whl | head -n 1)
 
-# 5. web bundle: worker, main-thread API, demo page, and a manifest naming the wheel
+# 5. pure-Python wheels for exporting automata. dd is built from its sdist: its binary wheels contain
+#    CUDD extensions; without them it is pure Python. Its generated C sources are removed.
+WHEELS="$BUILD/wheels"
+if [ ! -f "$WHEELS/.complete" ]; then
+    rm -rf "$WHEELS"
+    "$HOST_PYTHON" -m pip wheel --quiet --no-deps --no-binary dd --wheel-dir "$WHEELS" "${VISUALIZATION_PACKAGES[@]}"
+    "$HOST_PYTHON" "$HERE/packaging/slim_wheel.py" "$WHEELS"/dd-*.whl 'dd/*.c' 'dd/*.pyx' 'dd/*.pxd'
+    touch "$WHEELS/.complete"
+fi
+rm -f "$DIST"/graphviz-*.whl "$DIST"/dd-*.whl "$DIST"/astutils-*.whl "$DIST"/ply-*.whl
+cp "$WHEELS"/*.whl "$DIST/"
+VISUALIZATION_WHEELS=$("$HOST_PYTHON" -c 'import json, pathlib, sys; print(json.dumps(sorted(p.name for p in pathlib.Path(sys.argv[1]).glob("*.whl"))))' "$WHEELS")
+
+# 6. web bundle: worker, main-thread API, demo page, and a manifest naming the wheels
 cp "$HERE/web/amaya.js" "$HERE/web/amaya-worker.js" "$HERE/web/index.html" "$DIST/"
 cat > "$DIST/amaya-build.json" <<EOF
 {
   "wheel": "$WHEEL",
+  "visualizationWheels": $VISUALIZATION_WHEELS,
   "pyodideVersion": "$PYODIDE_VERSION",
   "sylvanVersion": "$SYLVAN_VERSION",
   "amayaCommit": "$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
