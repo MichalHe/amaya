@@ -68,6 +68,40 @@ try {
   const recovered = after.answer === 'unsat';
   console.log(`${recovered ? 'ok  ' : 'FAIL'} after timeout: ${after.answer} (${after.status})`);
   failures += recovered ? 0 : 1;
+
+  // Exported automata: the graph of the last automaton is rendered (Graphviz from the CDN), the operation
+  // trace can be shown, and a text format is displayed as source.
+  await page.select('#export', 'dot');
+  await page.select('#example', 'Interval (sat)');
+  const exported = await solve();
+  await page.waitForSelector('#graph svg', { timeout: 60000 });
+  const graph = await page.evaluate(() => {
+    const select = document.getElementById('automaton');
+    return { count: select.options.length, selected: select.selectedOptions[0]?.textContent,
+             last: select.options[select.options.length - 2]?.textContent,
+             nodes: document.querySelectorAll('#graph svg g.node').length };
+  });
+  const graphOk = exported.answer === 'sat' && graph.count > 1 && graph.selected === graph.last && graph.nodes > 0;
+  console.log(`${graphOk ? 'ok  ' : 'FAIL'} automata graph: ${graph.count - 1} automata + trace, ` +
+              `selected '${graph.selected}', ${graph.nodes} nodes drawn`);
+  failures += graphOk ? 0 : 1;
+
+  await page.evaluate(() => {
+    const select = document.getElementById('automaton');
+    select.value = String(select.options.length - 1);
+    select.dispatchEvent(new Event('change'));
+  });
+  await page.waitForFunction(() => document.querySelectorAll('#graph svg g.node').length > 0 &&
+                                   /trace/.test(document.getElementById('automaton').selectedOptions[0].textContent));
+  console.log('ok   operation trace rendered');
+
+  await page.select('#export', 'vtf');
+  await solve();
+  const vtf = await page.evaluate(() => ({ hidden: document.getElementById('source').hidden,
+                                           text: document.getElementById('source').textContent }));
+  const vtfOk = !vtf.hidden && vtf.text.startsWith('@NFA');
+  console.log(`${vtfOk ? 'ok  ' : 'FAIL'} automata as VTF: ${JSON.stringify(vtf.text.slice(0, 40))}`);
+  failures += vtfOk ? 0 : 1;
 } finally {
   await browser.close();
 }

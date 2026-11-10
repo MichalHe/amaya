@@ -69,8 +69,9 @@ export class Amaya {
     this.worker.onerror = (event) => this._failAll(new Error(event.message || 'Amaya worker failed'));
 
     const ready = new Promise((resolve, reject) => this.pending.set(0, { resolve, reject }));
+    const visualizationWheelURLs = (this.build.visualizationWheels ?? []).map((wheel) => new URL(wheel, this.baseURL).href);
     this.worker.postMessage({ type: 'init', id: 0, pyodideIndexURL: indexURL,
-                              wheelURL: new URL(this.build.wheel, this.baseURL).href, env });
+                              wheelURL: new URL(this.build.wheel, this.baseURL).href, visualizationWheelURLs, env });
     this.versions = await ready;
     return this.versions;
   }
@@ -108,14 +109,23 @@ export class Amaya {
    * @param {string} [options.mode]        'get-sat' (default) or 'convert'
    * @param {string[]} [options.modeArgs]  options after the mode, e.g. ['-p'] to print a model, ['-f', 'smt2'] for convert
    * @param {number} [options.timeoutMs]   terminate the worker after this time (default: no limit)
-   * @returns {Promise<{answer: string|null, error: string|null, exit_code: number, stdout: string, stderr: string, seconds: number}>}
+   * @param {'dot'|'vtf'|'mata'} [options.exportAutomata]  also return every automaton built by the decision
+   *        procedure, in this format (as `get-sat -o DIR --output-format FORMAT`). The first such call
+   *        downloads the Python packages graphviz and dd (about 160 kB).
+   * @returns {Promise<{answer: string|null, error: string|null, exit_code: number, stdout: string, stderr: string,
+   *          seconds: number, automata?: Array<{id: number, operation: string, format: string, name: string,
+   *          text: string, states: number, transitions: number}>, trace?: string|null,
+   *          variables?: Object<string, string>}>}
+   *          `automata` is ordered by operation id; the last one belongs to the whole formula. `trace` is the
+   *          graph of the operations in DOT. `variables` maps variable ids (the track labels) to SMT names.
    */
   async solve(smt2, options = {}) {
     await this.init();
     const id = this.nextId++;
     const result = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
     this.worker.postMessage({ type: 'solve', id, smt2, args: options.args ?? ['--fast'],
-                              mode: options.mode ?? 'get-sat', modeArgs: options.modeArgs ?? [] });
+                              mode: options.mode ?? 'get-sat', modeArgs: options.modeArgs ?? [],
+                              exportAutomata: options.exportAutomata ?? null });
     if (!options.timeoutMs) return result;
 
     let timer;
