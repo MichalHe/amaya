@@ -64,26 +64,31 @@ export class Amaya {
     this.nextId = 1;
     this.build = null;
     this.versions = null;
+    // Counts start-ups; terminate() increments it, which cancels a start-up in progress.
+    this.generation = 0;
   }
 
   /** Start the worker and load Pyodide and the Amaya wheel. Safe to call repeatedly. */
   init() {
     if (!this.ready) {
-      this.ready = this._start().catch((error) => {
-        this._stopWorker();
+      const generation = ++this.generation;
+      this.ready = this._start(generation).catch((error) => {
+        // A start-up canceled by terminate() has been cleaned up already, and a later start-up may own the worker.
+        if (generation === this.generation) this._stopWorker();
         throw error;
       });
     }
     return this.ready;
   }
 
-  async _start() {
+  async _start(generation) {
     if (!this.build) {
       // Revalidated on every load: it names the files of the current build (see the buildId below).
       const response = await fetch(new URL('amaya-build.json', this.baseURL), { cache: 'no-cache' });
       if (!response.ok) throw new Error(`cannot load amaya-build.json: HTTP ${response.status}`);
       this.build = await response.json();
     }
+    if (generation !== this.generation) throw new Error('Amaya worker terminated');  // terminate() during the fetch
     const pyodideVersion = this.build.pyodideVersion ?? DEFAULT_PYODIDE_VERSION;
     const indexURL = this.pyodideIndexURL ?? `https://cdn.jsdelivr.net/pyodide/v${pyodideVersion}/full/`;
     const env = {};
@@ -92,14 +97,16 @@ export class Amaya {
     // The build id makes a cached worker of an older build unusable; the wheel names change with each build.
     const workerURL = new URL('amaya-worker.js', this.baseURL);
     if (this.build.buildId) workerURL.searchParams.set('v', this.build.buildId);
-    this.worker = new Worker(workerURL);
-    this.worker.onmessage = (event) => this._onMessage(event.data);
-    this.worker.onerror = (event) => this._failAll(new Error(event.message || 'Amaya worker failed'));
+    const worker = new Worker(workerURL);
+    this.worker = worker;
+    // Only the current worker may settle requests or fail them.
+    worker.onmessage = (event) => { if (this.worker === worker) this._onMessage(event.data); };
+    worker.onerror = (event) => { if (this.worker === worker) this._failAll(new Error(event.message || 'Amaya worker failed')); };
 
     const ready = new Promise((resolve, reject) => this.pending.set(0, { resolve, reject }));
     const visualizationWheelURLs = (this.build.visualizationWheels ?? []).map((wheel) => new URL(wheel, this.baseURL).href);
-    this.worker.postMessage({ type: 'init', id: 0, pyodideIndexURL: indexURL,
-                              wheelURL: new URL(this.build.wheel, this.baseURL).href, visualizationWheelURLs, env });
+    worker.postMessage({ type: 'init', id: 0, pyodideIndexURL: indexURL,
+                         wheelURL: new URL(this.build.wheel, this.baseURL).href, visualizationWheelURLs, env });
     this.versions = await ready;
     return this.versions;
   }
@@ -127,6 +134,7 @@ export class Amaya {
     if (this.worker) this.worker.terminate();
     this.worker = null;
     this.ready = null;
+    this.generation += 1;
   }
 
   /**
@@ -149,6 +157,7 @@ export class Amaya {
    */
   async solve(smt2, options = {}) {
     await this.init();
+    if (!this.worker) throw new Error('Amaya worker terminated');  // terminate() after the start-up finished
     const id = this.nextId++;
     const result = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
     this.worker.postMessage({ type: 'solve', id, smt2, args: options.args ?? ['--fast'],

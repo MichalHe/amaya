@@ -71,8 +71,9 @@ try {
       `\n(assert (= (+ ${vars.map((v, i) => `(* ${2 * i + 3} ${v})`).join(' ')}) 1000003))` +
       `\n(assert (and ${vars.map((v) => `(>= ${v} 0)`).join(' ')}))\n(check-sat)\n`;
   });
-  const slow = await solve(3);
-  const stopped = /stopped/.test(slow.status) || slow.answer !== '';
+  // Stopped with no answer: a run that finished within the time limit would not show that the timeout works.
+  const slow = await solve(1);
+  const stopped = /stopped/.test(slow.status) && slow.answer === '';
   console.log(`${stopped ? 'ok  ' : 'FAIL'} timeout: answer='${slow.answer}' status='${slow.status}'`);
   failures += stopped ? 0 : 1;
 
@@ -136,6 +137,37 @@ try {
   const noneOk = /No automata were built: Amaya decided/.test(none) && !selectorShown;
   console.log(`${noneOk ? 'ok  ' : 'FAIL'} formula decided without automata (selector ${selectorShown ? 'shown' : 'hidden'}): ${none}`);
   failures += noneOk ? 0 : 1;
+
+  // The API's worker life cycle: terminate() cancels a start-up in progress, and a canceled start-up cannot
+  // stop the worker of a later one.
+  const lifecycle = await page.evaluate(async () => {
+    const { Amaya } = await import(new URL('amaya.js', location.href).href);
+    const settle = (promise, ms) => Promise.race([promise.then(() => 'resolved', () => 'rejected'),
+                                                  new Promise((resolve) => setTimeout(() => resolve('pending'), ms))]);
+    // terminate() while amaya-build.json is being fetched.
+    const a = new Amaya();
+    const first = a.init();
+    a.terminate();
+    const duringFetch = await settle(first, 30000);
+    const workerLeft = a.worker !== null;
+    // terminate() while the worker starts, then init() at once.
+    const b = new Amaya();
+    const old = b.init();
+    while (!b.worker) await new Promise((resolve) => setTimeout(resolve, 5));
+    b.terminate();
+    const fresh = b.init();
+    const oldStartup = await settle(old, 30000);
+    const freshStartup = await settle(fresh, 60000);
+    const answer = freshStartup === 'resolved'
+      ? (await b.solve('(set-logic LIA)\n(declare-fun x () Int)\n(assert (> x 3))\n(check-sat)\n', { timeoutMs: 30000 })).answer
+      : null;
+    b.terminate();
+    return { duringFetch, workerLeft, oldStartup, freshStartup, answer };
+  });
+  const lifecycleOk = lifecycle.duringFetch === 'rejected' && !lifecycle.workerLeft && lifecycle.oldStartup === 'rejected' &&
+    lifecycle.freshStartup === 'resolved' && lifecycle.answer === 'sat';
+  console.log(`${lifecycleOk ? 'ok  ' : 'FAIL'} terminate() during start-up: ${JSON.stringify(lifecycle)}`);
+  failures += lifecycleOk ? 0 : 1;
 } finally {
   await browser.close();
 }
