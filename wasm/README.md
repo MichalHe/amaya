@@ -64,6 +64,13 @@ const result = await amaya.solve(smt2Text, {
 
 From Python inside Pyodide the same entry point is `amaya.web.solve(smt2_text, args, mode, mode_args)`.
 
+**Updating a deployment.** Static hosts let browsers cache files (GitHub Pages for 10 minutes), and a page
+must not mix files of two builds. The wheel's version carries a hash of its sources
+(`amaya-0.0.0+wasm.<hash>-….whl`), `amaya-build.json` is revalidated on every load, and `amaya.js` loads
+the worker as `amaya-worker.js?v=<buildId>`. The demo page imports `amaya.js?v=<buildId>` (stamped by
+`build.sh`); a page of your own should do the same, e.g. read `buildId` from `amaya-build.json` and import
+`amaya.js?v=${buildId}`, or be served with headers that make browsers revalidate `amaya.js`.
+
 ### Exporting automata
 
 `exportAutomata: 'dot' | 'vtf' | 'mata'` returns every automaton built by the decision procedure, exactly as

@@ -55,7 +55,8 @@ export class Amaya {
 
   async _start() {
     if (!this.build) {
-      const response = await fetch(new URL('amaya-build.json', this.baseURL));
+      // Revalidated on every load: it names the files of the current build (see the buildId below).
+      const response = await fetch(new URL('amaya-build.json', this.baseURL), { cache: 'no-cache' });
       if (!response.ok) throw new Error(`cannot load amaya-build.json: HTTP ${response.status}`);
       this.build = await response.json();
     }
@@ -64,7 +65,10 @@ export class Amaya {
     const env = {};
     if (this.memoryMB) env.AMAYA_SYLVAN_MEMORY_MB = String(this.memoryMB);
 
-    this.worker = new Worker(new URL('amaya-worker.js', this.baseURL));
+    // The build id makes a cached worker of an older build unusable; the wheel names change with each build.
+    const workerURL = new URL('amaya-worker.js', this.baseURL);
+    if (this.build.buildId) workerURL.searchParams.set('v', this.build.buildId);
+    this.worker = new Worker(workerURL);
     this.worker.onmessage = (event) => this._onMessage(event.data);
     this.worker.onerror = (event) => this._failAll(new Error(event.message || 'Amaya worker failed'));
 
