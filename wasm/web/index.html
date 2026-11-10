@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amaya in the browser</title>
+<style>
+  :root { --bg: #fafafa; --fg: #1c1c1c; --muted: #666; --panel: #fff; --border: #d4d4d4; --accent: #2457c5;
+          --sat: #1e7d32; --unsat: #b3261e; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161616; --fg: #e6e6e6; --muted: #9a9a9a; --panel: #1f1f1f; --border: #3a3a3a; --accent: #7aa2ff;
+            --sat: #7bd88f; --unsat: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p.lead { margin: 0 0 20px; color: var(--muted); }
+  label { display: block; font-weight: 600; margin: 14px 0 6px; }
+  textarea, input, select, button { font: inherit; color: inherit; }
+  textarea { width: 100%; min-height: 220px; padding: 10px; font-family: var(--mono); font-size: 13px;
+             background: var(--panel); border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  .row > div { flex: 1 1 200px; }
+  input[type=text], input[type=number], select { width: 100%; padding: 7px 9px; background: var(--panel);
+             border: 1px solid var(--border); border-radius: 6px; }
+  button { padding: 8px 18px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .55; cursor: default; }
+  #status { margin-top: 16px; color: var(--muted); min-height: 1.5em; }
+  #answer { font: 700 1.6rem var(--mono); margin: 8px 0; }
+  #answer.sat { color: var(--sat); } #answer.unsat { color: var(--unsat); }
+  pre { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+        font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Amaya in the browser</h1>
+  <p class="lead">Amaya, an automata-based LIA SMT solver, running locally as WebAssembly (Pyodide).</p>
+
+  <label for="example">Example</label>
+  <select id="example"></select>
+
+  <label for="formula">SMT-LIB2 input</label>
+  <textarea id="formula" spellcheck="false"></textarea>
+
+  <div class="row">
+    <div><label for="args">Options</label><input id="args" type="text" value="--fast"></div>
+    <div style="flex: 0 1 160px"><label for="timeout">Timeout (s)</label><input id="timeout" type="number" min="1" value="60"></div>
+    <div style="flex: 0 1 auto"><label><input id="model" type="checkbox"> print model</label></div>
+    <div style="flex: 0 1 auto"><button id="run" disabled>Solve</button></div>
+  </div>
+
+  <div id="status">Loading Amaya…</div>
+  <div id="answer"></div>
+  <pre id="output" hidden></pre>
+
+  <footer id="footer"></footer>
+</main>
+
+<script type="module">
+import { Amaya, AmayaTimeoutError } from './amaya.js';
+
+const examples = {
+  'Interval (sat)': '(set-logic LIA)\n(declare-fun x () Int)\n(assert (and (> x 3) (< x 5)))\n(check-sat)\n',
+  'Parity (unsat)': '(set-logic LIA)\n(declare-fun x () Int)\n(assert (= (* 2 x) 7))\n(check-sat)\n',
+  'Quantifiers (sat)': '(set-logic LIA)\n(declare-fun y () Int)\n(assert (exists ((x Int)) (and (= y (* 3 x)) (> y 10))))\n(check-sat)\n',
+  'Frobenius coin problem (unsat)': '(set-logic LIA)\n(declare-fun n () Int)\n(assert (and (> n 23)\n  (not (exists ((a Int) (b Int)) (and (>= a 0) (>= b 0) (= n (+ (* 5 a) (* 7 b))))))))\n(check-sat)\n',
+};
+const exampleSelect = document.getElementById('example');
+const formula = document.getElementById('formula');
+for (const name of Object.keys(examples)) exampleSelect.add(new Option(name, name));
+formula.value = examples[exampleSelect.value];
+exampleSelect.onchange = () => { formula.value = examples[exampleSelect.value]; };
+
+const status = document.getElementById('status');
+const answer = document.getElementById('answer');
+const output = document.getElementById('output');
+const run = document.getElementById('run');
+let backendOutput = [];
+
+const amaya = new Amaya({ onOutput: (stream, text) => backendOutput.push(text) });
+const t0 = performance.now();
+amaya.init().then((versions) => {
+  status.textContent = `Ready in ${((performance.now() - t0) / 1000).toFixed(1)} s.`;
+  document.getElementById('footer').textContent =
+    `Python ${versions.python}, Pyodide ${versions.pyodide ?? '?'}, Amaya ${amaya.build.amayaCommit}, sylvan ${amaya.build.sylvanVersion}`;
+  run.disabled = false;
+}).catch((error) => { status.textContent = `Failed to load: ${error.message}`; });
+
+run.onclick = async () => {
+  run.disabled = true;
+  answer.textContent = ''; answer.className = '';
+  output.hidden = true; backendOutput = [];
+  status.textContent = 'Solving…';
+  const args = document.getElementById('args').value.split(/\s+/).filter(Boolean);
+  const timeoutMs = 1000 * Number(document.getElementById('timeout').value || 60);
+  const modeArgs = document.getElementById('model').checked ? ['-p'] : [];
+  try {
+    const result = await amaya.solve(formula.value, { args, modeArgs, timeoutMs });
+    answer.textContent = result.answer ?? 'no answer';
+    answer.className = result.answer ?? '';
+    status.textContent = result.error ? `Error: ${result.error}` : `Finished in ${result.seconds.toFixed(2)} s.`;
+    const text = [result.stdout.trim(), result.stderr.trim(), backendOutput.join('\n').trim()].filter(Boolean).join('\n\n');
+    if (text) { output.textContent = text; output.hidden = false; }
+  } catch (error) {
+    status.textContent = error instanceof AmayaTimeoutError ? `${error.message}; the solver was stopped.` : `Error: ${error.message}`;
+  } finally {
+    run.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
