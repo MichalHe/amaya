@@ -109,8 +109,9 @@ jobs:
           name: website
           path: site/_site
 
+      # A third-party action with write access: pinned to the commit of its release v4.9.0.
       - name: Publish on the gh-pages branch
-        uses: JamesIves/github-pages-deploy-action@v4
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445  # v4.9.0
         with:
           folder: site/_site
           branch: gh-pages
