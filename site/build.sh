@@ -27,7 +27,11 @@ cp "$REPO/extras/amaya_logo.png" "$OUT/assets/amaya-logo.png"
 for file in "$DIST"/*; do
     [ "$(basename "$file")" = index.html ] || cp "$file" "$OUT/playground/"
 done
-BUILD_ID=$(sed -n 's/.*"buildId": "\([0-9a-f]*\)".*/\1/p' "$DIST/amaya-build.json")
+BUILD_ID=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("buildId", ""))' "$DIST/amaya-build.json")
+if [ -z "$BUILD_ID" ]; then
+    echo "No buildId in $DIST/amaya-build.json; rebuild the bundle with wasm/build.sh." >&2
+    exit 1
+fi
 sed "s|src=\"./playground.js\"|src=\"./playground.js?v=$BUILD_ID\"|" "$HERE/playground/index.html" > "$OUT/playground/index.html"
 grep -q "playground.js?v=$BUILD_ID" "$OUT/playground/index.html"
 
