@@ -1689,6 +1689,9 @@ def _make_unsat_evaluation_result(ctx: EvaluationContext) -> Evaluation_Result:
 
 def _report_statistics(statistics: Dpllt_Run_Statistics):
     logger.info('DPLL(T) run statistics: %s', statistics)
+    import os as _os, sys as _sys
+    if _os.environ.get('DPLLT_STATS'):
+        print('DPLLT-STATS iters=%d theory=%d bounds=%d prefix_cores=%d saved=%d hits=%d misses=%d' % (statistics.iteration_count, statistics.theory_calls, statistics.bounds_refutations, getattr(statistics, 'prefix_cores', 0), getattr(statistics, 'prefix_core_saved', 0), statistics.prefix_cache_hits, statistics.prefix_cache_misses), file=_sys.stderr)
 
 
 def solve_with_dpllt_over_automata(root: ASTp_Node,
@@ -1744,6 +1747,8 @@ def solve_with_dpllt_over_automata(root: ASTp_Node,
 
     with isolated_sat_formula_context():
         abstraction = abstract_chi_into_monotone_sat_formula(chi_conjuncts)
+        abstraction.chi_conjuncts = chi_conjuncts
+        abstraction.phi_conjuncts = split.phi_conjuncts
         statistics.abstracted_literal_count = abstraction.atom_count
 
         logger.info('DPLL(T): %d general conjuncts, %d positive-existential conjuncts, %d abstracted literals.',
@@ -1852,6 +1857,11 @@ def _enumerate_implicants(abstraction: Monotone_Literal_Abstraction,
                     return model_of_iteration
 
                 atom_ids_to_block = asserted_atom_ids
+                if getattr(builder, 'last_core', None):
+                    statistics.bounds_refutation_core_literals += 0
+                    atom_ids_to_block = builder.last_core
+                    statistics.prefix_cores = getattr(statistics, 'prefix_cores', 0) + 1
+                    statistics.prefix_core_saved = getattr(statistics, 'prefix_core_saved', 0) + len(asserted_atom_ids) - len(builder.last_core)
 
             blocking_clause = abstraction.make_blocking_clause(atom_ids_to_block)
             if not blocking_clause:
@@ -1879,6 +1889,56 @@ def _decide_asserted_literals(abstraction: Monotone_Literal_Abstraction,
     Evaluate one asserted literal set against the general part; return the SAT result, or None when the
     intersection is empty and the caller should block the set and continue.
     """
+    import os as _os
+    builder.last_core = None
+    if _os.environ.get('DPLLT_RESTRICT'):
+        if getattr(ctx, 'enc_table', None) is not None:
+            ctx.enc_table = {}
+        restricted = _restrict_chi_to_atom_ids(abstraction, asserted_atom_ids)
+        if isinstance(restricted, BoolLiteral):
+            if not restricted.value:
+                return None
+            nfa = nfa_for_phi
+        else:
+            fill_referenced_vars(restricted)
+            logger.info('DPLL(T): iteration %d, restricted chi:\n%s', statistics.iteration_count, format_formula(restricted))
+            if _os.environ.get('DPLLT_RESTRICT') == 'whole' and abstraction.phi_conjuncts:
+                whole = make_conjunction_of_conjuncts(tuple(abstraction.phi_conjuncts) + (restricted,))
+                nfa = parse.run_evaluation_procedure(whole, ctx)
+            else:
+                restricted_nfa = parse.run_evaluation_procedure(restricted, ctx)
+                nfa = intersect_automata(nfa_for_phi, restricted_nfa, ctx)
+        binary_model = nfa.find_model()
+        if binary_model is None:
+            return None
+        return _make_sat_evaluation_result(ctx, nfa, binary_model)
+    if _os.environ.get('DPLLT_PHI_FIRST'):
+        if getattr(ctx, 'enc_table', None) is not None:
+            ctx.enc_table = {}
+        ids = sorted(asserted_atom_ids)
+        literals = {atom_id: abstraction.manager.literal_by_atom_id[atom_id] for atom_id in ids}
+        if _os.environ.get('DPLLT_PHI_FIRST') == 'canon':
+            order = ids
+        else:
+            order = sorted(ids, key=lambda atom_id: parse.estimate_automaton_size(literals[atom_id]))
+        nfa = nfa_for_phi
+        prefix = []
+        for atom_id in order:
+            literal_nfa = parse.run_evaluation_procedure(literals[atom_id], ctx)
+            new_nfa = intersect_automata(nfa, literal_nfa, ctx)
+            if new_nfa is not nfa_for_phi and new_nfa is not literal_nfa:
+                new_nfa = parse.minimize_automaton_if_configured(literals[atom_id], new_nfa, ctx)
+            nfa = new_nfa
+            prefix.append(atom_id)
+            if not nfa.final_states:
+                if _os.environ.get('DPLLT_CORE'):
+                    builder.last_core = set(prefix)
+                return None
+        binary_model = nfa.find_model()
+        if binary_model is None:
+            return None
+        return _make_sat_evaluation_result(ctx, nfa, binary_model)
+
     assertion = build_assertion_formula_for_atom_ids(abstraction, asserted_atom_ids, chi_bound_vars,
                                                      project_bound_vars=config.project_bound_vars)
 
@@ -1913,6 +1973,57 @@ def _decide_asserted_literals(abstraction: Monotone_Literal_Abstraction,
     return _make_sat_evaluation_result(ctx, nfa, binary_model)
 
 
+def _restrict_chi_to_atom_ids(abstraction, asserted_atom_ids):
+    """ chi with every literal outside `asserted_atom_ids` replaced by False, constant-folded, quantifiers kept in place. """
+    manager = abstraction.manager
+    def go(node):
+        constant_value = _constant_value_of_node(node)
+        if constant_value is not None:
+            return BoolLiteral(constant_value)
+        if is_literal_node(node):
+            atom_id = manager.atom_id_by_literal_key[compute_literal_abstraction_key(node)]
+            return node if atom_id in asserted_atom_ids else BoolLiteral(False)
+        if isinstance(node, AST_Quantifier):
+            child = go(node.child)
+            if isinstance(child, BoolLiteral):
+                return child
+            child_vars = _referenced_vars_of_node(child) if not isinstance(child, (AST_Connective, AST_Quantifier, AST_Negation)) else None
+            if child_vars is None:
+                fill_referenced_vars(child)
+                child_vars = frozenset(child.referenced_vars)
+            bound = tuple(var for var in node.bound_vars if var in child_vars)
+            if not bound:
+                return child
+            return AST_Quantifier(referenced_vars=tuple(), bound_vars=bound, child=child)
+        if isinstance(node, AST_Connective):
+            children = [go(child) for child in node.children]
+            if node.type == Connective_Type.AND:
+                if any(isinstance(c, BoolLiteral) and not c.value for c in children):
+                    return BoolLiteral(False)
+                children = [c for c in children if not isinstance(c, BoolLiteral)]
+                if not children:
+                    return BoolLiteral(True)
+            else:
+                if any(isinstance(c, BoolLiteral) and c.value for c in children):
+                    return BoolLiteral(True)
+                children = [c for c in children if not isinstance(c, BoolLiteral)]
+                if not children:
+                    return BoolLiteral(False)
+            if len(children) == 1:
+                return children[0]
+            return AST_Connective(referenced_vars=tuple(), type=node.type, children=tuple(children))
+        raise ValueError(type(node))
+    parts = [go(conjunct) for conjunct in abstraction.chi_conjuncts]
+    if any(isinstance(p, BoolLiteral) and not p.value for p in parts):
+        return BoolLiteral(False)
+    parts = [p for p in parts if not isinstance(p, BoolLiteral)]
+    if not parts:
+        return BoolLiteral(True)
+    if len(parts) == 1:
+        return parts[0]
+    return AST_Connective(referenced_vars=tuple(), type=Connective_Type.AND, children=tuple(parts))
+
+
 def _may_invoke_assertion_optimizer(config: DpllTAutomataConfig, statistics: Dpllt_Run_Statistics) -> bool:
     if config.assertion_optimizer == ASSERTION_OPTIMIZER_MODE_NONE:
         return False
@@ -1944,6 +2055,9 @@ def evaluate_prepared_formula_with_dpllt_automata(astp: ASTp_Node,
                        'scratch; pass --backend MTBDD for the caches to be in play.',
                        solver_config.backend_type.name)
 
+    import os as _os
+    if _os.environ.get('DPLLT_NO_CSE'):
+        return solve_with_dpllt_over_automata(astp, ctx, config=config)
     with cse_enabled():
         return solve_with_dpllt_over_automata(astp, ctx, config=config)
 
