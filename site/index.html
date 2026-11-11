@@ -26,7 +26,6 @@
       <a href="#start">Get started</a>
       <a href="playground/">Playground</a>
       <a href="#papers">Publications</a>
-      <a href="#more">Documentation</a>
       <a href="https://github.com/VeriFIT/amaya">GitHub</a>
       <button class="theme-toggle" type="button" aria-label="Switch the colour theme">
         <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>
@@ -135,8 +134,9 @@
 
   <section class="chapter" id="start" aria-labelledby="start-title">
     <h2 id="start-title">Get started</h2>
-    <p class="chapter-lead">Amaya needs Python and Sylvan&nbsp;1.5, the decision-diagram library behind its C++
-      backend. The instructions below are for Linux.</p>
+    <p class="chapter-lead">Amaya is written in Python and C++. The Python frontend calls a C++ backend through a
+      Cython wrapper; the backend stores automaton transitions as multi-terminal binary decision diagrams of the
+      Sylvan&nbsp;1.5 library. The instructions below are for Linux.</p>
     <div class="start-grid">
       <div>
         <h3>Install</h3>
@@ -145,7 +145,6 @@
           <button type="button" role="tab" id="tab-docker" aria-controls="panel-docker" aria-selected="false" tabindex="-1">Docker</button>
         </div>
         <div id="panel-source" role="tabpanel" aria-labelledby="tab-source">
-          <p>Sylvan needs CMake, GMP and hwloc; the C++ backend needs a C++ compiler and Cython.</p>
           <div class="code"><pre><span class="comment"># Sylvan 1.5</span>
 git clone --depth 1 --branch v1.5.0 https://github.com/trolando/sylvan.git
 sed -i 's/-Werror//g' sylvan/CMakeLists.txt
@@ -243,31 +242,14 @@ python3 run-amaya.py --fast get-sat -o automata --output-format dot formula.smt2
       <a href="https://smt-comp.github.io/2025/results/lia-single-query/">LIA</a> and NIA divisions of the
       single-query track.</p>
   </section>
-
-  <section class="chapter" id="more" aria-labelledby="more-title">
-    <h2 id="more-title">Documentation and help</h2>
-    <div class="link-grid">
-      <a class="link-card" href="https://github.com/VeriFIT/amaya/blob/devel/README.md">
-        <strong>README</strong><span>Building Amaya and its command-line interface.</span></a>
-      <a class="link-card" href="https://github.com/VeriFIT/amaya/blob/devel/wasm/README.md">
-        <strong>WebAssembly build</strong><span>Building the playground, and using Amaya from your own web page.</span></a>
-      <a class="link-card" href="https://github.com/VeriFIT/amaya/tree/devel/docs">
-        <strong>Design notes</strong><span>Documents on the decision procedure and its extensions.</span></a>
-      <a class="link-card" href="https://github.com/VeriFIT/amaya/issues">
-        <strong>Issue tracker</strong><span>Report bugs and wrong answers, ideally with the formula.</span></a>
-      <a class="link-card" href="https://github.com/VeriFIT/amaya">
-        <strong>Source code</strong><span>The repository on GitHub; development happens on the <code>devel</code> branch.</span></a>
-      <a class="link-card" href="https://github.com/VeriFIT/amaya/blob/devel/LICENSE.txt">
-        <strong>Licence</strong><span>Amaya is free software under the Mozilla Public License 2.0.</span></a>
-    </div>
-  </section>
 </main>
 
 <footer class="colophon">
   <div class="colophon-inner">
     <p>Amaya was created by Michal Hečko and is developed at the
       <a href="https://www.fit.vut.cz/">Faculty of Information Technology, Brno University of Technology</a>.
-      It is free software under the Mozilla Public License 2.0.</p>
+      It is free software under the
+      <a href="https://github.com/VeriFIT/amaya/blob/devel/LICENSE.txt">Mozilla Public License 2.0</a>.</p>
     <p>This site uses the Source Serif&nbsp;4 and IBM Plex typefaces (SIL Open Font License).</p>
   </div>
 </footer>
