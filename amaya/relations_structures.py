@@ -7,6 +7,7 @@ from enum import Enum, IntEnum
 import functools
 import math
 from typing import (
+    NamedTuple,
     Any,
     Callable,
     Generator,
@@ -22,15 +23,12 @@ from typing import (
 )
 
 
-@dataclass(frozen=True)
-class Var:
+class Var(NamedTuple):
+    """
+    PERF-PROTOTYPE: a NamedTuple instead of a frozen dataclass, so that hashing, equality and
+    ordering (all hot in the preprocessing passes) run in C instead of in generated Python methods.
+    """
     id: int
-
-    def __lt__(self, other: Var) -> bool:
-        return self.id < other.id
-
-    def __gt__(self, other: Var) -> bool:
-        return self.id > other.id
 
 
 @dataclass
