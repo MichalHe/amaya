@@ -1,0 +1,8 @@
+{
+  "buildId": "7221fe2e501e",
+  "wheel": "amaya-0.0.0+wasm.f86e5cdfa6-cp313-cp313-pyemscripten_2025_0_wasm32.whl",
+  "visualizationWheels": ["astutils-0.0.6-py3-none-any.whl", "dd-0.6.0-py3-none-any.whl", "graphviz-0.21-py3-none-any.whl", "ply-3.10-py2.py3-none-any.whl"],
+  "pyodideVersion": "0.29.5",
+  "sylvanVersion": "v1.5.0",
+  "amayaCommit": "3ccdb22"
+}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- After Amaya's logo: an automaton drawn on the faces of a polyhedron. -->
+  <path d="M16 3 L28 23 L17 19 Z" fill="#f2c48a"/>
+  <path d="M16 3 L17 19 L4 23 Z" fill="#7fc4c4"/>
+  <path d="M4 23 L17 19 L28 23 L16 29 Z" fill="#1b7272"/>
+  <g fill="#fff" stroke="#122120" stroke-width="1.4">
+    <circle cx="16" cy="3.6" r="2.6"/>
+    <circle cx="4.2" cy="23" r="2.6"/>
+    <circle cx="27.8" cy="23" r="2.6"/>
+    <circle cx="16" cy="28.4" r="2.6"/>
+  </g>
+</svg>

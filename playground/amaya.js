@@ -1,0 +1,187 @@
+/*
+ * Browser API for the WebAssembly build of Amaya.
+ *
+ *   import { Amaya } from './amaya.js';
+ *   const amaya = new Amaya();                 // files are looked up next to amaya.js
+ *   await amaya.init();                        // downloads Pyodide (CDN) and the Amaya wheel, ~2-5 s
+ *   const result = await amaya.solve(smt2Text, { args: ['--fast'], timeoutMs: 30000 });
+ *   console.log(result.answer);                // 'sat' | 'unsat' | 'unknown' | null (see result.error)
+ *
+ * Amaya runs in a Web Worker, so the page stays responsive. A timeout terminates the worker (the only way
+ * to stop a running WebAssembly computation) and the next call starts a fresh one. No SharedArrayBuffer
+ * is used, so any static file server works (no COOP/COEP headers needed).
+ */
+
+export const DEFAULT_PYODIDE_VERSION = '0.29.5';
+
+/**
+ * Label the tracks of an automaton exported as DOT with the SMT names of the variables instead of their ids
+ * (`Var(id=3)` with the MTBDD backend, `3` with the native one). `variables` is `result.variables` of
+ * {@link Amaya#solve}. A name shared by several variables, e.g. a bound variable shadowing a free one, gets
+ * its id appended (`x#3`). Other text is left unchanged.
+ * @param {string} dot
+ * @param {Object<string, string>} variables  variable id -> name
+ * @returns {string}
+ */
+export function dotWithVariableNames(dot, variables) {
+  const names = new Map(Object.entries(variables ?? {}));
+  const uses = new Map();
+  for (const name of names.values()) uses.set(name, (uses.get(name) ?? 0) + 1);
+  const escapeHtml = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // The track cell written by compute_html_label_for_symbols in amaya/visualization.py.
+  return dot.replace(/(<TD BORDER="0" BGCOLOR="gray">)(?:Var\(id=(\d+)\)|(\d+)):(<\/TD>)/g,
+    (cell, open, mtbddId, nativeId, close) => {
+      const id = mtbddId ?? nativeId;
+      const name = names.get(id);
+      if (name === undefined) return cell;
+      return `${open}${escapeHtml(uses.get(name) > 1 ? `${name}#${id}` : name)}:${close}`;
+    });
+}
+
+export class AmayaTimeoutError extends Error {
+  constructor(timeoutMs) {
+    super(`Amaya did not finish within ${timeoutMs} ms`);
+    this.name = 'AmayaTimeoutError';
+  }
+}
+
+export class Amaya {
+  /**
+   * @param {object} [options]
+   * @param {string} [options.baseURL]          directory with amaya-worker.js, amaya-build.json and the wheel
+   * @param {string} [options.pyodideIndexURL]  Pyodide distribution; must be the release the wheel was built for
+   * @param {number} [options.memoryMB]         upper bound for the MTBDD node table and cache (default 256)
+   * @param {(stream: string, text: string) => void} [options.onOutput]  output printed by the C/C++ backend
+   */
+  constructor(options = {}) {
+    this.baseURL = options.baseURL ?? new URL('.', import.meta.url).href;
+    this.pyodideIndexURL = options.pyodideIndexURL;
+    this.memoryMB = options.memoryMB;
+    this.onOutput = options.onOutput ?? (() => {});
+    this.worker = null;
+    this.ready = null;
+    this.pending = new Map();
+    this.nextId = 1;
+    this.build = null;
+    this.versions = null;
+    // Counts start-ups; terminate() increments it, which cancels a start-up in progress.
+    this.generation = 0;
+  }
+
+  /** Start the worker and load Pyodide and the Amaya wheel. Safe to call repeatedly. */
+  init() {
+    if (!this.ready) {
+      const generation = ++this.generation;
+      this.ready = this._start(generation).catch((error) => {
+        // A start-up canceled by terminate() has been cleaned up already, and a later start-up may own the worker.
+        if (generation === this.generation) this._stopWorker();
+        throw error;
+      });
+    }
+    return this.ready;
+  }
+
+  async _start(generation) {
+    if (!this.build) {
+      // Revalidated on every load: it names the files of the current build (see the buildId below).
+      const response = await fetch(new URL('amaya-build.json', this.baseURL), { cache: 'no-cache' });
+      if (!response.ok) throw new Error(`cannot load amaya-build.json: HTTP ${response.status}`);
+      this.build = await response.json();
+    }
+    if (generation !== this.generation) throw new Error('Amaya worker terminated');  // terminate() during the fetch
+    const pyodideVersion = this.build.pyodideVersion ?? DEFAULT_PYODIDE_VERSION;
+    const indexURL = this.pyodideIndexURL ?? `https://cdn.jsdelivr.net/pyodide/v${pyodideVersion}/full/`;
+    const env = {};
+    if (this.memoryMB) env.AMAYA_SYLVAN_MEMORY_MB = String(this.memoryMB);
+
+    // The build id makes a cached worker of an older build unusable; the wheel names change with each build.
+    const workerURL = new URL('amaya-worker.js', this.baseURL);
+    if (this.build.buildId) workerURL.searchParams.set('v', this.build.buildId);
+    const worker = new Worker(workerURL);
+    this.worker = worker;
+    // Only the current worker may settle requests or fail them.
+    worker.onmessage = (event) => { if (this.worker === worker) this._onMessage(event.data); };
+    worker.onerror = (event) => { if (this.worker === worker) this._failAll(new Error(event.message || 'Amaya worker failed')); };
+
+    const ready = new Promise((resolve, reject) => this.pending.set(0, { resolve, reject }));
+    const visualizationWheelURLs = (this.build.visualizationWheels ?? []).map((wheel) => new URL(wheel, this.baseURL).href);
+    worker.postMessage({ type: 'init', id: 0, pyodideIndexURL: indexURL,
+                         wheelURL: new URL(this.build.wheel, this.baseURL).href, visualizationWheelURLs, env });
+    this.versions = await ready;
+    return this.versions;
+  }
+
+  _onMessage(message) {
+    if (message.type === 'output') {
+      this.onOutput(message.stream, message.text);
+      return;
+    }
+    const id = message.type === 'ready' ? 0 : message.id ?? 0;
+    const entry = this.pending.get(id);
+    if (!entry) return;
+    this.pending.delete(id);
+    if (message.type === 'error') entry.reject(new Error(message.message));
+    else entry.resolve(message.type === 'ready' ? message.versions : message.result);
+  }
+
+  _failAll(error) {
+    for (const entry of this.pending.values()) entry.reject(error);
+    this.pending.clear();
+    this._stopWorker();
+  }
+
+  _stopWorker() {
+    if (this.worker) this.worker.terminate();
+    this.worker = null;
+    this.ready = null;
+    this.generation += 1;
+  }
+
+  /**
+   * Run Amaya on SMT-LIB2 text.
+   * @param {string} smt2
+   * @param {object} [options]
+   * @param {string[]} [options.args]      CLI options before the mode (default ['--fast'])
+   * @param {string} [options.mode]        'get-sat' (default) or 'convert'
+   * @param {string[]} [options.modeArgs]  options after the mode, e.g. ['-p'] to print a model, ['-f', 'smt2'] for convert
+   * @param {number} [options.timeoutMs]   terminate the worker after this time (default: no limit)
+   * @param {'dot'|'vtf'|'mata'} [options.exportAutomata]  also return every automaton built by the decision
+   *        procedure, in this format (as `get-sat -o DIR --output-format FORMAT`). The first such call
+   *        downloads the Python packages graphviz and dd (about 160 kB).
+   * @returns {Promise<{answer: string|null, error: string|null, exit_code: number, stdout: string, stderr: string,
+   *          seconds: number, automata?: Array<{id: number, operation: string, format: string, name: string,
+   *          text: string, states: number, transitions: number}>, trace?: string|null,
+   *          variables?: Object<string, string>}>}
+   *          `automata` is ordered by operation id; the last one belongs to the whole formula. `trace` is the
+   *          graph of the operations in DOT. `variables` maps variable ids (the track labels) to SMT names.
+   */
+  async solve(smt2, options = {}) {
+    await this.init();
+    if (!this.worker) throw new Error('Amaya worker terminated');  // terminate() after the start-up finished
+    const id = this.nextId++;
+    const result = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    this.worker.postMessage({ type: 'solve', id, smt2, args: options.args ?? ['--fast'],
+                              mode: options.mode ?? 'get-sat', modeArgs: options.modeArgs ?? [],
+                              exportAutomata: options.exportAutomata ?? null });
+    if (!options.timeoutMs) return result;
+
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        this.pending.delete(id);
+        this._failAll(new AmayaTimeoutError(options.timeoutMs));
+        reject(new AmayaTimeoutError(options.timeoutMs));
+      }, options.timeoutMs);
+    });
+    try {
+      return await Promise.race([result, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Stop the worker; a later init()/solve() starts a new one. */
+  terminate() {
+    this._failAll(new Error('Amaya worker terminated'));
+  }
+}

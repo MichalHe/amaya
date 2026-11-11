@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amaya playground</title>
+<meta name="description" content="Run Amaya, an automata-based SMT solver for linear integer arithmetic, in your browser and look at the automata it builds.">
+<link rel="canonical" href="https://verifit.github.io/amaya/playground/">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="../assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/site.css">
+<script src="../assets/theme.js"></script>
+<script type="module" src="../assets/site.js"></script>
+<!-- The playground: wasm/web/playground.js and the WebAssembly bundle, copied here by site/build.sh. -->
+<script type="module" src="./playground.js?v=7221fe2e501e"></script>
+</head>
+<body class="playground-page">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="masthead">
+  <div class="masthead-inner">
+    <a class="wordmark" href="../"><img src="../assets/favicon.svg" alt="" width="26" height="26">Amaya</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../#how">How it works</a>
+      <a href="../#start">Get started</a>
+      <a href="./" aria-current="page">Playground</a>
+      <a href="../#papers">Publications</a>
+      <a href="../#more">Documentation</a>
+      <a href="https://github.com/VeriFIT/amaya">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch the colour theme">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="chapter" aria-labelledby="playground-title">
+    <h1 id="playground-title">Playground</h1>
+    <p class="chapter-lead">Amaya compiled to WebAssembly, running on your computer; nothing is uploaded. The first
+      visit downloads Pyodide (CPython for WebAssembly) from a CDN, which takes a few seconds. Set
+      <em>Automata</em> to <em>graph</em> to see the automata Amaya builds.</p>
+
+    <div class="panel">
+      <label class="field-label" for="example">Example</label>
+      <select id="example"></select>
+      <p id="example-about"></p>
+
+      <label class="field-label" for="formula">SMT-LIB 2 input</label>
+      <textarea id="formula" spellcheck="false"></textarea>
+
+      <div class="controls">
+        <div><label class="field-label" for="args">Options</label><input id="args" type="text" value="--fast"></div>
+        <div class="narrow"><label class="field-label" for="timeout">Timeout (s)</label><input id="timeout" type="number" min="1" value="60"></div>
+        <div class="narrow"><label class="field-label" for="export">Automata</label>
+          <select id="export">
+            <option value="">don't export</option>
+            <option value="dot">graph (DOT)</option>
+            <option value="vtf">VTF</option>
+            <option value="mata">Mata</option>
+          </select></div>
+        <div class="auto"><label class="check"><input id="model" type="checkbox"> print model</label></div>
+        <div class="auto"><button id="run" class="button button-primary" disabled>Solve</button></div>
+      </div>
+
+      <div id="status">Loading Amaya…</div>
+      <div id="answer"></div>
+      <pre id="output" hidden></pre>
+
+      <section id="automata" hidden>
+        <h2>Automata</h2>
+        <div class="controls">
+          <div><label class="field-label" for="automaton">Automaton</label><select id="automaton"></select></div>
+          <div class="auto buttons">
+            <button id="view-graph" class="secondary" aria-pressed="true">Graph</button>
+            <button id="view-source" class="secondary" aria-pressed="false">Source</button>
+            <button id="zoom" class="secondary">Actual size</button>
+            <button id="download" class="secondary">Download</button>
+            <label class="check"><input id="names" type="checkbox" checked> variable names</label>
+          </div>
+        </div>
+        <div id="automaton-info"></div>
+        <div id="graph" class="fit"></div>
+        <pre id="source" hidden></pre>
+      </section>
+    </div>
+    <p id="footer"></p>
+  </section>
+</main>
+
+<footer class="colophon">
+  <div class="colophon-inner">
+    <p>The playground runs Amaya on <a href="https://pyodide.org">Pyodide</a> and draws automata with
+      <a href="https://github.com/mdaines/viz-js">Viz.js</a> (Graphviz compiled to WebAssembly). Exporting automata
+      also loads the <code>graphviz</code> and <code>dd</code> Python packages.</p>
+    <p>Amaya is free software under the Mozilla Public License 2.0. <a href="https://github.com/VeriFIT/amaya/issues">Report a problem</a>.</p>
+  </div>
+</footer>
+</body>
+</html>
