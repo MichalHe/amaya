@@ -18,13 +18,15 @@ from enum import IntEnum
 from typing import Callable, Dict, List, Literal, Optional, Tuple
 
 from amaya import logger
-from amaya.config import OptimizationsConfig, SolverConfig
+from amaya.config import OptimizationsConfig, SolutionDomain, SolverConfig
+from amaya.config import solver_config as global_solver_config
 from amaya.preprocessing import flatten_bool_nary_connectives
 from amaya.preprocessing.antiprenexing import miniscope_quantifiers
 from amaya.preprocessing.conditional_equality_resolution import fill_referenced_vars, resolve_conditional_equalities
 from amaya.preprocessing.connective_child_dedup import remove_duplicit_connective_children
 from amaya.preprocessing.eval import VarInfo
 from amaya.preprocessing.inner_quantifier_squeeze_elimination import eliminate_inner_quantifier_squeezes
+from amaya.preprocessing.unit_coefficient_fourier_motzkin import eliminate_unit_coefficient_vars_by_fourier_motzkin
 from amaya.preprocessing.structural_id import Structural_Id_Table, compute_structural_id
 from amaya.preprocessing.theory_reasoning import (
     Asserted_Model_Properties,
@@ -137,6 +139,11 @@ def _pass_squeeze_elimination(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
     return eliminate_inner_quantifier_squeezes(ast, ctx.var_table)
 
 
+def _pass_unit_coefficient_fourier_motzkin(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
+    quantified_vars_are_nonnegative = global_solver_config.solution_domain == SolutionDomain.NATURALS
+    return eliminate_unit_coefficient_vars_by_fourier_motzkin(ast, ctx.var_table, quantified_vars_are_nonnegative)
+
+
 def _pass_fill_referenced_vars(ast: ASTp_Node, ctx: Pass_Context) -> ASTp_Node:
     fill_referenced_vars(ast)
     return ast
@@ -225,6 +232,16 @@ def _registry_definition() -> List[Pass_Descriptor]:
             run=_pass_squeeze_elimination,
             tier=Pass_Tier.CORE, growth_factor_limit=1.2,
             consumes=frozenset({QUANTIFIER_SHAPE, ATOM_REWRITTEN, NARY_SHAPE, BOUNDS_TIGHTENED}),
+            produces=frozenset({VAR_ELIMINATED, QUANTIFIER_SHAPE, ATOM_REWRITTEN, NARY_SHAPE, BOOL_LITERAL}),
+            requires_referenced_vars=True,
+        ),
+        Pass_Descriptor(
+            # Does not increase the number of atoms (`_produces_no_more_atoms`); the node count can still
+            # grow by the AND nodes `_make_and` creates, hence the same guard as `squeeze-elimination`.
+            name='unit-coefficient-fm', config_flag='eliminate_unit_coefficient_vars_by_fourier_motzkin',
+            run=_pass_unit_coefficient_fourier_motzkin,
+            tier=Pass_Tier.CORE, growth_factor_limit=1.2,
+            consumes=frozenset({QUANTIFIER_SHAPE, ATOM_REWRITTEN, NARY_SHAPE, EQUALITY_EXPOSED}),
             produces=frozenset({VAR_ELIMINATED, QUANTIFIER_SHAPE, ATOM_REWRITTEN, NARY_SHAPE, BOOL_LITERAL}),
             requires_referenced_vars=True,
         ),

@@ -44,6 +44,7 @@ from amaya.preprocessing.conditional_equality_resolution import fill_referenced_
 from amaya.preprocessing.connective_child_dedup import remove_duplicit_connective_children
 from amaya.preprocessing.eval import VarInfo, divide_relation_by_gcd
 from amaya.preprocessing.inner_quantifier_squeeze_elimination import eliminate_inner_quantifier_squeezes
+from amaya.preprocessing.unit_coefficient_fourier_motzkin import eliminate_unit_coefficient_vars_by_fourier_motzkin
 from amaya.preprocessing.pipeline import Optimization_Pipeline, Pipeline_Report, build_registry
 import amaya.preprocessing.unbound_vars as var_bounds_lib
 from amaya.relations_structures import (
@@ -298,6 +299,12 @@ def _optimize_formula_structure_legacy(astp: ASTp_Node, var_table: Dict[Var, Var
         logger.debug('Eliminating squeezed inner quantifiers:  %s', astp)
         astp = eliminate_inner_quantifier_squeezes(astp, var_table)
         logger.debug('Squeezed inner quantifiers eliminated. Result:  %s', astp)
+
+    if solver_config.optimizations.eliminate_unit_coefficient_vars_by_fourier_motzkin:
+        logger.debug('Eliminating unit-coefficient variables by Fourier-Motzkin:  %s', astp)
+        quantified_vars_are_nonnegative = solver_config.solution_domain == SolutionDomain.NATURALS
+        astp = eliminate_unit_coefficient_vars_by_fourier_motzkin(astp, var_table, quantified_vars_are_nonnegative)
+        logger.debug('Unit-coefficient variables eliminated. Result:  %s', astp)
 
     if solver_config.optimizations.deduplicate_connective_children:
         logger.debug('Removing duplicit children of connectives:  %s', astp)

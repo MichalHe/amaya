@@ -384,6 +384,7 @@ opt_to_config_field = {
     'dedup-connective-children': 'deduplicate_connective_children',
     'rce': 'resolve_conditional_equalities',
     'squeeze-elimination': 'eliminate_squeezed_inner_quantifiers',
+    'unit-coefficient-fm': 'eliminate_unit_coefficient_vars_by_fourier_motzkin',
     'bounded-congruence': 'use_bounded_congruence_construction',
 }
 optimization_choices = list(opt_to_config_field.keys()) + ['all']
@@ -429,6 +430,9 @@ argparser.add_argument('-O',
                              '> squeeze-elimination:\n'
                              '      Eliminate an existentially quantified integer variable squeezed between two\n'
                              '         linear bounds whose gap is exactly A - 1, substituting floor(E / A) for it.\n'
+                             '> unit-coefficient-fm:\n'
+                             '      Eliminate an existentially quantified integer variable occurring only in linear atoms with\n'
+                             '         coefficient +1/-1 by Fourier-Motzkin, when the number of atoms does not increase.\n'
                              '> bounded-congruence:\n'
                              '      Build the automaton for an existentially quantified variable bounded from both sides and\n'
                              '         occurring only in a single congruence using a specialized construction. Requires -m MTBDD.\n'

@@ -155,6 +155,18 @@ class OptimizationsConfig:
         (exists ((y Int)) (and (<= (* 10 y) (* 9 x)) (<= (* 9 x) (+ (* 10 y) 9))))   --->   True
     """
 
+    eliminate_unit_coefficient_vars_by_fourier_motzkin: bool = False
+    """
+    Eliminate an existentially quantified integer variable whose every occurrence is a linear atom
+    with coefficient +1 or -1 at the variable, by pairing each of its lower bounds with each of its
+    upper bounds (Fourier-Motzkin elimination, exact over the integers for unit coefficients). Applied
+    only when the number of atoms does not increase. See
+    amaya/preprocessing/unit_coefficient_fourier_motzkin.py.
+
+    Example:
+        (exists ((v Int)) (and (<= 0 v) (<= v x) (<= y v)))   --->   (and (<= 0 x) (<= y x))
+    """
+
     propagate_modular_bounds: bool = False
     """
     (EXPERIMENTAL) Eliminate quantified variables that a congruence determines, carrying their bounds
