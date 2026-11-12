@@ -11,18 +11,72 @@ Amaya supports two execution backends:
 - a high-performance MTBDD-based backend representing transition symbols symbolically using MTBDDs.
 
 ## Installing
-All required dependencies can be found in `requirements.txt` and a virtual environment with these dependencies is all that
-is needed to run Amaya using the native (default) backend.
 
-### Building the high-performance MTBDD backend
-Amaya relies on [sylvan](https://github.com/trolando/sylvan) providing efficient MTBDD implementation. In order to utilize Sylvan, Amaya
-implements a C++ library with custom MTBDD leaves and automata algorithms. The python frontend then relies on Python's `ctypes` module
-to call Amaya's C++ library.
+### Native backend (default)
+The native backend requires only the Python packages listed in `requirements.txt`:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+A system-wide installation of the same packages also works; a virtual environment is not required.
 
-The following steps need to be performed in order to use the MTBDD-backend:
-1) Compile and install [sylvan](https://github.com/trolando/sylvan)
-2) Compile [Amaya's C++ library](https://github.com/MichalHe/learning-sylvan).
-3) Make sure the resulting shared object is present in `amaya/` folder, so that the `ctypes` wrapper will be able to find it.
+### MTBDD backend (optional, `--backend MTBDD`)
+The MTBDD backend is the C++ library in `mtbdd-backend/`. It is compiled into the Cython extension module
+`libamaya`, which the Python frontend imports as `from amaya import libamaya` (`amaya/mtbdd_transitions.py`).
+It depends on the [Sylvan](https://github.com/trolando/sylvan) BDD library. Only Sylvan **v1.5.0** is supported;
+newer releases contain breaking API changes.
+
+Build dependencies:
+
+| Dependency                           | Debian package                       |
+|--------------------------------------|--------------------------------------|
+| C/C++ compiler with C++20 support    | `gcc`, `g++`                         |
+| CMake, make, pkg-config              | `cmake`, `make`, `pkg-config`        |
+| Python headers                       | `python3-dev`                        |
+| GMP                                  | `libgmp-dev`                         |
+| hwloc (required by Sylvan)           | `libhwloc-dev`                       |
+| Cython, setuptools (Python packages) | `pip install cython setuptools`      |
+
+1) Build and install Sylvan v1.5.0 (installs into `/usr/local` by default). The `sed` command removes `-Werror`,
+   because recent compilers emit warnings on the v1.5.0 sources:
+   ```bash
+   git clone https://github.com/trolando/sylvan.git
+   cd sylvan
+   git checkout v1.5.0
+   sed -i 's/-Werror//g' CMakeLists.txt
+   mkdir build && cd build
+   cmake -DBUILD_SHARED_LIBS=ON ..
+   make -j"$(nproc)"
+   sudo make install
+   sudo ldconfig
+   ```
+2) Build the `libamaya` extension. The `libamaya` target in `mtbdd-backend/Makefile` runs
+   `mtbdd-backend/wrapper/compile_wrapper.py` and copies the resulting `libamaya*.so` into `amaya/`.
+   The Makefile uses the `python3` found on `PATH`, so activate the virtual environment containing Cython
+   first, or select an interpreter explicitly with `PYTHON=...`:
+   ```bash
+   pip install cython setuptools
+   export CPATH=/usr/local/include LIBRARY_PATH=/usr/local/lib LD_LIBRARY_PATH=/usr/local/lib
+   make -C mtbdd-backend libamaya            # or: make -C mtbdd-backend libamaya PYTHON=/path/to/python3
+   ```
+   `CPATH`, `LIBRARY_PATH` and `LD_LIBRARY_PATH` point the compiler, linker and dynamic loader at the Sylvan
+   installation; adjust them if Sylvan was installed under a different prefix. They are needed because the
+   include and library directories hard-coded in `mtbdd-backend/wrapper/compile_wrapper.py:ext` are specific
+   to the development machine.
+3) Check that the extension loads:
+   ```bash
+   python3 -c 'from amaya import libamaya'
+   ```
+
+`make -C mtbdd-backend clean` removes all build artifacts, including the copy of `libamaya*.so` in `amaya/`.
+
+### Docker
+`Dockerfile` performs all of the steps above on a Debian base image:
+```bash
+docker build -t amaya .
+docker run --rm -it amaya python3 run-amaya.py --backend MTBDD get-sat smt-files/tptp/ARI005=1.smt2
+```
 
 ## Running
 The `run-amaya.py` script provides a user interface to Amaya. This script is current capable of running Amaya in three modes:
