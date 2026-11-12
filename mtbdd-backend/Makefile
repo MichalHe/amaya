@@ -9,7 +9,7 @@ CXXFLAGS=$(COMMON_FLAGS) --std=c++20 $(SHARED_LIB_FLAGS)
 CFLAGS=$(COMMON_FLAGS) $(SHARED_LIB_FLAGS)
 
 # Python interpreter used to build the Cython extension (must have Cython installed).
-PYTHON ?= /home/mhecko/school/sw/amaya/venv/bin/python
+PYTHON ?= python3
 AMAYA_PKG_DIR := ../amaya
 
 # Every compiled object lands in build/. `clean` removes that directory outright, so the objects
