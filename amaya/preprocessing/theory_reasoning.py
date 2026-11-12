@@ -588,6 +588,10 @@ def simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: As
     return _simplify_formula_using_model_properties(root_node, assertions)
 
 
+def _is_equation(node: ASTp_Node) -> bool:
+    return isinstance(node, Relation) and node.predicate_symbol == '='
+
+
 def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: Asserted_Model_Properties) -> ASTp_Node:
     match root_node:
         case Var():
@@ -699,12 +703,25 @@ def _simplify_formula_using_model_properties(root_node: ASTp_Node, assertions: A
         case AST_Connective():
             match root_node.type:
                 case Connective_Type.AND:
-                    assertions.insert_stack()
-                    new_children = tuple(
-                        _simplify_formula_using_model_properties(subformula, assertions)
-                        for subformula in root_node.children
+                    # Equations are visited before their siblings, so that an alias extracted from an
+                    # equation (`v = 5c + r`) is substituted into every sibling of the conjunction.
+                    # Visiting the children in their input order makes the result depend on that order:
+                    # a sibling visited before the equation records its variables in
+                    # `vars_referenced_unsubstituted`, and `_register_unresolved_equation` then keeps the
+                    # binder of the aliased variable and leaves the sibling unsubstituted. The children
+                    # of the result keep their input order.
+                    child_indices_in_visit_order = sorted(
+                        range(len(root_node.children)),
+                        key=lambda child_index: not _is_equation(root_node.children[child_index]),
                     )
+                    new_children_by_index: dict[int, ASTp_Node] = {}
+                    assertions.insert_stack()
+                    for child_index in child_indices_in_visit_order:
+                        new_children_by_index[child_index] = _simplify_formula_using_model_properties(
+                            root_node.children[child_index], assertions)
                     assertions.pop_stack()
+                    new_children = tuple(new_children_by_index[child_index]
+                                         for child_index in range(len(root_node.children)))
 
                     # TODO: We should do these simplifications greedily while we are making progress.
                     # assertions.insert_stack()

@@ -650,3 +650,49 @@ def test_remove_atoms_satisfied_by_unconstrained_vars_keeps_atom_whose_other_var
     scan_variable_use(formula, var_use_info)
 
     assert remove_atoms_satisfied_by_unconstrained_vars(formula, var_use_info, desired_polarity=True) == formula
+
+
+def test_alias_from_equation_listed_after_its_siblings_is_substituted_into_them():
+    '''
+    The equation defining v is the last child of the conjunction. Model reasoning visits equations
+    before their siblings, so the siblings are rewritten using v = 5c + r and the binder of v is dropped,
+    independently of the input order of the children.
+
+    not                                     not
+       exists (c, r)                           exists (c, r)
+          and                                     and
+             -r <= -1                                -r <= -1
+             r <= 4                                  r <= 4
+             exists (v)              ---->           and
+                and                                     5c + r <= -1
+                   v <= -1                              -x + 5c + r <= 0
+                   -x + v <= 0
+                   v - 5c - r = 0
+    '''
+    x, c, r, v = Var(1), Var(2), Var(3), Var(4)
+
+    lower_bound_on_r = Relation(vars=[r], coefs=[-1], rhs=-1, predicate_symbol='<=')
+    upper_bound_on_r = Relation(vars=[r], coefs=[1], rhs=4, predicate_symbol='<=')
+
+    formula = dsl._neg(dsl._exists((c, r), dsl._and(
+        lower_bound_on_r,
+        upper_bound_on_r,
+        dsl._exists((v,), dsl._and(
+            Relation(vars=[v], coefs=[1], rhs=-1, predicate_symbol='<='),
+            Relation(vars=[x, v], coefs=[-1, 1], rhs=0, predicate_symbol='<='),
+            dsl._eq([(1, v), (-5, c), (-1, r)], 0),
+        )),
+    )))
+
+    result = simplify_formula_using_model_properties(formula, Asserted_Model_Properties())
+
+    expected_result = dsl._neg(dsl._exists((c, r), dsl._and(
+        lower_bound_on_r,
+        upper_bound_on_r,
+        dsl._and(
+            Relation(vars=[c, r], coefs=[5, 1], rhs=-1, predicate_symbol='<='),
+            Relation(vars=[x, c, r], coefs=[-1, 5, 1], rhs=0, predicate_symbol='<='),
+        ),
+    )))
+
+    assert result == expected_result
