@@ -70,6 +70,15 @@ class EvaluationContext:
 
         self.alphabet = alphabet
 
+        self.return_after_first_nonempty_disjunct_of_root_disjunction: bool = False
+        """
+        If True, `parse.evaluate_binary_conjunction_expr` evaluating a disjunction at recursion depth 0
+        returns the automaton of the disjuncts evaluated so far as soon as its language is nonempty.
+        The returned automaton then accepts a subset of the solutions of the disjunction, which is
+        correct only for a caller that tests the automaton for emptiness or reads one model from it.
+        A caller that intersects, complements or caches the automaton must leave this False.
+        """
+
     def get_alphabet(self) -> LSBF_Alphabet:
         if self.alphabet is None:
             raise ValueError('Requesting the overall alphabet from the evaluation context when None has been set.')

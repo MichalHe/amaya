@@ -371,7 +371,14 @@ def evaluate_prepared_formula_with_automata(astp: ASTp_Node, eval_ctx: Evaluatio
         model = evaluate_using_sharding(astp, eval_ctx)
         return Evaluation_Result(run_stats=eval_ctx.stats, model=model, shards=[], solutions_nfa=None, var_table=var_table)
 
-    nfa = run_evaluation_procedure(astp, eval_ctx)
+    # Only a model is read off the automaton, so the evaluation of a root disjunction may stop at the
+    # first disjunct with a nonempty language. `solutions_nfa` below is then the automaton of the
+    # disjuncts evaluated so far, not of the whole formula.
+    eval_ctx.return_after_first_nonempty_disjunct_of_root_disjunction = True
+    try:
+        nfa = run_evaluation_procedure(astp, eval_ctx)
+    finally:
+        eval_ctx.return_after_first_nonempty_disjunct_of_root_disjunction = False
     binary_model = nfa.find_model()
     if binary_model:
         formula_params = tuple(var for var, var_info in var_table.items() if var_info.is_formula_param)
@@ -801,10 +808,13 @@ def evaluate_binary_conjunction_expr(expr: AST_Connective,
         remaining_subformulae = expr.children[1:]
 
     for operand_idx, next_operand in enumerate(remaining_subformulae):
-        # If the top-level of the formula looks like (OR F1 F2 ...) then
-        # terminate if we already see an automaton for Fi with a nonempty language
+        # If the top-level of the formula looks like (OR F1 F2 ...) then terminate if we already see an
+        # automaton for Fi with a nonempty language. The result accepts only a subset of the solutions,
+        # so this is enabled only by callers that test the result for emptiness - see
+        # `EvaluationContext.return_after_first_nonempty_disjunct_of_root_disjunction`.
         if solver_config.minimization_method != MinimizationAlgorithms.NONE:
-            if reduction_result.final_states and _depth == 0 and reduction_operation == ParsingOperation.NFA_UNION:
+            is_root_disjunction = _depth == 0 and reduction_operation == ParsingOperation.NFA_UNION
+            if (is_root_disjunction and reduction_result.final_states and ctx.return_after_first_nonempty_disjunct_of_root_disjunction):
                 return reduction_result
 
         if reduction_operation == ParsingOperation.NFA_INTERSECT and not reduction_result.final_states:
