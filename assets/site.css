@@ -338,17 +338,6 @@ main { display: block; }
 .paper summary { cursor: pointer; color: var(--teal); }
 .paper details .code { margin-top: 0.6rem; }
 
-/* Documentation links */
-.link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.8rem; }
-.link-card {
-  display: block; text-decoration: none; color: var(--ink); background: var(--paper-raised); border: 1px solid var(--rule);
-  border-radius: 12px; padding: 1rem 1.1rem;
-}
-.link-card:hover { border-color: var(--teal); color: var(--ink); }
-.link-card strong { display: block; font: 600 1.08rem var(--serif); margin-bottom: 0.25rem; }
-.link-card:hover strong { color: var(--teal); }
-.link-card span { color: var(--ink-soft); font-size: 0.95rem; }
-
 /* Footer */
 .colophon { margin-top: clamp(3rem, 7vw, 5rem); border-top: 1px solid var(--rule); background: var(--paper-sunken); }
 .colophon-inner { max-width: var(--page); margin: 0 auto; padding: 1.8rem var(--gutter) 2.4rem; color: var(--ink-soft); font-size: 0.93rem; }

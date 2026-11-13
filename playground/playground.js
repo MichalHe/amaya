@@ -4,7 +4,7 @@
  * provide the elements with the ids used below. The page's CSS must define the colours --fg (text, also used
  * for drawing graphs) and --track-bg (background of the track names in edge labels).
  */
-import { Amaya, AmayaTimeoutError, dotWithVariableNames } from './amaya.js?v=7221fe2e501e';
+import { Amaya, AmayaTimeoutError, dotWithVariableNames } from './amaya.js?v=4bcb0e0d1102';
 
 // Graphviz compiled to WebAssembly, loaded the first time a graph is shown.
 const VIZ_URL = 'https://cdn.jsdelivr.net/npm/@viz-js/viz@3.31.0/dist/viz.js';
